@@ -1,0 +1,71 @@
+# Copilot Instructions for Travel Packing Checklist Application
+
+This file provides guidance for using GitHub Copilot and AI agents to assist with development of the travel packing checklist app. It outlines conventions, priorities, and tips for collaborating with AI in this project.
+
+---
+
+## Project Context
+- PWA for travel packing lists, designed for families/groups
+- React + TypeScript frontend, Node.js backend
+- Self-hosted Docker deployment
+- Offline support and background sync
+
+## Development Environment
+- **Architecture**: Single Vite application with integrated frontend and backend
+- **Frontend**: Vite + React dev server on localhost:3000, accessible via https://code3000.padenco.com (remote VS Code proxy domain)
+- **Backend**: Express API server on localhost:3001 (started automatically with frontend)
+- **API Proxy**: Vite automatically proxies `/api/*` requests from the frontend to the backend. All API calls from the browser must go through this proxy. The backend should never be called directly from the browser.
+- **Remote Domain Proxying**: When developing in a remote VS Code environment, https://code3000.padenco.com acts as a secure proxy to your local frontend (localhost:3000). All API requests from the browser (including remote browser sessions) must use the `/api` proxy path, which is forwarded to the backend (localhost:3001) by Vite.
+- **CORS Configuration**: The backend must allow CORS for the following origins: `http://localhost:3000`, `http://code3000.padenco.com`, and `https://code3000.padenco.com`. This ensures that both local and remote browser sessions can communicate with the backend via the frontend proxy. Do not add other origins unless required for deployment.
+
+## Collaboration Guidelines
+- Follow the architecture and implementation checklist in `docs/`
+- Use the data model and API contract as reference for backend and frontend integration
+- Prioritize user stories and milestones in the checklist
+- When generating code, use TypeScript for frontend and JavaScript/TypeScript for backend
+- Ensure PWA features (service worker, manifest, offline sync) are included
+- Use RESTful conventions for API endpoints
+- **Do not restart servers during development** - hot reloading handles changes automatically
+- Test frontend changes at https://code3000.padenco.com (remote browser sessions are routed through the frontend proxy)
+- Document all major changes in code and update relevant docs
+
+## File/Folder Conventions
+-
+## API Routing and Proxy Requirements
+
+- **API Routing**: All backend API calls must be made from the frontend using the `/api` proxy path. Never call the backend directly from the browser or from client-side code using the backend's direct address (localhost:3001 or any other backend port/domain).
+- **Proxy Path**: The Vite proxy configuration ensures that `/api/*` requests are forwarded to the backend. This is required for both local and remote development, and for production deployments.
+- **CORS**: The backend must be configured to allow only the necessary origins for local and remote development. This prevents direct browser-to-backend calls and enforces the use of the frontend proxy.
+- **Debugging**: If you encounter issues with API requests (e.g., missing request body, CORS errors, 400/401 responses), first verify that requests are routed through the frontend proxy and not sent directly to the backend.
+
+**Summary:**
+- Always use the frontend API proxy for all backend requests.
+- Never call the backend directly from the browser.
+- Ensure CORS is configured for both local and remote proxy domains.
+- Document any changes to proxy or routing logic in this file.
+## Single Application Structure
+All code is organized as a single Vite application with integrated frontend and backend.
+
+`src/`: React frontend application source code
+`server/`: Express backend API source code  
+`public/`: Static assets and PWA manifest
+`docs/`: Architecture, checklist, and documentation
+`travel-list.sqlite`: SQLite database file
+`vite.config.ts`: Vite configuration with API proxy
+`copilot-instructions.md`: This file
+- Keep authentication and data isolated per family/group
+- Test offline and sync features thoroughly
+- Update documentation as features are added
+
+## How to Use Copilot/AI
+
+- Always add unit tests for all updated code.
+- If any updated code breaks a unit test, ask before altering the unit test to get it to pass.
+
+**Unit Test Hygiene:**
+- Ensure all unit tests have appropriate setup and teardown logic to clean up any test data, so tests can run repeatedly and independently without affecting other tests or leaving persistent data.
+- Use an in-memory database (e.g., SQLite `:memory:`) for backend unit tests to avoid database locking errors (SQLITE_BUSY) and to ensure tests do not affect local or production data.
+
+---
+
+For questions or changes, update this file and notify contributors.

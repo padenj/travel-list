@@ -1,0 +1,451 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import request from 'supertest';
+import express from 'express';
+import { v4 as uuidv4 } from 'uuid';
+import routes from '../routes';
+import { getDb, closeDb } from '../db';
+import { UserRepository, FamilyRepository } from '../repositories';
+import { hashPasswordSync, generateToken } from '../auth';
+import { USER_ROLES } from '../constants';
+
+describe('Routes Integration Tests', () => {
+  let app: express.Application;
+  let userRepo: UserRepository;
+  let familyRepo: FamilyRepository;
+  let testFamilyId: string;
+  let adminToken: string;
+
+  beforeEach(async () => {
+    // Setup Express app
+    app = express();
+    app.use(express.json());
+    app.use('/api', routes);
+
+    // Initialize database for tests
+    await getDb();
+    
+    // Create real repository instances
+    userRepo = new UserRepository();
+    familyRepo = new FamilyRepository();
+
+    // Create a test family first to satisfy foreign key constraints
+    testFamilyId = uuidv4();
+    await familyRepo.create({
+      id: testFamilyId,
+      name: 'Test Family',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    });
+
+    // Create admin user for authorization tests
+    const adminUserId = uuidv4();
+    await userRepo.create({
+      id: adminUserId,
+      username: 'testadmin',
+      password: hashPasswordSync('AdminPassword123!'),
+      role: USER_ROLES.SYSTEM_ADMIN,
+      must_change_password: false,
+      email: 'admin@test.com',
+      familyId: testFamilyId,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    });
+
+    // Generate admin token for protected route tests
+    const adminUser = await userRepo.findByUsername('testadmin');
+    if (!adminUser) throw new Error('Admin user not created');
+    adminToken = generateToken(adminUser);
+  });
+
+  afterEach(async () => {
+    // Clean up database after each test
+    const db = await getDb();
+    await db.run('DELETE FROM users WHERE id != ?', ['']);
+    await db.run('DELETE FROM families WHERE id != ?', ['']);
+    await db.run('DELETE FROM audit_log WHERE id != ?', ['']);
+    await closeDb();
+  });
+
+  describe('POST /api/login', () => {
+    it('should login successfully with valid credentials', async () => {
+      const mockUser = {
+        id: uuidv4(),
+        username: 'testuser',
+        password_hash: hashPasswordSync('TestPassword123!'),
+        role: USER_ROLES.FAMILY_MEMBER,
+        must_change_password: false,
+        email: 'test@example.com',
+        familyId: uuidv4(),
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+
+      userRepo.findByUsername.mockResolvedValue(mockUser);
+
+      const response = await request(app)
+        .post('/api/login')
+        .send({
+          username: 'testuser',
+          password: 'TestPassword123!'
+        });
+
+      expect(response.status).toBe(200);
+      expect(response.body).toHaveProperty('token');
+      expect(response.body).toHaveProperty('role', USER_ROLES.FAMILY_MEMBER);
+    });
+
+    it('should reject invalid credentials', async () => {
+      userRepo.findByUsername.mockResolvedValue(null);
+
+      const response = await request(app)
+        .post('/api/login')
+        .send({
+          username: 'nonexistent',
+          password: 'wrongpassword'
+        });
+
+      expect(response.status).toBe(401);
+      expect(response.body).toHaveProperty('error', 'INVALID_CREDENTIALS');
+    });
+
+    it('should require password change for new users', async () => {
+      const mockUser = {
+        id: uuidv4(),
+        username: 'newuser',
+        password_hash: hashPasswordSync('TempPassword123!'),
+        role: USER_ROLES.FAMILY_MEMBER,
+        must_change_password: true,
+        email: 'new@example.com',
+        familyId: uuidv4(),
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+
+      userRepo.findByUsername.mockResolvedValue(mockUser);
+
+      const response = await request(app)
+        .post('/api/login')
+        .send({
+          username: 'newuser',
+          password: 'TempPassword123!'
+        });
+
+      expect(response.status).toBe(403);
+      expect(response.body).toHaveProperty('error', 'PASSWORD_CHANGE_REQUIRED');
+      expect(response.body).toHaveProperty('username', 'newuser');
+    });
+
+    it('should reject requests with missing credentials', async () => {
+      const response = await request(app)
+        .post('/api/login')
+        .send({
+          username: 'testuser'
+          // Missing password
+        });
+
+      expect(response.status).toBe(401);
+    });
+  });
+
+  describe('POST /api/change-password', () => {
+    it('should change password successfully', async () => {
+      const mockUser = {
+        id: uuidv4(),
+        username: 'testuser',
+        password_hash: hashPasswordSync('OldPassword123!'),
+        role: USER_ROLES.FAMILY_MEMBER,
+        must_change_password: true,
+        email: 'test@example.com',
+        familyId: uuidv4(),
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+
+      userRepo.findByUsername.mockResolvedValue(mockUser);
+      userRepo.update.mockResolvedValue({ ...mockUser, must_change_password: false });
+
+      const response = await request(app)
+        .post('/api/change-password')
+        .send({
+          username: 'testuser',
+          oldPassword: 'OldPassword123!',
+          newPassword: 'NewSecurePassword123!'
+        });
+
+      expect(response.status).toBe(200);
+      expect(response.body).toHaveProperty('message', 'Password changed successfully');
+      expect(userRepo.update).toHaveBeenCalledWith(mockUser.id, expect.objectContaining({
+        must_change_password: false
+      }));
+    });
+
+    it('should reject weak passwords', async () => {
+      const mockUser = {
+        id: uuidv4(),
+        username: 'testuser',
+        password_hash: hashPasswordSync('OldPassword123!'),
+        role: USER_ROLES.FAMILY_MEMBER,
+        must_change_password: true,
+        email: 'test@example.com',
+        familyId: uuidv4(),
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+
+      userRepo.findByUsername.mockResolvedValue(mockUser);
+
+      const response = await request(app)
+        .post('/api/change-password')
+        .send({
+          username: 'testuser',
+          oldPassword: 'OldPassword123!',
+          newPassword: 'weak' // Too weak
+        });
+
+      expect(response.status).toBe(400);
+      expect(response.body).toHaveProperty('error', 'PASSWORD_TOO_WEAK');
+    });
+
+    it('should reject incorrect old password', async () => {
+      const mockUser = {
+        id: uuidv4(),
+        username: 'testuser',
+        password_hash: hashPasswordSync('OldPassword123!'),
+        role: USER_ROLES.FAMILY_MEMBER,
+        must_change_password: true,
+        email: 'test@example.com',
+        familyId: uuidv4(),
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+
+      userRepo.findByUsername.mockResolvedValue(mockUser);
+
+      const response = await request(app)
+        .post('/api/change-password')
+        .send({
+          username: 'testuser',
+          oldPassword: 'WrongOldPassword123!',
+          newPassword: 'NewSecurePassword123!'
+        });
+
+      expect(response.status).toBe(401);
+      expect(response.body).toHaveProperty('error', 'INVALID_CREDENTIALS');
+    });
+  });
+
+  describe('Protected Routes', () => {
+    let adminToken: string;
+    let memberToken: string;
+
+    beforeEach(() => {
+      const adminUser = {
+        id: uuidv4(),
+        username: 'admin',
+        role: USER_ROLES.SYSTEM_ADMIN,
+        familyId: uuidv4()
+      };
+
+      const memberUser = {
+        id: uuidv4(),
+        username: 'member',
+        role: USER_ROLES.FAMILY_MEMBER,
+        familyId: uuidv4()
+      };
+
+      adminToken = generateToken(adminUser as any);
+      memberToken = generateToken(memberUser as any);
+    });
+
+    describe('GET /api/users', () => {
+      it('should return users for system admin', async () => {
+        const mockUsers = [
+          {
+            id: uuidv4(),
+            username: 'user1',
+            role: USER_ROLES.FAMILY_MEMBER,
+            email: 'user1@example.com',
+            created_at: new Date().toISOString()
+          },
+          {
+            id: uuidv4(),
+            username: 'user2',
+            role: USER_ROLES.FAMILY_ADMIN,
+            email: 'user2@example.com',
+            created_at: new Date().toISOString()
+          }
+        ];
+
+        userRepo.findAll.mockResolvedValue(mockUsers);
+
+        const response = await request(app)
+          .get('/api/users')
+          .set('Authorization', `Bearer ${adminToken}`);
+
+        expect(response.status).toBe(200);
+        expect(response.body).toHaveProperty('users');
+        expect(response.body.users).toHaveLength(2);
+      });
+
+      it('should reject non-admin users', async () => {
+        const response = await request(app)
+          .get('/api/users')
+          .set('Authorization', `Bearer ${memberToken}`);
+
+        expect(response.status).toBe(403);
+        expect(response.body).toHaveProperty('error', 'Forbidden');
+      });
+
+      it('should reject requests without token', async () => {
+        const response = await request(app)
+          .get('/api/users');
+
+        expect(response.status).toBe(401);
+        expect(response.body).toHaveProperty('error', 'No token provided');
+      });
+    });
+
+    describe('POST /api/users', () => {
+      it('should create user as system admin', async () => {
+        const newUser = {
+          id: uuidv4(),
+          username: 'newuser',
+          password_hash: 'hashedpassword',
+          role: USER_ROLES.FAMILY_MEMBER,
+          must_change_password: false,
+          email: 'new@example.com',
+          familyId: uuidv4(),
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        };
+
+        userRepo.findByUsername.mockResolvedValue(null); // User doesn't exist
+        userRepo.create.mockResolvedValue(newUser);
+
+        const response = await request(app)
+          .post('/api/users')
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({
+            username: 'newuser',
+            password: 'SecurePassword123!',
+            role: USER_ROLES.FAMILY_MEMBER,
+            email: 'new@example.com',
+            familyId: uuidv4()
+          });
+
+        expect(response.status).toBe(200);
+        expect(response.body).toHaveProperty('user');
+        expect(userRepo.create).toHaveBeenCalled();
+      });
+
+      it('should reject weak passwords', async () => {
+        const response = await request(app)
+          .post('/api/users')
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({
+            username: 'newuser',
+            password: 'weak',
+            role: USER_ROLES.FAMILY_MEMBER,
+            email: 'new@example.com',
+            familyId: uuidv4()
+          });
+
+        expect(response.status).toBe(400);
+        expect(response.body).toHaveProperty('error', 'Password does not meet policy');
+      });
+
+      it('should reject duplicate usernames', async () => {
+        userRepo.findByUsername.mockResolvedValue({
+          id: uuidv4(),
+          username: 'existinguser'
+        });
+
+        const response = await request(app)
+          .post('/api/users')
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({
+            username: 'existinguser',
+            password: 'SecurePassword123!',
+            role: USER_ROLES.FAMILY_MEMBER,
+            email: 'new@example.com',
+            familyId: uuidv4()
+          });
+
+        expect(response.status).toBe(409);
+        expect(response.body).toHaveProperty('error', 'User already exists');
+      });
+    });
+
+    describe('GET /api/families', () => {
+      it('should return families for system admin', async () => {
+        const mockFamilies = [
+          {
+            id: uuidv4(),
+            name: 'Family 1',
+            created_at: new Date().toISOString()
+          },
+          {
+            id: uuidv4(),
+            name: 'Family 2',
+            created_at: new Date().toISOString()
+          }
+        ];
+
+        familyRepo.findAll.mockResolvedValue(mockFamilies);
+
+        const response = await request(app)
+          .get('/api/families')
+          .set('Authorization', `Bearer ${adminToken}`);
+
+        expect(response.status).toBe(200);
+        expect(response.body).toHaveProperty('families');
+        expect(response.body.families).toHaveLength(2);
+      });
+
+      it('should reject non-admin users', async () => {
+        const response = await request(app)
+          .get('/api/families')
+          .set('Authorization', `Bearer ${memberToken}`);
+
+        expect(response.status).toBe(403);
+        expect(response.body).toHaveProperty('error', 'Forbidden');
+      });
+    });
+
+    describe('POST /api/families', () => {
+      it('should create family as system admin', async () => {
+        const newFamily = {
+          id: uuidv4(),
+          name: 'New Family',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        };
+
+        familyRepo.create.mockResolvedValue(newFamily);
+
+        const response = await request(app)
+          .post('/api/families')
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({
+            name: 'New Family'
+          });
+
+        expect(response.status).toBe(200);
+        expect(response.body).toHaveProperty('family');
+        expect(familyRepo.create).toHaveBeenCalled();
+      });
+
+      it('should reject non-admin users', async () => {
+        const response = await request(app)
+          .post('/api/families')
+          .set('Authorization', `Bearer ${memberToken}`)
+          .send({
+            name: 'New Family'
+          });
+
+        expect(response.status).toBe(403);
+        expect(response.body).toHaveProperty('error', 'Forbidden');
+      });
+    });
+  });
+});

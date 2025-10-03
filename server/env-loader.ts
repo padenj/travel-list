@@ -1,0 +1,3 @@
+// Loads environment variables from .env file
+import 'dotenv/config';
+// ...existing code...

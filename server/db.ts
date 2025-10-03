@@ -1,0 +1,139 @@
+import sqlite3 from 'sqlite3';
+import { open, Database } from 'sqlite';
+
+let dbInstance: Database | null = null;
+let isInitializing = false;
+let initializationPromise: Promise<void> | null = null;
+
+// Database schemas separated for maintainability
+const SCHEMAS = {
+  users: `
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      username TEXT UNIQUE,
+      password_hash TEXT,
+      role TEXT CHECK (role IN ('SystemAdmin', 'FamilyAdmin', 'FamilyMember')),
+      must_change_password INTEGER DEFAULT 0,
+      email TEXT,
+      familyId TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      deleted_at TEXT,
+      FOREIGN KEY (familyId) REFERENCES families(id)
+    )`,
+  families: `
+    CREATE TABLE IF NOT EXISTS families (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      deleted_at TEXT
+    )`,
+  audit_log: `
+    CREATE TABLE IF NOT EXISTS audit_log (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      username TEXT NOT NULL,
+      action TEXT NOT NULL,
+      details TEXT,
+      timestamp TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    )`,
+  indexes: `
+    CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
+    CREATE INDEX IF NOT EXISTS idx_users_family ON users(familyId);
+    CREATE INDEX IF NOT EXISTS idx_users_deleted ON users(deleted_at);
+    CREATE INDEX IF NOT EXISTS idx_families_deleted ON families(deleted_at);
+    CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log(user_id);
+    CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_log(timestamp);
+  `
+};
+
+async function initializeDatabase(db: Database): Promise<void> {
+  if (isInitializing && initializationPromise) {
+    await initializationPromise;
+    return;
+  }
+  
+  if (isInitializing) return;
+  
+  isInitializing = true;
+  initializationPromise = (async () => {
+    try {
+      // Enable foreign keys
+      await db.exec('PRAGMA foreign_keys = ON');
+      
+      // Create tables in correct order (families first due to foreign key)
+      await db.exec(SCHEMAS.families);
+      await db.exec(SCHEMAS.users);
+      await db.exec(SCHEMAS.audit_log);
+      await db.exec(SCHEMAS.indexes);
+      
+      console.log('📄 Database schema initialized successfully');
+    } catch (error) {
+      console.error('❌ Database initialization failed:', error);
+      throw error;
+    } finally {
+      isInitializing = false;
+      initializationPromise = null;
+    }
+  })();
+  
+  await initializationPromise;
+}
+
+export async function getDb(): Promise<Database> {
+  // Check if current instance is closed or invalid
+  if (dbInstance) {
+    try {
+      // Test if the database connection is still valid
+      await dbInstance.get('SELECT 1');
+    } catch (error) {
+      // Database is closed or invalid, reset it
+      dbInstance = null;
+    }
+  }
+
+  if (!dbInstance) {
+    try {
+      const isTest = process.env.NODE_ENV === 'test' || process.env.VITEST;
+      const filename = isTest ? ':memory:' : './travel-list.sqlite';
+      
+      dbInstance = await open({
+        filename,
+        driver: sqlite3.Database,
+      });
+      
+      await initializeDatabase(dbInstance);
+      
+      // Handle connection errors
+      dbInstance.on('error', (err: Error) => {
+        console.error('💥 Database error:', err);
+      });
+      
+    } catch (error) {
+      console.error('💥 Failed to open database:', error);
+      dbInstance = null;
+      throw error;
+    }
+  }
+  return dbInstance;
+}
+
+// Graceful shutdown
+export async function closeDb(): Promise<void> {
+  if (dbInstance) {
+    try {
+      await dbInstance.close();
+      console.log('🔐 Database connection closed');
+    } catch (error) {
+      // Handle already closed database gracefully
+      console.log('🔐 Database connection already closed');
+    } finally {
+      dbInstance = null;
+      isInitializing = false;
+      initializationPromise = null;
+    }
+  }
+}
