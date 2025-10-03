@@ -117,7 +117,7 @@ export default function AppRoutes(): React.ReactElement {
           path="/admin/family" 
           element={
             user.role === 'SystemAdmin' || user.role === 'FamilyAdmin' ? (
-              <FamilyAdminPage user={user} />
+              <FamilyAdminPage />
             ) : (
               <Navigate to="/" replace />
             )

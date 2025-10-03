@@ -16,7 +16,7 @@ import {
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
-import { IconTrash, IconPlus, IconAlertCircle } from '@tabler/icons-react';
+import { IconTrash, IconPlus } from '@tabler/icons-react';
 import { getCurrentUserProfile, createFamilyMember, deleteUser } from '../api';
 
 interface User {
