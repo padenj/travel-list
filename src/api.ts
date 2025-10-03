@@ -1,3 +1,82 @@
+// Item-Category assignment APIs
+export const assignItemToCategory = async (itemId: string, categoryId: string): Promise<ApiResponse> => {
+  return authenticatedApiCall(`/items/${itemId}/categories/${categoryId}`, {
+    method: 'POST',
+  });
+};
+
+export const removeItemFromCategory = async (itemId: string, categoryId: string): Promise<ApiResponse> => {
+  return authenticatedApiCall(`/items/${itemId}/categories/${categoryId}`, {
+    method: 'DELETE',
+  });
+};
+// Category APIs
+export const getCategories = async (familyId: string): Promise<ApiResponse> => {
+  return authenticatedApiCall(`/categories/${familyId}`);
+};
+
+export const createCategory = async (familyId: string, name: string): Promise<ApiResponse> => {
+  return authenticatedApiCall('/categories', {
+    method: 'POST',
+    body: JSON.stringify({ familyId, name }),
+  });
+};
+
+export const updateCategory = async (id: string, name: string): Promise<ApiResponse> => {
+  return authenticatedApiCall(`/categories/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify({ name }),
+  });
+};
+
+export const deleteCategory = async (id: string): Promise<ApiResponse> => {
+  return authenticatedApiCall(`/categories/${id}`, {
+    method: 'DELETE',
+  });
+};
+// Item APIs
+export const getItems = async (familyId: string): Promise<ApiResponse> => {
+  return authenticatedApiCall(`/items/${familyId}`);
+};
+
+export const createItem = async (familyId: string, name: string): Promise<ApiResponse> => {
+  return authenticatedApiCall('/items', {
+    method: 'POST',
+    body: JSON.stringify({ familyId, name }),
+  });
+};
+
+export const updateItem = async (id: string, name: string): Promise<ApiResponse> => {
+  return authenticatedApiCall(`/items/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify({ name }),
+  });
+};
+
+export const deleteItem = async (id: string): Promise<ApiResponse> => {
+  return authenticatedApiCall(`/items/${id}`, {
+    method: 'DELETE',
+  });
+};
+
+export const getCategoriesForItem = async (itemId: string): Promise<ApiResponse> => {
+  return authenticatedApiCall(`/items/${itemId}/categories`);
+};
+
+export const getMembersForItem = async (itemId: string): Promise<ApiResponse> => {
+  return authenticatedApiCall(`/items/${itemId}/members`);
+};
+
+export const isAssignedToWholeFamily = async (itemId: string): Promise<ApiResponse> => {
+  return authenticatedApiCall(`/items/${itemId}/whole-family`);
+};
+
+export const setChecked = async (itemId: string, checked: boolean): Promise<ApiResponse> => {
+  return authenticatedApiCall(`/items/${itemId}/checked`, {
+    method: 'PUT',
+    body: JSON.stringify({ checked }),
+  });
+};
 // Family member management APIs
 export const createFamilyMember = async (familyId: string, memberData: {
   name: string;

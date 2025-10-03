@@ -1,9 +1,12 @@
-// ...existing code...
+// Get whole family assignment for an item
+// Get categories for an item
+
+
 import express, { Request, Response, Router } from 'express';
 import { logAudit } from './audit';
 import { validatePassword, hashPassword, comparePassword, hashPasswordSync, comparePasswordSync, generateToken } from './auth';
 import { authMiddleware } from './middleware';
-import { UserRepository, FamilyRepository } from './repositories';
+import { UserRepository, FamilyRepository, CategoryRepository, ItemRepository } from './repositories';
 import { ERROR_CODES, USER_ROLES, HTTP_STATUS } from './constants';
 import { User, LoginRequest, ChangePasswordRequest } from './server-types';
 import { v4 as uuidv4 } from 'uuid';
@@ -18,9 +21,233 @@ declare global {
 }
 
 const router: Router = express.Router();
-
 const userRepo = new UserRepository();
 const familyRepo = new FamilyRepository();
+const categoryRepo = new CategoryRepository();
+const itemRepo = new ItemRepository();
+
+// Get categories for an item
+router.get('/items/:itemId/categories', authMiddleware, async (req: Request, res: Response) => {
+  const { itemId } = req.params;
+  try {
+    const categories = await itemRepo.getCategoriesForItem(itemId);
+    return res.json({ categories });
+  } catch (error) {
+    console.error('Error fetching item categories:', error);
+    return res.status(500).json({ error: 'Failed to fetch item categories' });
+  }
+});
+
+// Update item checked state
+router.put('/items/:id/checked', authMiddleware, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { checked } = req.body;
+  try {
+    const updated = await itemRepo.setChecked(id, !!checked);
+    return res.json({ item: updated });
+  } catch (error) {
+    console.error('Error updating item checked state:', error);
+    return res.status(500).json({ error: 'Failed to update item checked state' });
+  }
+});
+// Category CRUD endpoints
+router.post('/categories', authMiddleware, async (req: Request, res: Response) => {
+  const { familyId, name } = req.body;
+  if (!familyId || !name || name.trim() === '') {
+    return res.status(400).json({ error: 'Family ID and category name are required' });
+  }
+  try {
+    const category = await categoryRepo.create({
+      id: uuidv4(),
+      familyId,
+      name: name.trim(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+    return res.json({ category });
+  } catch (error) {
+    console.error('Error creating category:', error);
+    return res.status(500).json({ error: 'Failed to create category' });
+  }
+});
+
+router.get('/categories/:familyId', authMiddleware, async (req: Request, res: Response) => {
+  const { familyId } = req.params;
+  try {
+    const categories = await categoryRepo.findAll(familyId);
+    return res.json({ categories });
+  } catch (error) {
+    console.error('Error fetching categories:', error);
+    return res.status(500).json({ error: 'Failed to fetch categories' });
+  }
+});
+
+router.put('/categories/:id', authMiddleware, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { name } = req.body;
+  if (!name || name.trim() === '') {
+    return res.status(400).json({ error: 'Category name is required' });
+  }
+  try {
+    const updated = await categoryRepo.update(id, { name: name.trim() });
+    return res.json({ category: updated });
+  } catch (error) {
+    console.error('Error updating category:', error);
+    return res.status(500).json({ error: 'Failed to update category' });
+  }
+});
+
+router.delete('/categories/:id', authMiddleware, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  try {
+    await categoryRepo.softDelete(id);
+    return res.json({ message: 'Category deleted' });
+  } catch (error) {
+    console.error('Error deleting category:', error);
+    return res.status(500).json({ error: 'Failed to delete category' });
+  }
+});
+
+// Item CRUD endpoints
+router.post('/items', authMiddleware, async (req: Request, res: Response) => {
+  const { familyId, name } = req.body;
+  if (!familyId || !name || name.trim() === '') {
+    return res.status(400).json({ error: 'Family ID and item name are required' });
+  }
+  try {
+    const item = await itemRepo.create({
+      id: uuidv4(),
+      familyId,
+      name: name.trim(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+    return res.json({ item });
+  } catch (error) {
+    console.error('Error creating item:', error);
+    return res.status(500).json({ error: 'Failed to create item' });
+  }
+});
+
+router.get('/items/:familyId', authMiddleware, async (req: Request, res: Response) => {
+  const { familyId } = req.params;
+  try {
+    const items = await itemRepo.findAll(familyId);
+    return res.json({ items });
+  } catch (error) {
+    console.error('Error fetching items:', error);
+    return res.status(500).json({ error: 'Failed to fetch items' });
+  }
+});
+
+router.put('/items/:id', authMiddleware, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { name } = req.body;
+  if (!name || name.trim() === '') {
+    return res.status(400).json({ error: 'Item name is required' });
+  }
+  try {
+    const updated = await itemRepo.update(id, { name: name.trim() });
+    return res.json({ item: updated });
+  } catch (error) {
+    console.error('Error updating item:', error);
+    return res.status(500).json({ error: 'Failed to update item' });
+  }
+});
+
+router.delete('/items/:id', authMiddleware, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  try {
+    await itemRepo.softDelete(id);
+    return res.json({ message: 'Item deleted' });
+  } catch (error) {
+    console.error('Error deleting item:', error);
+    return res.status(500).json({ error: 'Failed to delete item' });
+  }
+});
+
+// Assignment endpoints
+router.post('/items/:itemId/categories/:categoryId', authMiddleware, async (req: Request, res: Response) => {
+  const { itemId, categoryId } = req.params;
+  try {
+    await itemRepo.assignToCategory(itemId, categoryId);
+    return res.json({ message: 'Item assigned to category' });
+  } catch (error) {
+    console.error('Error assigning item to category:', error);
+    return res.status(500).json({ error: 'Failed to assign item to category' });
+  }
+});
+
+router.delete('/items/:itemId/categories/:categoryId', authMiddleware, async (req: Request, res: Response) => {
+  const { itemId, categoryId } = req.params;
+  try {
+    await itemRepo.removeFromCategory(itemId, categoryId);
+    return res.json({ message: 'Item removed from category' });
+  } catch (error) {
+    console.error('Error removing item from category:', error);
+    return res.status(500).json({ error: 'Failed to remove item from category' });
+  }
+});
+
+router.post('/items/:itemId/members/:memberId', authMiddleware, async (req: Request, res: Response) => {
+  const { itemId, memberId } = req.params;
+  try {
+    await itemRepo.assignToMember(itemId, memberId);
+    return res.json({ message: 'Item assigned to member' });
+  } catch (error) {
+    console.error('Error assigning item to member:', error);
+    return res.status(500).json({ error: 'Failed to assign item to member' });
+  }
+});
+
+router.delete('/items/:itemId/members/:memberId', authMiddleware, async (req: Request, res: Response) => {
+  const { itemId, memberId } = req.params;
+  try {
+    await itemRepo.removeFromMember(itemId, memberId);
+    return res.json({ message: 'Item removed from member' });
+  } catch (error) {
+    console.error('Error removing item from member:', error);
+    return res.status(500).json({ error: 'Failed to remove item from member' });
+  }
+});
+
+router.post('/items/:itemId/whole-family/:familyId', authMiddleware, async (req: Request, res: Response) => {
+  const { itemId, familyId } = req.params;
+  try {
+    await itemRepo.assignToWholeFamily(itemId, familyId);
+    return res.json({ message: 'Item assigned to whole family' });
+  } catch (error) {
+    console.error('Error assigning item to whole family:', error);
+    return res.status(500).json({ error: 'Failed to assign item to whole family' });
+  }
+});
+
+router.delete('/items/:itemId/whole-family', authMiddleware, async (req: Request, res: Response) => {
+  const { itemId } = req.params;
+  try {
+    await itemRepo.removeFromWholeFamily(itemId);
+    return res.json({ message: 'Item removed from whole family' });
+  } catch (error) {
+    console.error('Error removing item from whole family:', error);
+    return res.status(500).json({ error: 'Failed to remove item from whole family' });
+  }
+});
+
+  // Get items assigned to whole family for a packing list
+  router.get('/items/:itemId/whole-family', authMiddleware, async (req: Request, res: Response) => {
+    const { itemId } = req.params;
+    try {
+      // Assuming itemRepo.getWholeFamilyAssignment returns the item if assigned to whole family, or null/empty otherwise
+      const assignment = await itemRepo.getWholeFamilyAssignment(itemId);
+      if (!assignment) {
+        return res.status(404).json({ error: 'No whole family assignment found for this item' });
+      }
+      return res.json({ item: assignment });
+    } catch (error) {
+      console.error('Error fetching whole family assignment:', error);
+      return res.status(500).json({ error: 'Failed to fetch whole family assignment' });
+    }
+  });
 
 // Create default admin if not exists
 export async function ensureDefaultAdmin() {

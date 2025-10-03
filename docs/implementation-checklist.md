@@ -71,13 +71,33 @@
 - SystemAdmin can view and modify all users and roles within the system.
 - SystemAdmin users can add or delete families.
 - FamilyAdmin users are restricted to only assign FamilyAdmin to other members in their family.
-- [ ] Backend: CRUD for members, categories, items with soft delete
-- [ ] Backend: Many-to-many relationships (items-categories, items-members)
-- [ ] Backend: Support for "whole family" item assignments
-- [ ] Frontend: UI for managing members, categories, items
-- [ ] Frontend: Multi-select for item categories and member assignments
-- [ ] Seed standard categories: "International", "Cold Weather", "Beach", "Formal", "Work", "Car"
-- [ ] Seed default items for each category
+### Updated Requirements (Oct 2025)
+
+- Use the existing SQLite database for all new models and relationships.
+- Items and categories are specific to families. Users can add items and categories to the current family only.
+- Items must include a required `name` field. Categories must include a required `name` field.
+- Roles and members are already implemented (Milestone 2). No new endpoints for adding/removing members are needed.
+- Items can be assigned to existing users in the current family, or to the "whole family" (special assignment).
+- When creating packing lists, items will be displayed in a separate list for each user. "Whole family" items will be displayed in their own list.
+- Soft deleted items should be hidden from all lists and UI (no restore for now).
+- Use checkboxes for multi-select UI (categories, member assignments).
+- Seed standard categories and default items should be added automatically through the "Manage my Family" wizard (not on startup).
+
+#### Milestone 3 Tasks
+- [x] Backend: CRUD for categories and items (with soft delete, hidden from UI)
+- [x] Backend: Many-to-many relationships (items-categories, items-members, including "whole family" assignment)
+- [x] Frontend: UI for managing categories and items (checkbox multi-select for assignments)
+- [x] Frontend: Integrate category/item management into "Manage my Family" wizard
+- [x] Frontend: Display packing lists per user and for "whole family" items
+- [x] Seed standard categories and default items via wizard
+
+### Milestone 3 Completion Note
+
+**✅ Milestone 3 core features are now complete.**
+- Backend and frontend support for CRUD, assignments, and packing list display per user and whole family.
+- Packing list UI now fetches and displays items assigned to whole family (via new API route).
+- All assignment, checked state, and seeding logic integrated and tested.
+- Ready to proceed to Milestone 4: Template Management.
 
 ## Milestone 4: Template Management
 - [ ] Backend: CRUD for templates with category and item references

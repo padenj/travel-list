@@ -8,6 +8,9 @@ import Dashboard from './components/Dashboard';
 import SystemAdminPage from './components/SystemAdminPage';
 import FamilyAdminPage from './components/FamilyAdminPage';
 import Layout from './components/Layout';
+import PackingListPage from './components/PackingListPage';
+import CategoryManagementPage from './components/CategoryManagementPage';
+import ItemManagementPage from './components/ItemManagementPage';
 
 interface User {
   username?: string;
@@ -122,6 +125,18 @@ export default function AppRoutes(): React.ReactElement {
               <Navigate to="/" replace />
             )
           } 
+        />
+        <Route 
+          path="/packing-lists" 
+          element={<PackingListPage />} 
+        />
+        <Route 
+          path="/categories" 
+          element={<CategoryManagementPage />} 
+        />
+        <Route 
+          path="/items" 
+          element={<ItemManagementPage />} 
         />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

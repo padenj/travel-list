@@ -91,6 +91,51 @@ export default function Layout({ children, user, onLogout }: LayoutProps): React
            Family Administration
           </Link>
         )}
+
+        <Link 
+          to="/packing-lists" 
+          style={{ 
+            textDecoration: 'none',
+            color: location.pathname === '/packing-lists' ? 'var(--mantine-color-blue-6)' : 'inherit',
+            display: 'block',
+            padding: '8px 12px',
+            borderRadius: '4px',
+            marginBottom: '4px',
+            backgroundColor: location.pathname === '/packing-lists' ? 'var(--mantine-color-blue-0)' : 'transparent'
+          }}
+        >
+          Packing Lists
+        </Link>
+
+        <Link 
+          to="/categories" 
+          style={{ 
+            textDecoration: 'none',
+            color: location.pathname === '/categories' ? 'var(--mantine-color-blue-6)' : 'inherit',
+            display: 'block',
+            padding: '8px 12px',
+            borderRadius: '4px',
+            marginBottom: '4px',
+            backgroundColor: location.pathname === '/categories' ? 'var(--mantine-color-blue-0)' : 'transparent'
+          }}
+        >
+          Manage Categories
+        </Link>
+
+        <Link 
+          to="/items" 
+          style={{ 
+            textDecoration: 'none',
+            color: location.pathname === '/items' ? 'var(--mantine-color-blue-6)' : 'inherit',
+            display: 'block',
+            padding: '8px 12px',
+            borderRadius: '4px',
+            marginBottom: '4px',
+            backgroundColor: location.pathname === '/items' ? 'var(--mantine-color-blue-0)' : 'transparent'
+          }}
+        >
+          Manage Items
+        </Link>
       </AppShell.Navbar>
 
       <AppShell.Main>

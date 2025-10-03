@@ -21,7 +21,47 @@ const SCHEMAS = {
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
       deleted_at TEXT,
       FOREIGN KEY (familyId) REFERENCES families(id)
-    )`,
+    );
+    CREATE TABLE IF NOT EXISTS categories (
+      id TEXT PRIMARY KEY,
+      familyId TEXT NOT NULL,
+      name TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      deleted_at TEXT,
+      FOREIGN KEY (familyId) REFERENCES families(id)
+    );
+    CREATE TABLE IF NOT EXISTS items (
+      id TEXT PRIMARY KEY,
+      familyId TEXT NOT NULL,
+      name TEXT NOT NULL,
+      checked INTEGER DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      deleted_at TEXT,
+      FOREIGN KEY (familyId) REFERENCES families(id)
+    );
+    CREATE TABLE IF NOT EXISTS item_categories (
+      item_id TEXT NOT NULL,
+      category_id TEXT NOT NULL,
+      PRIMARY KEY (item_id, category_id),
+      FOREIGN KEY (item_id) REFERENCES items(id),
+      FOREIGN KEY (category_id) REFERENCES categories(id)
+    );
+    CREATE TABLE IF NOT EXISTS item_members (
+      item_id TEXT NOT NULL,
+      member_id TEXT NOT NULL,
+      PRIMARY KEY (item_id, member_id),
+      FOREIGN KEY (item_id) REFERENCES items(id),
+      FOREIGN KEY (member_id) REFERENCES users(id)
+    );
+    CREATE TABLE IF NOT EXISTS item_whole_family (
+      item_id TEXT PRIMARY KEY,
+      family_id TEXT NOT NULL,
+      FOREIGN KEY (item_id) REFERENCES items(id),
+      FOREIGN KEY (family_id) REFERENCES families(id)
+    );
+  `,
   families: `
     CREATE TABLE IF NOT EXISTS families (
       id TEXT PRIMARY KEY,
@@ -47,6 +87,15 @@ const SCHEMAS = {
     CREATE INDEX IF NOT EXISTS idx_families_deleted ON families(deleted_at);
     CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log(user_id);
     CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_log(timestamp);
+    CREATE INDEX IF NOT EXISTS idx_categories_family ON categories(familyId);
+    CREATE INDEX IF NOT EXISTS idx_categories_deleted ON categories(deleted_at);
+    CREATE INDEX IF NOT EXISTS idx_items_family ON items(familyId);
+    CREATE INDEX IF NOT EXISTS idx_items_deleted ON items(deleted_at);
+    CREATE INDEX IF NOT EXISTS idx_item_categories_item ON item_categories(item_id);
+    CREATE INDEX IF NOT EXISTS idx_item_categories_category ON item_categories(category_id);
+    CREATE INDEX IF NOT EXISTS idx_item_members_item ON item_members(item_id);
+    CREATE INDEX IF NOT EXISTS idx_item_members_member ON item_members(member_id);
+    CREATE INDEX IF NOT EXISTS idx_item_whole_family_family ON item_whole_family(family_id);
   `
 };
 

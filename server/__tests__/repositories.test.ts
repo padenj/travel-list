@@ -133,6 +133,7 @@ describe('Repositories', () => {
     it('should create a user successfully', async () => {
       const userData = {
         id: uuidv4(),
+        name: 'Test User',
         username: 'testuser',
         password: 'hashedpassword123',
         role: 'FamilyMember' as const,
@@ -154,6 +155,7 @@ describe('Repositories', () => {
     it('should find user by username', async () => {
       const userData = {
         id: uuidv4(),
+        name: 'Test User',
         username: 'testuser',
         password: 'hashedpassword123',
         role: 'FamilyMember' as const,
@@ -179,6 +181,7 @@ describe('Repositories', () => {
     it('should update user successfully', async () => {
       const userData = {
         id: uuidv4(),
+        name: 'Test User',
         username: 'testuser',
         password: 'hashedpassword123',
         role: 'FamilyMember' as const,
@@ -203,6 +206,7 @@ describe('Repositories', () => {
     it('should find all users', async () => {
       const user1 = {
         id: uuidv4(),
+        name: 'User One',
         username: 'user1',
         password: 'hashedpassword123',
         role: 'FamilyMember' as const,
@@ -215,6 +219,7 @@ describe('Repositories', () => {
 
       const user2 = {
         id: uuidv4(),
+        name: 'User Two',
         username: 'user2',
         password: 'hashedpassword456',
         role: 'FamilyAdmin' as const,
@@ -236,6 +241,7 @@ describe('Repositories', () => {
     it('should soft delete user', async () => {
       const userData = {
         id: uuidv4(),
+        name: 'Test User',
         username: 'testuser',
         password: 'hashedpassword123',
         role: 'FamilyMember' as const,
@@ -256,6 +262,7 @@ describe('Repositories', () => {
     it('should handle unique username constraint', async () => {
       const userData1 = {
         id: uuidv4(),
+        name: 'Unique User',
         username: 'uniqueuser',
         password: 'hashedpassword123',
         role: 'FamilyMember' as const,
@@ -268,6 +275,7 @@ describe('Repositories', () => {
 
       const userData2 = {
         id: uuidv4(),
+        name: 'Unique User 2',
         username: 'uniqueuser', // Same username
         password: 'hashedpassword456',
         role: 'FamilyMember' as const,
