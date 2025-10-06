@@ -8,8 +8,9 @@
     "dev:server": "tsx watch server/index.ts",
     "build": "vite build",
     "preview": "vite preview",
-  "test": "vitest",
+  "test": "vitest --run",
     "test:e2e": "playwright test",
+  "test:wait": "vitest",
     "test:ci": "npx vitest --run && npx playwright test"
   },
   "dependencies": {

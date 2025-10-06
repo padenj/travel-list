@@ -1,7 +1,8 @@
 // Clean Layout component
 import React from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { AppShell, Text, Button, Group, Container } from '@mantine/core';
+import { AppShell, Text, Group, Container, Avatar, Menu, UnstyledButton, Divider, Button } from '@mantine/core';
+import { IconSettings } from '@tabler/icons-react';
 import { useImpersonation } from '../contexts/ImpersonationContext';
 
 interface User {
@@ -34,6 +35,15 @@ export default function Layout({ children, user, onLogout }: LayoutProps): React
     backgroundColor: location.pathname === path ? 'var(--mantine-color-blue-0)' : 'transparent',
   });
 
+  const isSettingsContext = location.pathname.startsWith('/settings');
+
+  function getInitials(name?: string | null): string {
+    if (!name) return '?';
+    const parts = name.trim().split(/\s+/);
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  }
+
   return (
     <AppShell
       navbar={{ width: 250, breakpoint: 'sm' }}
@@ -46,45 +56,84 @@ export default function Layout({ children, user, onLogout }: LayoutProps): React
             <Text size="xl" fw={500}>Travel List</Text>
           </div>
           <Group>
-            <Text size="sm">Welcome, {user.username}</Text>
-            <Text size="xs" c="dimmed">({user.role})</Text>
-            <Button variant="light" size="xs" onClick={onLogout}>Logout</Button>
+            {/* Profile menu: show initials avatar as menu target */}
+            <Menu withinPortal position="bottom-end">
+              <Menu.Target>
+                <UnstyledButton>
+                  <Avatar color="blue" radius="xl">
+                    {getInitials(user.username)}
+                  </Avatar>
+                </UnstyledButton>
+              </Menu.Target>
+
+              <Menu.Dropdown>
+                <Menu.Label>
+                  <Text fw={600}>{user.username}</Text>
+                </Menu.Label>
+                <Divider />
+                {canAccessFamilyAdmin && (
+                  <Menu.Item onClick={() => navigate('/settings')}>Settings</Menu.Item>
+                )}
+                {canAccessSystemAdmin && (
+                  <Menu.Item onClick={() => navigate('/admin/system')}>System Admin</Menu.Item>
+                )}
+                <Menu.Item color="red" onClick={onLogout}>Logout</Menu.Item>
+              </Menu.Dropdown>
+            </Menu>
           </Group>
         </Group>
       </AppShell.Header>
 
       <AppShell.Navbar p="md">
-        <Link to="/" style={linkStyle('/')}>
-          Dashboard
-        </Link>
+        <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+          <div>
+            {isSettingsContext ? (
+              // Show settings-oriented navigation instead of primary app nav
+              <div>
+                <Link to="/settings/profile" style={linkStyle('/settings/profile')}>Profile</Link>
+                <Link to="/settings/family" style={linkStyle('/settings/family')}>Family</Link>
+                <Link to="/settings/security" style={linkStyle('/settings/security')}>Security</Link>
+              </div>
+            ) : (
+              // Default primary navigation
+              <div>
+                <Link to="/" style={linkStyle('/')}> 
+                  Dashboard
+                </Link>
 
-        {canAccessSystemAdmin && (
-          <Link to="/admin/system" style={linkStyle('/admin/system')}>
-            System Administration
-          </Link>
-        )}
+                {/* System Administration remains available from the profile menu */}
 
-        {canAccessFamilyAdmin && (
-          <Link to="/admin/family" style={linkStyle('/admin/family')}>
-            Family Administration
-          </Link>
-        )}
+                <Link to="/packing-lists" style={linkStyle('/packing-lists')}>
+                  Packing Lists
+                </Link>
 
-        <Link to="/packing-lists" style={linkStyle('/packing-lists')}>
-          Packing Lists
-        </Link>
+                <Link to="/categories" style={linkStyle('/categories')}>
+                  Manage Categories
+                </Link>
 
-        <Link to="/categories" style={linkStyle('/categories')}>
-          Manage Categories
-        </Link>
+                <Link to="/items" style={linkStyle('/items')}>
+                  Manage Items
+                </Link>
 
-        <Link to="/items" style={linkStyle('/items')}>
-          Manage Items
-        </Link>
+                <Link to="/templates" style={linkStyle('/templates')}>
+                  Manage Templates
+                </Link>
+              </div>
+            )}
+          </div>
 
-        <Link to="/templates" style={linkStyle('/templates')}>
-          Manage Templates
-        </Link>
+          <div style={{ marginTop: 'auto' }}>
+            <Divider />
+            <div style={{ marginTop: 8 }}>
+              <Link to="/settings" style={linkStyle('/settings')}>
+                <Group gap="xs" align="center">
+                  <IconSettings size={16} />
+                  <span>Settings</span>
+                </Group>
+              </Link>
+            </div>
+          </div>
+        </div>
       </AppShell.Navbar>
 
       <AppShell.Main>

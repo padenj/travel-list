@@ -7,11 +7,14 @@ import PasswordChangePage from './PasswordChangePage';
 import Dashboard from './components/Dashboard';
 import SystemAdminPage from './components/SystemAdminPage';
 import FamilyAdminPage from './components/FamilyAdminPage';
-import Layout from './components/Layout';
+import SettingsProfile from './components/SettingsProfile';
+import SettingsSecurity from './components/SettingsSecurity';
+import SplitRailLayout from './components/SplitRailLayout';
 import PackingListPage from './components/PackingListPage';
 import CategoryManagementPage from './components/CategoryManagementPage';
 import ItemManagementPage from './components/ItemManagementPage';
 import TemplateManagerPage from './components/TemplateManagerPage';
+import NavigationPrototypes from './components/NavigationPrototypes';
 
 interface User {
   username?: string;
@@ -104,7 +107,7 @@ export default function AppRoutes(): React.ReactElement {
 
   // Show main app with routing
   return (
-    <Layout user={user} onLogout={handleLogout}>
+    <SplitRailLayout user={user} onLogout={handleLogout}>
       <Routes>
         <Route path="/" element={<Dashboard user={user} />} />
         <Route 
@@ -127,6 +130,38 @@ export default function AppRoutes(): React.ReactElement {
             )
           } 
         />
+        {/* Settings routes - redirect /settings to /settings/profile */}
+        <Route path="/settings" element={<Navigate to="/settings/profile" replace />} />
+        <Route 
+          path="/settings/profile" 
+          element={
+            user.role === 'SystemAdmin' || user.role === 'FamilyAdmin' ? (
+              <SettingsProfile />
+            ) : (
+              <Navigate to="/" replace />
+            )
+          } 
+        />
+        <Route 
+          path="/settings/family" 
+          element={
+            user.role === 'SystemAdmin' || user.role === 'FamilyAdmin' ? (
+              <FamilyAdminPage />
+            ) : (
+              <Navigate to="/" replace />
+            )
+          } 
+        />
+        <Route 
+          path="/settings/security" 
+          element={
+            user.role === 'SystemAdmin' || user.role === 'FamilyAdmin' ? (
+              <SettingsSecurity />
+            ) : (
+              <Navigate to="/" replace />
+            )
+          } 
+        />
         <Route 
           path="/packing-lists" 
           element={<PackingListPage />} 
@@ -143,8 +178,12 @@ export default function AppRoutes(): React.ReactElement {
             path="/templates" 
             element={<TemplateManagerPage />} 
           />
+        <Route 
+          path="/prototypes" 
+          element={<NavigationPrototypes />} 
+        />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
-    </Layout>
+    </SplitRailLayout>
   );
 }
