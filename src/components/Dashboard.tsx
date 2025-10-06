@@ -1,7 +1,5 @@
-import React, { useState } from 'react';
-import { Title, Text, Container, Card, Group, Button } from '@mantine/core';
-import { IconSettings } from '@tabler/icons-react';
-import FamilySetupWizard from './FamilySetupWizard';
+import React from 'react';
+import { Title, Text, Container, Card, Group } from '@mantine/core';
 
 interface User {
   username?: string;
@@ -14,21 +12,15 @@ interface DashboardProps {
 }
 
 export default function Dashboard({ user }: DashboardProps): React.ReactElement {
-  const [showSetupWizard, setShowSetupWizard] = useState(false);
+  // Family setup wizard removed: families are created via System Administration
+  
 
   return (
     <Container size="lg">
+      {/* Global impersonation banner is displayed in Layout; no local banner needed here */}
       <Group justify="space-between" mb="xl">
         <Title order={1}>Dashboard</Title>
-        {user.role === 'SystemAdmin' && (
-          <Button 
-            leftSection={<IconSettings size={16} />}
-            variant="light"
-            onClick={() => setShowSetupWizard(true)}
-          >
-            Manage My Family
-          </Button>
-        )}
+        {/* System Administration button removed per request */}
       </Group>
       
       <Card shadow="sm" padding="lg" radius="md" withBorder>
@@ -59,26 +51,23 @@ export default function Dashboard({ user }: DashboardProps): React.ReactElement 
             </Text>
           )}
           <Text size="sm" c="dimmed" mb="xs">
-            • Categories & Items (Coming Soon) - Organize your packing items
+            • Manage Categories - Organize your packing categories
           </Text>
           <Text size="sm" c="dimmed" mb="xs">
-            • Templates (Coming Soon) - Create reusable packing lists
+            • Manage Items - Create and organize packing items
+          </Text>
+          <Text size="sm" c="dimmed" mb="xs">
+            • Manage Templates - Create reusable packing lists
           </Text>
           <Text size="sm" c="dimmed">
-            • Packing Lists (Coming Soon) - Plan your trips
+            • Packing Lists - Plan your trips
           </Text>
         </div>
       </Card>
 
-      <FamilySetupWizard
-        opened={showSetupWizard}
-        onClose={() => setShowSetupWizard(false)}
-        onComplete={(familyData) => {
-          console.log('Family created:', familyData);
-          setShowSetupWizard(false);
-        }}
-        userRole={user.role || ''}
-      />
+      {/* FamilySetupWizard removed. Family creation is handled via System Administration. */}
+
+      {/* Impersonation handled by global banner in Layout; dashboard focuses on core content */}
     </Container>
   );
 }

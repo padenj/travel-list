@@ -11,6 +11,7 @@ import Layout from './components/Layout';
 import PackingListPage from './components/PackingListPage';
 import CategoryManagementPage from './components/CategoryManagementPage';
 import ItemManagementPage from './components/ItemManagementPage';
+import TemplateManagerPage from './components/TemplateManagerPage';
 
 interface User {
   username?: string;
@@ -138,6 +139,10 @@ export default function AppRoutes(): React.ReactElement {
           path="/items" 
           element={<ItemManagementPage />} 
         />
+          <Route 
+            path="/templates" 
+            element={<TemplateManagerPage />} 
+          />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Layout>

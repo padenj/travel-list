@@ -2,7 +2,10 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
-    environment: 'node',
+    // Use jsdom so frontend component tests (testing-library) can render DOM.
+    // Server-side tests still work under jsdom in this project; if any
+    // node-specific test fails we can selectively configure per-suite.
+    environment: 'jsdom',
     globals: true,
     setupFiles: ['./tests/setup.ts'],
     include: [

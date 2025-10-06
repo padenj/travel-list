@@ -1,5 +1,4 @@
-import React from 'react';
-import { Card, Title, Stack, Checkbox, Group, Divider } from '@mantine/core';
+import { Card, Title, Stack, Checkbox, Group } from '@mantine/core';
 
 export interface PackingListProps {
   userLists: { userId: string; userName: string; items: { id: string; name: string; checked: boolean }[] }[];

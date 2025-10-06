@@ -10,11 +10,11 @@ const SCHEMAS = {
   users: `
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
+      name TEXT,
       username TEXT UNIQUE,
       password_hash TEXT,
       role TEXT CHECK (role IN ('SystemAdmin', 'FamilyAdmin', 'FamilyMember')),
-      must_change_password INTEGER DEFAULT 0,
+      must_change_password INTEGER DEFAULT 1,
       email TEXT,
       familyId TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -61,6 +61,54 @@ const SCHEMAS = {
       FOREIGN KEY (item_id) REFERENCES items(id),
       FOREIGN KEY (family_id) REFERENCES families(id)
     );
+
+      CREATE TABLE IF NOT EXISTS templates (
+        id TEXT PRIMARY KEY,
+        family_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        description TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        deleted_at TEXT,
+        FOREIGN KEY (family_id) REFERENCES families(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS template_categories (
+        template_id TEXT NOT NULL,
+        category_id TEXT NOT NULL,
+        PRIMARY KEY (template_id, category_id),
+        FOREIGN KEY (template_id) REFERENCES templates(id),
+        FOREIGN KEY (category_id) REFERENCES categories(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS template_items (
+        template_id TEXT NOT NULL,
+        item_id TEXT NOT NULL,
+        PRIMARY KEY (template_id, item_id),
+        FOREIGN KEY (template_id) REFERENCES templates(id),
+        FOREIGN KEY (item_id) REFERENCES items(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS packing_lists (
+        id TEXT PRIMARY KEY,
+        family_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        deleted_at TEXT,
+        FOREIGN KEY (family_id) REFERENCES families(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS packing_list_items (
+        id TEXT PRIMARY KEY,
+        packing_list_id TEXT NOT NULL,
+        item_id TEXT NOT NULL,
+        checked INTEGER DEFAULT 0,
+        added_during_packing INTEGER DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (packing_list_id) REFERENCES packing_lists(id),
+        FOREIGN KEY (item_id) REFERENCES items(id)
+      );
   `,
   families: `
     CREATE TABLE IF NOT EXISTS families (
@@ -96,6 +144,16 @@ const SCHEMAS = {
     CREATE INDEX IF NOT EXISTS idx_item_members_item ON item_members(item_id);
     CREATE INDEX IF NOT EXISTS idx_item_members_member ON item_members(member_id);
     CREATE INDEX IF NOT EXISTS idx_item_whole_family_family ON item_whole_family(family_id);
+    CREATE INDEX IF NOT EXISTS idx_templates_family ON templates(family_id);
+    CREATE INDEX IF NOT EXISTS idx_templates_deleted ON templates(deleted_at);
+    CREATE INDEX IF NOT EXISTS idx_template_categories_template ON template_categories(template_id);
+    CREATE INDEX IF NOT EXISTS idx_template_categories_category ON template_categories(category_id);
+    CREATE INDEX IF NOT EXISTS idx_template_items_template ON template_items(template_id);
+    CREATE INDEX IF NOT EXISTS idx_template_items_item ON template_items(item_id);
+    CREATE INDEX IF NOT EXISTS idx_packing_lists_family ON packing_lists(family_id);
+    CREATE INDEX IF NOT EXISTS idx_packing_lists_deleted ON packing_lists(deleted_at);
+    CREATE INDEX IF NOT EXISTS idx_packing_list_items_packing_list ON packing_list_items(packing_list_id);
+    CREATE INDEX IF NOT EXISTS idx_packing_list_items_item ON packing_list_items(item_id);
   `
 };
 
@@ -146,7 +204,11 @@ export async function getDb(): Promise<Database> {
 
   if (!dbInstance) {
     try {
-      const isTest = process.env.NODE_ENV === 'test' || process.env.VITEST;
+  // Vitest sets a global VITEST flag; additionally respect NODE_ENV=test
+  // Use an in-memory DB for tests to avoid file-based locking and ensure clean state.
+  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+  // @ts-ignore
+  const isTest = process.env.NODE_ENV === 'test' || (typeof global !== 'undefined' && (global as any).VITEST) || process.env.VITEST;
       const filename = isTest ? ':memory:' : './travel-list.sqlite';
       
       dbInstance = await open({

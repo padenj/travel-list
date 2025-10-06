@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { Stack, TextInput, Button, Checkbox, Group, Card, Title } from '@mantine/core';
 
 export interface CategoryFormProps {

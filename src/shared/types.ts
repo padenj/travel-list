@@ -53,3 +53,23 @@ export interface ChangePasswordRequest {
   oldPassword: string;
   newPassword: string;
 }
+
+// Packing List interface
+export interface PackingList {
+  id: string;
+  family_id: string;
+  name: string;
+  created_at: string;
+  updated_at: string;
+  deleted_at?: string | null;
+}
+
+// Packing List Item interface
+export interface PackingListItem {
+  id: string;
+  packing_list_id: string;
+  item_id: string;
+  checked: boolean;
+  added_during_packing: boolean;
+  created_at: string;
+}

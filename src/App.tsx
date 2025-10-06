@@ -5,6 +5,8 @@ import { MantineProvider } from '@mantine/core';
 import { ModalsProvider } from '@mantine/modals';
 import { Notifications } from '@mantine/notifications';
 import AppRoutes from './AppRoutes';
+import { ImpersonationProvider } from './contexts/ImpersonationContext';
+import { RefreshProvider } from './contexts/RefreshContext';
 import '@mantine/core/styles.css';
 import '@mantine/notifications/styles.css';
 
@@ -23,7 +25,11 @@ function App(): React.ReactElement {
       <ModalsProvider>
         <Notifications />
         <Router>
-          <AppRoutes />
+          <RefreshProvider>
+            <ImpersonationProvider>
+              <AppRoutes />
+            </ImpersonationProvider>
+          </RefreshProvider>
         </Router>
       </ModalsProvider>
     </MantineProvider>

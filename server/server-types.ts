@@ -59,6 +59,49 @@ export interface ItemMember {
   member_id: string;
 }
 
+// Template interface
+export interface Template {
+  id: string;
+  family_id: string;
+  name: string;
+  description?: string;
+  created_at: string;
+  updated_at: string;
+  deleted_at?: string | null;
+}
+
+// Template-Category assignment
+export interface TemplateCategory {
+  template_id: string;
+  category_id: string;
+}
+
+// Template-Item assignment
+export interface TemplateItem {
+  template_id: string;
+  item_id: string;
+}
+
+// Packing List interface
+export interface PackingList {
+  id: string;
+  family_id: string;
+  name: string;
+  created_at: string;
+  updated_at: string;
+  deleted_at?: string | null;
+}
+
+// Packing List Item interface
+export interface PackingListItem {
+  id: string;
+  packing_list_id: string;
+  item_id: string;
+  checked: boolean;
+  added_during_packing: boolean;
+  created_at: string;
+}
+
 // Item assigned to whole family
 export interface ItemWholeFamily {
   item_id: string;

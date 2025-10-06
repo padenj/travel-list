@@ -63,6 +63,10 @@ export const getCategoriesForItem = async (itemId: string): Promise<ApiResponse>
   return authenticatedApiCall(`/items/${itemId}/categories`);
 };
 
+export const getItemsForCategory = async (categoryId: string): Promise<ApiResponse> => {
+  return authenticatedApiCall(`/categories/${categoryId}/items`);
+};
+
 export const getMembersForItem = async (itemId: string): Promise<ApiResponse> => {
   return authenticatedApiCall(`/items/${itemId}/members`);
 };
@@ -71,12 +75,108 @@ export const isAssignedToWholeFamily = async (itemId: string): Promise<ApiRespon
   return authenticatedApiCall(`/items/${itemId}/whole-family`);
 };
 
+export const assignToMember = async (itemId: string, memberId: string): Promise<ApiResponse> => {
+  return authenticatedApiCall(`/items/${itemId}/members/${memberId}`, {
+    method: 'POST',
+  });
+};
+
+export const removeFromMember = async (itemId: string, memberId: string): Promise<ApiResponse> => {
+  return authenticatedApiCall(`/items/${itemId}/members/${memberId}`, {
+    method: 'DELETE',
+  });
+};
+
+export const assignToWholeFamily = async (itemId: string, familyId: string): Promise<ApiResponse> => {
+  return authenticatedApiCall(`/items/${itemId}/whole-family/${familyId}`, {
+    method: 'POST',
+  });
+};
+
+export const removeFromWholeFamily = async (itemId: string): Promise<ApiResponse> => {
+  return authenticatedApiCall(`/items/${itemId}/whole-family`, {
+    method: 'DELETE',
+  });
+};
+
 export const setChecked = async (itemId: string, checked: boolean): Promise<ApiResponse> => {
   return authenticatedApiCall(`/items/${itemId}/checked`, {
     method: 'PUT',
     body: JSON.stringify({ checked }),
   });
 };
+
+  // Template APIs
+  export const createTemplate = async (familyId: string, name: string, description?: string): Promise<ApiResponse> => {
+    return authenticatedApiCall('/templates', {
+      method: 'POST',
+      body: JSON.stringify({ family_id: familyId, name, description }),
+    });
+  };
+
+  export const getTemplates = async (familyId: string): Promise<ApiResponse> => {
+    return authenticatedApiCall(`/templates/${familyId}`);
+  };
+
+  export const getTemplate = async (id: string): Promise<ApiResponse> => {
+    return authenticatedApiCall(`/template/${id}`);
+  };
+
+  export const updateTemplate = async (id: string, updates: any): Promise<ApiResponse> => {
+    return authenticatedApiCall(`/template/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(updates),
+    });
+  };
+
+  export const deleteTemplate = async (id: string): Promise<ApiResponse> => {
+    return authenticatedApiCall(`/template/${id}`, {
+      method: 'DELETE',
+    });
+  };
+
+  export const assignCategoryToTemplate = async (templateId: string, categoryId: string): Promise<ApiResponse> => {
+    return authenticatedApiCall(`/template/${templateId}/categories/${categoryId}`, {
+      method: 'POST',
+    });
+  };
+
+  export const removeCategoryFromTemplate = async (templateId: string, categoryId: string): Promise<ApiResponse> => {
+    return authenticatedApiCall(`/template/${templateId}/categories/${categoryId}`, {
+      method: 'DELETE',
+    });
+  };
+
+  export const assignItemToTemplate = async (templateId: string, itemId: string): Promise<ApiResponse> => {
+    return authenticatedApiCall(`/template/${templateId}/items/${itemId}`, {
+      method: 'POST',
+    });
+  };
+
+  export const removeItemFromTemplate = async (templateId: string, itemId: string): Promise<ApiResponse> => {
+    return authenticatedApiCall(`/template/${templateId}/items/${itemId}`, {
+      method: 'DELETE',
+    });
+  };
+
+  export const getExpandedItemsForTemplate = async (templateId: string): Promise<ApiResponse> => {
+    return authenticatedApiCall(`/template/${templateId}/expanded-items`);
+  };
+
+  export const getCategoriesForTemplate = async (templateId: string): Promise<ApiResponse> => {
+    return authenticatedApiCall(`/template/${templateId}/categories`);
+  };
+
+  export const getItemsForTemplate = async (templateId: string): Promise<ApiResponse> => {
+    return authenticatedApiCall(`/template/${templateId}/items`);
+  };
+
+  export const syncTemplateItems = async (templateId: string, itemIds: string[]): Promise<ApiResponse> => {
+    return authenticatedApiCall(`/template/${templateId}/sync-items`, {
+      method: 'POST',
+      body: JSON.stringify({ itemIds }),
+    });
+  };
 // Family member management APIs
 export const createFamilyMember = async (familyId: string, memberData: {
   name: string;
@@ -298,6 +398,10 @@ export const deleteUser = async (userId: string): Promise<ApiResponse> => {
 // Family management APIs
 export const getFamilies = async (): Promise<ApiResponse> => {
   return authenticatedApiCall('/families');
+};
+
+export const getFamily = async (familyId: string): Promise<ApiResponse> => {
+  return authenticatedApiCall(`/families/${familyId}`);
 };
 
 export const createFamily = async (familyData: { name: string }): Promise<ApiResponse> => {

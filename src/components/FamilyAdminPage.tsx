@@ -17,7 +17,8 @@ import {
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
 import { IconTrash, IconPlus } from '@tabler/icons-react';
-import { getCurrentUserProfile, createFamilyMember, deleteUser } from '../api';
+import { getCurrentUserProfile, createFamilyMember, deleteUser, getFamily } from '../api';
+import { useImpersonation } from '../contexts/ImpersonationContext';
 
 interface User {
   id: string;
@@ -35,6 +36,7 @@ export default function FamilyAdminPage(): React.ReactElement {
   const [family, setFamily] = useState<any>(null);
   const [members, setMembers] = useState<User[]>([]);
   const [showMemberModal, setShowMemberModal] = useState(false);
+  const { impersonatingFamilyId } = useImpersonation();
 
   const memberForm = useForm({
     initialValues: {
@@ -65,13 +67,25 @@ export default function FamilyAdminPage(): React.ReactElement {
   const loadFamily = async () => {
     setLoading(true);
     try {
-      const response = await getCurrentUserProfile();
-      if (response.response.ok && response.data.family) {
-        setFamily(response.data.family);
-        setMembers(response.data.family.members || []);
+      // If impersonation is active and user is a SystemAdmin, load the impersonated family
+      if (impersonatingFamilyId) {
+        const famRes = await getFamily(impersonatingFamilyId);
+        if (famRes.response.ok && famRes.data.family) {
+          setFamily(famRes.data.family);
+          setMembers(famRes.data.family.members || []);
+        } else {
+          setFamily(null);
+          setMembers([]);
+        }
       } else {
-        setFamily(null);
-        setMembers([]);
+        const response = await getCurrentUserProfile();
+        if (response.response.ok && response.data.family) {
+          setFamily(response.data.family);
+          setMembers(response.data.family.members || []);
+        } else {
+          setFamily(null);
+          setMembers([]);
+        }
       }
     } catch (error) {
       notifications.show({ title: 'Error', message: 'Failed to load family', color: 'red' });

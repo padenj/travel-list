@@ -19,6 +19,8 @@ import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
 import { IconTrash, IconPlus, IconAlertCircle } from '@tabler/icons-react';
 import { getFamilies, getUsers, createFamily, createUser, deleteFamily, deleteUser, createFamilyMember, editFamilyMember, resetFamilyMemberPassword } from '../api';
+import { useNavigate } from 'react-router-dom';
+import { useImpersonation } from '../contexts/ImpersonationContext';
 
 interface User {
   id: string;
@@ -39,6 +41,9 @@ interface Family {
 export default function SystemAdminPage(): React.ReactElement {
   const [families, setFamilies] = useState<Family[]>([]);
   const [users, setUsers] = useState<User[]>([]);
+  const [creatingFamily, setCreatingFamily] = useState(false);
+    // Removed unused familyTemplates state declaration
+    // const [familyTemplates, setFamilyTemplates] = useState<Record<string, any[]>>({});
   const [loading, setLoading] = useState(true);
   const [showFamilyModal, setShowFamilyModal] = useState(false);
   const [showUserModal, setShowUserModal] = useState(false);
@@ -249,8 +254,12 @@ export default function SystemAdminPage(): React.ReactElement {
     loadData();
   }, []);
 
+  const { startImpersonation } = useImpersonation();
+  const navigate = useNavigate();
+
   const handleCreateFamily = async (values: { name: string }) => {
     try {
+      setCreatingFamily(true);
       const response = await createFamily(values);
       if (response.response.ok) {
         notifications.show({
@@ -260,7 +269,14 @@ export default function SystemAdminPage(): React.ReactElement {
         });
         setShowFamilyModal(false);
         familyForm.reset();
-        loadData();
+        // Only reload families (faster) — users can be fetched later when needed
+        try {
+          const familiesRes = await getFamilies();
+          if (familiesRes.response.ok) setFamilies(familiesRes.data.families || []);
+        } catch (err) {
+          // fallback to full load if needed
+          loadData();
+        }
       } else {
         notifications.show({
           title: 'Error',
@@ -274,6 +290,8 @@ export default function SystemAdminPage(): React.ReactElement {
         message: 'Network error',
         color: 'red',
       });
+    } finally {
+      setCreatingFamily(false);
     }
   };
 
@@ -418,6 +436,9 @@ export default function SystemAdminPage(): React.ReactElement {
                     <Button size="xs" variant="light" onClick={() => handleAddMember(family.id)}>
                       Add Family Member
                     </Button>
+                    <Button size="xs" variant="light" onClick={() => { startImpersonation(family.id); navigate('/'); }}>
+                      View Family
+                    </Button>
                     <ActionIcon 
                       color="red" 
                       variant="light"
@@ -476,6 +497,7 @@ export default function SystemAdminPage(): React.ReactElement {
                     </Table.Tbody>
                   </Table>
                 )}
+                {/* seeded templates display removed per request */}
               </Card>
             );
           })
@@ -545,7 +567,7 @@ export default function SystemAdminPage(): React.ReactElement {
               <Button variant="light" onClick={() => setShowFamilyModal(false)}>
                 Cancel
               </Button>
-              <Button type="submit">Create Family</Button>
+              <Button type="submit" loading={creatingFamily}>{creatingFamily ? 'Creating...' : 'Create Family'}</Button>
             </Group>
           </Stack>
         </form>

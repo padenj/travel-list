@@ -5,7 +5,7 @@
 import express, { Request, Response, Router } from 'express';
 import { logAudit } from './audit';
 import { validatePassword, hashPassword, comparePassword, hashPasswordSync, comparePasswordSync, generateToken } from './auth';
-import { authMiddleware } from './middleware';
+import { authMiddleware, familyAccessMiddleware } from './middleware';
 import { UserRepository, FamilyRepository, CategoryRepository, ItemRepository } from './repositories';
 import { ERROR_CODES, USER_ROLES, HTTP_STATUS } from './constants';
 import { User, LoginRequest, ChangePasswordRequest } from './server-types';
@@ -25,6 +25,253 @@ const userRepo = new UserRepository();
 const familyRepo = new FamilyRepository();
 const categoryRepo = new CategoryRepository();
 const itemRepo = new ItemRepository();
+
+import { TemplateRepository } from './repositories';
+import { seedTemplatesForFamily } from './seed-templates';
+const templateRepo = new TemplateRepository();
+
+// Note: family access enforcement is handled by familyAccessMiddleware in middleware.ts
+
+// Template CRUD
+router.post('/templates', authMiddleware, async (req: Request, res: Response) => {
+  const { family_id, name, description } = req.body;
+  if (!family_id || !name || name.trim() === '') {
+    return res.status(400).json({ error: 'Family ID and template name are required' });
+  }
+  try {
+    // Only SystemAdmin or FamilyAdmin for the target family may create templates
+    if (req.user?.role !== 'SystemAdmin') {
+      // if not system admin, ensure user is FamilyAdmin of the family_id
+      const user = req.user;
+      if (!user || user.familyId !== family_id || user.role !== 'FamilyAdmin') {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+    }
+    const template = await templateRepo.create({
+      id: uuidv4(),
+      family_id,
+      name: name.trim(),
+      description: description || '',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+    return res.json({ template });
+  } catch (error) {
+    console.error('Error creating template:', error);
+    return res.status(500).json({ error: 'Failed to create template' });
+  }
+});
+
+router.get('/templates/:familyId', authMiddleware, familyAccessMiddleware('familyId'), async (req: Request, res: Response) => {
+  const { familyId } = req.params;
+  try {
+    const templates = await templateRepo.findAll(familyId);
+    return res.json({ templates });
+  } catch (error) {
+    console.error('Error fetching templates:', error);
+    return res.status(500).json({ error: 'Failed to fetch templates' });
+  }
+});
+
+router.get('/template/:id', authMiddleware, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  try {
+    const template = await templateRepo.findById(id);
+    if (!template) return res.status(404).json({ error: 'Template not found' });
+    return res.json({ template });
+  } catch (error) {
+    console.error('Error fetching template:', error);
+    return res.status(500).json({ error: 'Failed to fetch template' });
+  }
+});
+
+router.put('/template/:id', authMiddleware, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const updates = req.body;
+  try {
+    const existing = await templateRepo.findById(id);
+    if (!existing) return res.status(404).json({ error: 'Template not found' });
+    // Only SystemAdmin or FamilyAdmin for the template's family may update
+    if (req.user?.role !== 'SystemAdmin') {
+      if (req.user?.familyId !== existing.family_id || req.user.role !== 'FamilyAdmin') {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+    }
+    const updated = await templateRepo.update(id, updates);
+    return res.json({ template: updated });
+  } catch (error) {
+    console.error('Error updating template:', error);
+    return res.status(500).json({ error: 'Failed to update template' });
+  }
+});
+
+router.delete('/template/:id', authMiddleware, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  try {
+    const existing = await templateRepo.findById(id);
+    if (!existing) return res.status(404).json({ error: 'Template not found' });
+    if (req.user?.role !== 'SystemAdmin') {
+      if (req.user?.familyId !== existing.family_id || req.user.role !== 'FamilyAdmin') {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+    }
+    await templateRepo.softDelete(id);
+    return res.json({ message: 'Template deleted' });
+  } catch (error) {
+    console.error('Error deleting template:', error);
+    return res.status(500).json({ error: 'Failed to delete template' });
+  }
+});
+
+// Assign/remove categories/items to template
+router.post('/template/:id/categories/:categoryId', authMiddleware, async (req: Request, res: Response) => {
+  const { id, categoryId } = req.params;
+  try {
+    const existing = await templateRepo.findById(id);
+    if (!existing) return res.status(404).json({ error: 'Template not found' });
+    if (req.user?.role !== 'SystemAdmin') {
+      if (req.user?.familyId !== existing.family_id || req.user.role !== 'FamilyAdmin') {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+    }
+    await templateRepo.assignCategory(id, categoryId);
+    return res.json({ message: 'Category assigned to template' });
+  } catch (error) {
+    console.error('Error assigning category:', error);
+    return res.status(500).json({ error: 'Failed to assign category' });
+  }
+});
+
+router.delete('/template/:id/categories/:categoryId', authMiddleware, async (req: Request, res: Response) => {
+  const { id, categoryId } = req.params;
+  try {
+    const existing = await templateRepo.findById(id);
+    if (!existing) return res.status(404).json({ error: 'Template not found' });
+    if (req.user?.role !== 'SystemAdmin') {
+      if (req.user?.familyId !== existing.family_id || req.user.role !== 'FamilyAdmin') {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+    }
+    await templateRepo.removeCategory(id, categoryId);
+    return res.json({ message: 'Category removed from template' });
+  } catch (error) {
+    console.error('Error removing category:', error);
+    return res.status(500).json({ error: 'Failed to remove category' });
+  }
+});
+
+router.post('/template/:id/items/:itemId', authMiddleware, async (req: Request, res: Response) => {
+  const { id, itemId } = req.params;
+  try {
+    const existing = await templateRepo.findById(id);
+    if (!existing) return res.status(404).json({ error: 'Template not found' });
+    if (req.user?.role !== 'SystemAdmin') {
+      if (req.user?.familyId !== existing.family_id || req.user.role !== 'FamilyAdmin') {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+    }
+    await templateRepo.assignItem(id, itemId);
+    return res.json({ message: 'Item assigned to template' });
+  } catch (error) {
+    console.error('Error assigning item:', error);
+    return res.status(500).json({ error: 'Failed to assign item' });
+  }
+});
+
+router.delete('/template/:id/items/:itemId', authMiddleware, async (req: Request, res: Response) => {
+  const { id, itemId } = req.params;
+  try {
+    const existing = await templateRepo.findById(id);
+    if (!existing) return res.status(404).json({ error: 'Template not found' });
+    if (req.user?.role !== 'SystemAdmin') {
+      if (req.user?.familyId !== existing.family_id || req.user.role !== 'FamilyAdmin') {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+    }
+    await templateRepo.removeItem(id, itemId);
+    return res.json({ message: 'Item removed from template' });
+  } catch (error) {
+    console.error('Error removing item:', error);
+    return res.status(500).json({ error: 'Failed to remove item' });
+  }
+});
+
+// Sync template items with a provided list of item IDs.
+// Body: { itemIds: string[] }
+router.post('/template/:id/sync-items', authMiddleware, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { itemIds } = req.body as { itemIds?: string[] };
+  if (!Array.isArray(itemIds)) {
+    return res.status(400).json({ error: 'itemIds array is required' });
+  }
+  try {
+    const existing = await templateRepo.findById(id);
+    if (!existing) return res.status(404).json({ error: 'Template not found' });
+    // Permission check: SystemAdmin or FamilyAdmin for the template's family
+    if (req.user?.role !== 'SystemAdmin') {
+      if (req.user?.familyId !== existing.family_id || req.user.role !== 'FamilyAdmin') {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+    }
+
+    // Get current item assignments
+    const currentRows = await templateRepo.getItems(id);
+    const currentIds = currentRows.map((r: any) => r.item_id);
+
+    // Determine adds and removes
+    const toAdd = itemIds.filter(i => !currentIds.includes(i));
+    const toRemove = currentIds.filter(i => !itemIds.includes(i));
+
+    for (const itemId of toAdd) {
+      await templateRepo.assignItem(id, itemId);
+    }
+    for (const itemId of toRemove) {
+      await templateRepo.removeItem(id, itemId);
+    }
+
+    const updatedItems = await templateRepo.getItemsForTemplate(id);
+    return res.json({ templateId: id, items: updatedItems });
+  } catch (error) {
+    console.error('Error syncing template items:', error);
+    return res.status(500).json({ error: 'Failed to sync template items' });
+  }
+});
+
+// Get categories assigned to a template
+router.get('/template/:id/categories', authMiddleware, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  try {
+    const categories = await templateRepo.getCategoriesForTemplate(id);
+    return res.json({ categories });
+  } catch (error) {
+    console.error('Error fetching template categories:', error);
+    return res.status(500).json({ error: 'Failed to fetch template categories' });
+  }
+});
+
+// Get items assigned to a template
+router.get('/template/:id/items', authMiddleware, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  try {
+    const items = await templateRepo.getItemsForTemplate(id);
+    return res.json({ items });
+  } catch (error) {
+    console.error('Error fetching template items:', error);
+    return res.status(500).json({ error: 'Failed to fetch template items' });
+  }
+});
+
+// Get expanded items for a template (categories + items)
+router.get('/template/:id/expanded-items', authMiddleware, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  try {
+    const items = await templateRepo.getExpandedItems(id);
+    return res.json({ items });
+  } catch (error) {
+    console.error('Error fetching expanded items:', error);
+    return res.status(500).json({ error: 'Failed to fetch expanded items' });
+  }
+});
 
 // Get categories for an item
 router.get('/items/:itemId/categories', authMiddleware, async (req: Request, res: Response) => {
@@ -71,7 +318,7 @@ router.post('/categories', authMiddleware, async (req: Request, res: Response) =
   }
 });
 
-router.get('/categories/:familyId', authMiddleware, async (req: Request, res: Response) => {
+router.get('/categories/:familyId', authMiddleware, familyAccessMiddleware('familyId'), async (req: Request, res: Response) => {
   const { familyId } = req.params;
   try {
     const categories = await categoryRepo.findAll(familyId);
@@ -79,6 +326,18 @@ router.get('/categories/:familyId', authMiddleware, async (req: Request, res: Re
   } catch (error) {
     console.error('Error fetching categories:', error);
     return res.status(500).json({ error: 'Failed to fetch categories' });
+  }
+});
+
+// Get items for a specific category
+router.get('/categories/:categoryId/items', authMiddleware, async (req: Request, res: Response) => {
+  const { categoryId } = req.params;
+  try {
+    const items = await itemRepo.getItemsForCategory(categoryId);
+    return res.json({ items });
+  } catch (error) {
+    console.error('Error fetching category items:', error);
+    return res.status(500).json({ error: 'Failed to fetch category items' });
   }
 });
 
@@ -129,7 +388,7 @@ router.post('/items', authMiddleware, async (req: Request, res: Response) => {
   }
 });
 
-router.get('/items/:familyId', authMiddleware, async (req: Request, res: Response) => {
+router.get('/items/:familyId', authMiddleware, familyAccessMiddleware('familyId'), async (req: Request, res: Response) => {
   const { familyId } = req.params;
   try {
     const items = await itemRepo.findAll(familyId);
@@ -211,7 +470,7 @@ router.delete('/items/:itemId/members/:memberId', authMiddleware, async (req: Re
   }
 });
 
-router.post('/items/:itemId/whole-family/:familyId', authMiddleware, async (req: Request, res: Response) => {
+router.post('/items/:itemId/whole-family/:familyId', authMiddleware, familyAccessMiddleware('familyId'), async (req: Request, res: Response) => {
   const { itemId, familyId } = req.params;
   try {
     await itemRepo.assignToWholeFamily(itemId, familyId);
@@ -271,7 +530,27 @@ export async function ensureDefaultAdmin() {
     }
   }
 }
-ensureDefaultAdmin();
+// Delay ensuring the default admin until the next event loop turn to avoid
+// races with test-time DB initialization when this module is imported.
+// Delay ensuring the default admin until the next event loop turn to avoid
+// races with test-time DB initialization when this module is imported.
+// However, when running tests (vitest or NODE_ENV=test) avoid touching the DB
+// during import altogether — tests initialize the DB explicitly.
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore
+const isTestEnv = process.env.NODE_ENV === 'test' || (typeof global !== 'undefined' && (global as any).VITEST) || process.env.VITEST;
+if (!isTestEnv) {
+  setImmediate(() => {
+    ensureDefaultAdmin().catch(err => {
+      // Log but don't crash module import
+      console.error('ensureDefaultAdmin failed:', err);
+    });
+  });
+} else {
+  // In test environment, do not auto-create admin here to avoid races.
+  // Tests that need a default admin should call ensureDefaultAdmin() explicitly
+  // after the test DB has been initialized.
+}
 
 // Login endpoint
 router.post('/login', async (req: Request, res: Response): Promise<Response> => {
@@ -556,45 +835,35 @@ router.get('/families', authMiddleware, async (req: Request, res: Response): Pro
   return res.json({ families });
 });
 
+// Get family by id
+router.get('/families/:id', authMiddleware, familyAccessMiddleware('id'), async (req: Request, res: Response): Promise<Response> => {
+  const { id } = req.params;
+  try {
+    const family = await familyRepo.findById(id);
+    if (!family) return res.status(404).json({ error: 'Family not found' });
+    // Include members for convenience (users in this family)
+    const allUsers = await userRepo.findAll();
+    const members = allUsers.filter(u => u.familyId === id && !u.deleted_at).map(({ password_hash, ...rest }) => rest);
+    return res.json({ family: { ...family, members } });
+  } catch (error) {
+    console.error('Error fetching family:', error);
+    return res.status(500).json({ error: 'Failed to fetch family' });
+  }
+});
+
 // Add family (SystemAdmin only)
 router.post('/families', authMiddleware, async (req: Request, res: Response): Promise<Response> => {
   if (req.user?.role !== 'SystemAdmin') {
     return res.status(403).json({ error: 'Forbidden' });
   }
-  
-  // Debug logging for troubleshooting request body issues
-  console.log('🔎 Incoming POST /api/families');
-  console.log('Headers:', req.headers);
-  console.log('Body:', req.body);
-
   const { name } = req.body;
 
   if (!name || name.trim() === '') {
-    console.log('⚠️ Family name missing or empty in request body');
     return res.status(400).json({ error: 'Family name is required' });
   }
 
   try {
-    // Check if the current user is already assigned to a family
-    const currentUser = await userRepo.findById(req.user.id);
-    if (!currentUser) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-
-    if (currentUser.familyId) {
-      // User is already in a family - update that family's name instead
-      const existingFamily = await familyRepo.findById(currentUser.familyId);
-      if (existingFamily) {
-        const updatedFamily = await familyRepo.update(currentUser.familyId, {
-          name: name.trim(),
-          updated_at: new Date().toISOString()
-        });
-        console.log('✅ Family updated:', updatedFamily);
-        return res.json({ family: updatedFamily, updated: true });
-      }
-    }
-
-    // Create new family
+    // Create new family record (do not assign any users/members)
     const familyId = uuidv4();
     const family = await familyRepo.create({
       id: familyId,
@@ -603,14 +872,17 @@ router.post('/families', authMiddleware, async (req: Request, res: Response): Pr
       updated_at: new Date().toISOString()
     });
 
-    // Assign the current user to the new family
-    await userRepo.update(req.user.id, {
-      familyId: familyId,
-      updated_at: new Date().toISOString()
-    });
+    // Seed example templates synchronously for the newly-created family
+    try {
+      await seedTemplatesForFamily(familyId);
+    } catch (err) {
+      console.error('Error seeding templates for new family:', err);
+      // proceed even if seeding fails
+    }
 
-    console.log('✅ Family created and user assigned:', family);
-    return res.json({ family, created: true });
+    // Return created family and seeded templates for convenience
+    const templates = await templateRepo.findAll(familyId);
+    return res.json({ family, templates, created: true });
   } catch (error) {
     console.error('Error creating family:', error);
     return res.status(500).json({ error: 'Failed to create family' });

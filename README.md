@@ -216,3 +216,14 @@ See `TEST_REPORT.md` for detailed test documentation.
 - SQLite offers excellent performance for development and small deployments
 - Express middleware optimized for development and production
 - Comprehensive test suite ensures code quality and reliability
+
+## Seeding & Example Templates
+
+- Example templates, categories, and default items are created automatically when a new family is created through the `POST /api/families` endpoint. There is no separate CLI seed-runner.
+
+- Files:
+  - `server/seeds/example-templates.json` — JSON definition of categories, items, and templates used by the seeder logic.
+
+- Notes:
+  - Seeding is idempotent per family: if the target family already has templates the seeder will skip creating them.
+  - The test suite runs the seeding logic against an in-memory DB to validate behavior (Vitest sets `process.env.VITEST`).

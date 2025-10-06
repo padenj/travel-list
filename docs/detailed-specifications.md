@@ -76,10 +76,11 @@
   - Entire categories (dynamic - includes all current items in category)
   - Individual items (static - specific items only)
   - Mix of both approaches
-- **Dynamic Updates**: When items are added to categories, category-based templates automatically include them
+- **No Direct Assignments**: Templates reference categories or individual items only; they do not specify item assignments (to members or whole family)
+- **Dynamic Updates**: When items are added to categories, category-based templates automatically include them (for future packing lists)
 
 ### Template Usage
-- **Base for Packing Lists**: Templates generate initial packing lists
+- **Base for Packing Lists**: Templates generate initial packing lists by including all items from referenced categories/individual items, along with each item's predefined assignments (to specific members or whole family)
 - **Customization During Packing**: Users can add/remove items while packing
 - **Template Update Option**: Changes made during packing can optionally update the original template
 
@@ -87,16 +88,18 @@
 
 ### List Creation
 1. **Template Selection**: Choose existing template or start blank
-2. **Trip Information**: Enter trip name and basic details
-3. **Member Assignment**: Assign list items to specific family members
-4. **Initial Generation**: System creates packing list with all template items
+2. **Trip Information**: Enter packing list name (no start/end dates required; creation date tracked automatically)
+3. **Item Population**: All items from template's categories/individual items are added, with each item's predefined assignments (to specific members or whole family)
+4. **Initial Generation**: System creates packing list with all template items and their assignments
 
 ### Packing Process
-- **Item Status**: Mark items as packed/unpacked
+- **Item Status**: Mark items as packed/unpacked (checked status maintained per packing list)
 - **Add Items**: Add new items during packing process
 - **Remove Items**: Remove unneeded items from list
-- **Member Sections**: Separate views for each family member's items
-- **Whole Family Section**: Shared items visible to all members
+- **Member Sections**: Separate views for each family member's items, organized by category
+- **Whole Family Section**: Shared items visible to all members, organized by category
+- **Dynamic Item Updates**: Changes to item names, assignments, or removals in item manager are reflected in packing lists
+- **New Item Prompts**: If new items are added to referenced categories, track and prompt user to optionally add them to the packing list
 
 ### Template Feedback
 - **Update Prompt**: When packing list is modified, offer to update source template

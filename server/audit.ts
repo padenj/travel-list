@@ -13,11 +13,6 @@ export async function logAudit({ userId, username, action, details }: AuditLogEn
   await db.run(
     `INSERT INTO audit_log (id, user_id, username, action, details, timestamp)
      VALUES (?, ?, ?, ?, ?, ?)`,
-    uuidv4(),
-    userId,
-    username,
-    action,
-    details || '',
-    new Date().toISOString()
+    [uuidv4(), userId, username, action, details || '', new Date().toISOString()]
   );
 }

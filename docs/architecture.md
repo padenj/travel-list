@@ -44,15 +44,15 @@ This application is a Progressive Web App (PWA) for managing travel packing chec
 - **categories**: Packing item categories (per family)
 - **items**: Individual packing items (per family)
 - **templates**: Saved packing list templates
-- **packing_lists**: Active trip packing lists
+- **packing_lists**: Active trip packing lists (name, creation date, family-scoped)
 - **audit_log**: Security and change tracking
 
 ### Relationship Tables
 - **item_categories**: Many-to-many items ↔ categories
-- **item_members**: Many-to-many items ↔ family members
+- **item_members**: Many-to-many items ↔ family members (assignments to specific members or whole family)
 - **template_categories**: Template composition via categories
 - **template_items**: Template composition via individual items
-- **packing_list_items**: Packing list contents with check status
+- **packing_list_items**: Packing list contents with check status (per-item checked state, added_during_packing flag)
 
 ### Technical Features
 - **Primary Keys**: UUID strings for all entities

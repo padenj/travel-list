@@ -28,3 +28,14 @@ const localStorageMock = (() => {
 Object.defineProperty(global, 'localStorage', {
   value: localStorageMock
 });
+
+// Provide a minimal navigator.clipboard mock for testing-library/user-event
+if (typeof (global as any).navigator === 'undefined') {
+  (global as any).navigator = {};
+}
+if (typeof (global as any).navigator.clipboard === 'undefined') {
+  (global as any).navigator.clipboard = {
+    writeText: async (_text: string) => {},
+    readText: async () => ''
+  };
+}

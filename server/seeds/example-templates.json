@@ -1,0 +1,45 @@
+{
+  "familyName": "Example Family (seed)",
+  "categories": [
+    "Clothing",
+    "Toiletries",
+    "Electronics",
+    "Documents",
+    "Baby",
+    "Outdoor"
+  ],
+  "items": [
+    { "name": "T-Shirts", "categories": ["Clothing"] },
+    { "name": "Underwear", "categories": ["Clothing"] },
+    { "name": "Socks", "categories": ["Clothing"] },
+    { "name": "Toothbrush", "categories": ["Toiletries"] },
+    { "name": "Toothpaste", "categories": ["Toiletries"] },
+    { "name": "Phone Charger", "categories": ["Electronics"] },
+    { "name": "Laptop", "categories": ["Electronics"] },
+    { "name": "Passport", "categories": ["Documents"] },
+    { "name": "Travel Insurance Card", "categories": ["Documents"] },
+    { "name": "Diapers", "categories": ["Baby"] },
+    { "name": "Baby Wipes", "categories": ["Baby"] },
+    { "name": "Hiking Boots", "categories": ["Outdoor"] }
+  ],
+  "templates": [
+    {
+      "name": "Weekend Trip",
+      "description": "Minimal packing for a short weekend getaway.",
+      "categories": ["Clothing", "Toiletries"],
+      "items": ["Phone Charger", "Passport"]
+    },
+    {
+      "name": "Business Trip",
+      "description": "Packing list for a short business trip.",
+      "categories": ["Clothing", "Electronics", "Documents"],
+      "items": ["Laptop", "Phone Charger", "Passport"]
+    },
+    {
+      "name": "Family Picnic",
+      "description": "Items for an outdoor family outing.",
+      "categories": ["Outdoor", "Baby"],
+      "items": ["Diapers", "Baby Wipes"]
+    }
+  ]
+}
