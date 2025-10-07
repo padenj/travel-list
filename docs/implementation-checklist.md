@@ -185,13 +185,67 @@ These recommendations align testing effort with risk: most logic coverage via un
 - Full E2E browser testing (lightweight component tests implemented)
 
 ## Milestone 5: Packing List Functionality
-- [ ] Backend: CRUD for packing lists with item references (not copies)
-- [ ] Backend: Check/uncheck items, track items added during packing
-- [ ] Backend: Option to update original template when items added/removed
+## Milestone 5: Packing List Functionality
+- [x] Backend: CRUD for packing lists with item references (not copies)
+- [x] Backend: Check/uncheck items, track items added during packing
+- [x] Backend: Option to update original template when items added/removed
 - [ ] Frontend: UI for trip creation from templates
-- [ ] Frontend: Separate packing lists per family member + whole family items
+- [x] Frontend: Separate packing lists per family member + whole family items
 - [ ] Frontend: Add/remove items during packing with template update option
 - [ ] Support saving lists as new/updated templates
+
+Frontend progress (implemented):
+- [x] Frontend: Active packing list selector and Create New List modal
+- [x] Frontend: Toggle per-user checks against active packing list API
+- [x] Frontend: Template sync UI already implemented (earlier)
+
+The backend packing-list work has been implemented (DB, routes, repository methods, and tests). The frontend work remains.
+
+- [x] Backend: CRUD for packing lists with item references (not copies)
+- [x] Backend: Check/uncheck items, track items added during packing
+- [x] Backend: Option to update original template when items added/removed
+- [x] Tests: Unit and integration tests for packing lists and related behavior
+
+Detailed Milestone 5 Tasks (Packing lists — create, update, manage)
+
+Backend
+- [ ] DB: Add/validate `packing_lists` and `packing_list_items` tables (items referenced by id, store added_during_packing, not_needed flag, created_at)
+- [ ] DB: Ensure `packing_list_items` does not copy item names; changes to master `items` (name, assignments, categories) must be reflected automatically in lists that reference the item
+- [ ] API: Implement routes and controllers
+	- [x] GET /api/families/:familyId/packing-lists — list packing lists (filter, sort)
+	- [x] POST /api/families/:familyId/packing-lists — create (accept templateId optional, name, initial items override)
+	- [x] GET /api/packing-lists/:listId — fetch list details and items (include item refs + assignments + per-user checked state)
+	- [x] POST /api/packing-lists/:listId/populate-from-template — populate an existing list from a template (reference items)
+	- [ ] POST /api/packing-lists/:listId/items — add one-off or referenced items to list (support add-only to list, and optional promoteToMaster/template)
+	- [x] PATCH /api/packing-list-items/:itemId — toggle checked by user, set not_needed, reassign users
+	- [x] PATCH /api/families/:familyId/active-packing-list — set family active list (single active list per family)
+	- [ ] GET /api/packing-lists/:listId/items?memberId=... — fetch items scoped for a member's column
+- [ ] Business rules: support multi-assignment per item; on item master update, propagate name/assignment/category updates to any packing list rows that reference the master item (do not change added_during_packing items)
+- [ ] Sorting/filtering support on server side: sort by create_date (default) or name (asc/desc); filter by name (case-insensitive, debounced client-side)
+- [ ] Tests: Unit and integration tests for all endpoints and database behavior (including propagation of master item changes, not_needed semantics, per-user checked state)
+
+Frontend
+- [ ] Packing Lists page
+	- [ ] List view of packing lists for family with filter box (debounced, case-insensitive) and sort controls (create date default, name)
+	- [ ] Create New List modal: choose template (optional) to populate items (referenced), show single editable list of items with assignees displayed ("T-Shirts — Bob, Sally, Tim"), allow add/remove before save
+- [ ] Dashboard integration
+	- [x] Dropdown to set the family's active packing list (one active list per family)
+	- [x] When active list selected, render columns: left-most column = whole-family items, then one column per family member (ordered by member name)
+	- [ ] Items sorted/grouped by category (use first category if multiple) within each column
+	- [x] Checked behavior: each user can check/uncheck items in their column; checked items show strikethrough; other users see the checked state in that member's column
+	- [ ] Not-needed action: icon button with tooltip to mark item not_needed (moves to bottom and greys out); persisted in DB as flag
+	- [ ] Support adding one-off items directly in a member column; initial persistence is to the packing list only with optional UI to promote to master items/templates and set category
+- [ ] List management screen
+	- [ ] Editing a list shows items once with assignment string and lets user add/remove items and change assignments; saving persists references for items that exist in master list and flags added_during_packing for one-offs
+- [ ] Accessibility and responsiveness: columns collapse to stacked lists on small screens; provide a compact mode for mobile
+- [ ] Tests: component unit tests and a small integration test that creates a list from a template, modifies a master item, and verifies reflection in packing list
+
+Acceptance criteria
+- The Packing Lists page shows lists with sort and filter controls and allows creating/updating lists as described
+- Dashboard active list mode displays per-member columns and whole-family column, supports checking/unchecking per-user, not_needed, and one-off items
+- Changes to master `items` (name, assignments, categories) are reflected in lists that reference the item (except items explicitly added during packing)
+- One active list per family is supported and changes are visible to all family members immediately
+- API endpoints covered by unit/integration tests and frontend components covered by Vitest tests
 
 ## Milestone 6: Offline Support & Sync
 - [ ] Backend: Change tracking and incremental sync endpoints

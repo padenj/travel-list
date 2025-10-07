@@ -102,18 +102,31 @@ const SCHEMAS = {
       CREATE TABLE IF NOT EXISTS packing_list_items (
         id TEXT PRIMARY KEY,
         packing_list_id TEXT NOT NULL,
-        item_id TEXT NOT NULL,
+        item_id TEXT,
+        display_name TEXT,
         checked INTEGER DEFAULT 0,
         added_during_packing INTEGER DEFAULT 0,
+        not_needed INTEGER DEFAULT 0,
         created_at TEXT NOT NULL DEFAULT (datetime('now')),
         FOREIGN KEY (packing_list_id) REFERENCES packing_lists(id),
         FOREIGN KEY (item_id) REFERENCES items(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS packing_list_item_checks (
+        id TEXT PRIMARY KEY,
+        packing_list_item_id TEXT NOT NULL,
+        member_id TEXT NOT NULL,
+        checked INTEGER DEFAULT 0,
+        checked_at TEXT,
+        FOREIGN KEY (packing_list_item_id) REFERENCES packing_list_items(id),
+        FOREIGN KEY (member_id) REFERENCES users(id)
       );
   `,
   families: `
     CREATE TABLE IF NOT EXISTS families (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
+      active_packing_list_id TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
       deleted_at TEXT

@@ -29,6 +29,8 @@ const itemRepo = new ItemRepository();
 import { TemplateRepository } from './repositories';
 import { seedTemplatesForFamily } from './seed-templates';
 const templateRepo = new TemplateRepository();
+import { PackingListRepository } from './repositories';
+const packingListRepo = new PackingListRepository();
 
 // Note: family access enforcement is handled by familyAccessMiddleware in middleware.ts
 
@@ -341,6 +343,230 @@ router.get('/categories/:categoryId/items', authMiddleware, async (req: Request,
   }
 });
 
+// Packing lists
+// List packing lists for a family
+router.get('/families/:familyId/packing-lists', authMiddleware, familyAccessMiddleware('familyId'), async (req: Request, res: Response) => {
+  const { familyId } = req.params;
+  try {
+    const lists = await packingListRepo.findAll(familyId);
+    return res.json({ lists });
+  } catch (error) {
+    console.error('Error fetching packing lists:', error);
+    return res.status(500).json({ error: 'Failed to fetch packing lists' });
+  }
+});
+
+// Create a new packing list for a family (optionally populate from template)
+router.post('/families/:familyId/packing-lists', authMiddleware, familyAccessMiddleware('familyId'), async (req: Request, res: Response) => {
+  const { familyId } = req.params;
+  const { name, templateId, includeTemplateAssignments = true } = req.body;
+  if (!name || name.trim() === '') return res.status(400).json({ error: 'Name is required' });
+  try {
+    const newList = await packingListRepo.create({ id: uuidv4(), family_id: familyId, name: name.trim(), created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
+    if (templateId) {
+      await packingListRepo.populateFromTemplate(newList.id, templateId);
+    }
+    return res.json({ list: newList });
+  } catch (error) {
+    console.error('Error creating packing list:', error);
+    return res.status(500).json({ error: 'Failed to create packing list' });
+  }
+});
+
+// Get detailed packing list with items and per-member checks
+router.get('/packing-lists/:id', authMiddleware, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  try {
+    console.log('GET packing-lists request for listId:', id);
+    const list = await packingListRepo.findById(id);
+    if (!list) return res.status(404).json({ error: 'Packing list not found' });
+    console.log('Found packing list:', { id: list.id, name: list.name });
+    // family access check
+    if (req.user?.role !== 'SystemAdmin' && req.user?.familyId !== list.family_id) return res.status(403).json({ error: 'Forbidden' });
+  // return enriched items with member assignments to reduce client chatter
+  const items = await packingListRepo.getItemsWithMembers(id);
+  const checks = await packingListRepo.getUserItemChecks(id);
+  // Remove any per-item `checked` column (it can be ambiguous) so the
+  // canonical per-user checked state lives only in `checks`.
+  const sanitizedItems = items.map(({ checked, ...rest }: any) => rest);
+    console.log('GET packing-lists returning:', { 
+      listId: id, 
+      listName: list.name, 
+      itemCount: items.length, 
+      checkCount: checks.length,
+      checks: checks.map(c => ({ packing_list_item_id: c.packing_list_item_id, member_id: c.member_id, checked: c.checked }))
+    });
+    return res.json({ list, items: sanitizedItems, checks });
+  } catch (error) {
+    console.error('Error fetching packing list:', error);
+    return res.status(500).json({ error: 'Failed to fetch packing list' });
+  }
+});
+
+// Populate an existing list from a template
+router.post('/packing-lists/:id/populate-from-template', authMiddleware, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { templateId } = req.body;
+  if (!templateId) return res.status(400).json({ error: 'templateId is required' });
+  try {
+    const list = await packingListRepo.findById(id);
+    if (!list) return res.status(404).json({ error: 'Packing list not found' });
+    if (req.user?.role !== 'SystemAdmin' && req.user?.familyId !== list.family_id) return res.status(403).json({ error: 'Forbidden' });
+    await packingListRepo.populateFromTemplate(id, templateId);
+    return res.json({ message: 'Populated from template' });
+  } catch (error) {
+    console.error('Error populating packing list from template:', error);
+    return res.status(500).json({ error: 'Failed to populate packing list' });
+  }
+});
+
+// Update packing list (rename or other metadata)
+router.put('/packing-lists/:id', authMiddleware, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const updates = req.body;
+  try {
+    const existing = await packingListRepo.findById(id);
+    if (!existing) return res.status(404).json({ error: 'Packing list not found' });
+    if (req.user?.role !== 'SystemAdmin' && req.user?.familyId !== existing.family_id) return res.status(403).json({ error: 'Forbidden' });
+    const updated = await packingListRepo.update(id, updates);
+    return res.json({ list: updated });
+  } catch (error) {
+    console.error('Error updating packing list:', error);
+    return res.status(500).json({ error: 'Failed to update packing list' });
+  }
+});
+
+// Delete (soft-delete) packing list
+router.delete('/packing-lists/:id', authMiddleware, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  try {
+    const existing = await packingListRepo.findById(id);
+    if (!existing) return res.status(404).json({ error: 'Packing list not found' });
+    if (req.user?.role !== 'SystemAdmin' && req.user?.familyId !== existing.family_id) return res.status(403).json({ error: 'Forbidden' });
+    await packingListRepo.softDelete(id);
+    return res.json({ message: 'Packing list deleted' });
+  } catch (error) {
+    console.error('Error deleting packing list:', error);
+    return res.status(500).json({ error: 'Failed to delete packing list' });
+  }
+});
+
+// Add items to a packing list (supports masterItemId or oneOff)
+router.post('/packing-lists/:id/items', authMiddleware, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { masterItemId, oneOff } = req.body as any;
+  try {
+    const list = await packingListRepo.findById(id);
+    if (!list) return res.status(404).json({ error: 'Packing list not found' });
+    if (req.user?.role !== 'SystemAdmin' && req.user?.familyId !== list.family_id) return res.status(403).json({ error: 'Forbidden' });
+    let created;
+    if (masterItemId) {
+      created = await packingListRepo.addItem(id, masterItemId, false);
+    } else if (oneOff && oneOff.name) {
+      created = await packingListRepo.addOneOffItem(id, oneOff.name, true);
+    } else {
+      return res.status(400).json({ error: 'masterItemId or oneOff.name is required' });
+    }
+    return res.json({ item: created });
+  } catch (error) {
+    console.error('Error adding item to packing list:', error);
+    return res.status(500).json({ error: 'Failed to add item to packing list' });
+  }
+});
+
+// Toggle/set per-user checked state
+router.patch('/packing-lists/:listId/items/:itemId/check', authMiddleware, async (req: Request, res: Response) => {
+  const { listId, itemId } = req.params;
+  const { userId, checked } = req.body as any;
+  try {
+    const list = await packingListRepo.findById(listId);
+    if (!list) return res.status(404).json({ error: 'Packing list not found' });
+    if (req.user?.role !== 'SystemAdmin' && req.user?.familyId !== list.family_id) return res.status(403).json({ error: 'Forbidden' });
+    console.log('PATCH check request:', { listId, itemId, userId, checked, checkedType: typeof checked });
+    console.log('PATCH check for list:', { id: list.id, name: list.name });
+    let pli = await packingListRepo.findItem(listId, itemId);
+    // If not found by (packing_list_id, item_id) try interpreting itemId as the packing_list_item id
+    if (!pli) {
+      const maybe = await packingListRepo.findItemById(itemId);
+      if (maybe && maybe.packing_list_id === listId) {
+        pli = maybe;
+      }
+    }
+    if (!pli) {
+      console.log('List item not found for check', { listId, itemId });
+      return res.status(404).json({ error: 'List item not found' });
+    }
+    // userId defaults to authenticated user
+    const memberId = userId || req.user!.id;
+    console.log('About to call setUserItemChecked with', { listName: list.name, packing_list_item_id: pli.id, memberId, checked, checkedType: typeof checked });
+    await packingListRepo.setUserItemChecked(pli.id, memberId, !!checked);
+    console.log('setUserItemChecked completed for', { listName: list.name, packing_list_item_id: pli.id, memberId });
+    return res.json({ message: 'Check updated' });
+  } catch (error) {
+    console.error('Error updating check:', error);
+    return res.status(500).json({ error: 'Failed to update check' });
+  }
+});
+
+// Set not_needed flag on a packing list item
+router.patch('/packing-lists/:listId/items/:itemId/not-needed', authMiddleware, async (req: Request, res: Response) => {
+  const { listId, itemId } = req.params;
+  const { notNeeded } = req.body as any;
+  try {
+    const list = await packingListRepo.findById(listId);
+    if (!list) return res.status(404).json({ error: 'Packing list not found' });
+    if (req.user?.role !== 'SystemAdmin' && req.user?.familyId !== list.family_id) return res.status(403).json({ error: 'Forbidden' });
+    let pli = await packingListRepo.findItem(listId, itemId);
+    if (!pli) {
+      const maybe = await packingListRepo.findItemById(itemId);
+      if (maybe && maybe.packing_list_id === listId) pli = maybe;
+    }
+    if (!pli) return res.status(404).json({ error: 'List item not found' });
+    await packingListRepo.setNotNeeded(pli.id, !!notNeeded);
+    return res.json({ message: 'not_needed updated' });
+  } catch (error) {
+    console.error('Error updating not_needed:', error);
+    return res.status(500).json({ error: 'Failed to update not_needed' });
+  }
+});
+
+// Promote one-off to master
+router.post('/packing-lists/:listId/items/:itemId/promote', authMiddleware, async (req: Request, res: Response) => {
+  const { listId, itemId } = req.params;
+  const { createTemplate, templateName } = req.body as any;
+  try {
+    const list = await packingListRepo.findById(listId);
+    if (!list) return res.status(404).json({ error: 'Packing list not found' });
+    if (req.user?.role !== 'SystemAdmin' && req.user?.familyId !== list.family_id) return res.status(403).json({ error: 'Forbidden' });
+    let pli = await packingListRepo.findItem(listId, itemId);
+    if (!pli) {
+      const maybe = await packingListRepo.findItemById(itemId);
+      if (maybe && maybe.packing_list_id === listId) pli = maybe;
+    }
+    if (!pli) return res.status(404).json({ error: 'List item not found' });
+    const result = await packingListRepo.promoteOneOffToMaster(pli.id, list.family_id, !!createTemplate, templateName);
+    return res.json({ promoted: result });
+  } catch (error) {
+    console.error('Error promoting one-off:', error);
+    return res.status(500).json({ error: 'Failed to promote one-off' });
+  }
+});
+
+// Set active list for family
+router.patch('/families/:familyId/active-packing-list', authMiddleware, familyAccessMiddleware('familyId'), async (req: Request, res: Response) => {
+  const { familyId } = req.params;
+  const { listId } = req.body as any;
+  try {
+    const list = await packingListRepo.findById(listId);
+    if (!list || list.family_id !== familyId) return res.status(404).json({ error: 'Packing list not found for this family' });
+    await familyRepo.update(familyId, { active_packing_list_id: listId });
+    return res.json({ message: 'Active packing list updated' });
+  } catch (error) {
+    console.error('Error setting active packing list:', error);
+    return res.status(500).json({ error: 'Failed to set active packing list' });
+  }
+});
+
 router.put('/categories/:id', authMiddleware, async (req: Request, res: Response) => {
   const { id } = req.params;
   const { name } = req.body;
@@ -470,6 +696,18 @@ router.delete('/items/:itemId/members/:memberId', authMiddleware, async (req: Re
   }
 });
 
+// Get members assigned to an item
+router.get('/items/:itemId/members', authMiddleware, async (req: Request, res: Response) => {
+  const { itemId } = req.params;
+  try {
+    const members = await itemRepo.getMembersForItem(itemId);
+    return res.json({ members });
+  } catch (error) {
+    console.error('Error fetching members for item:', error);
+    return res.status(500).json({ error: 'Failed to fetch members for item' });
+  }
+});
+
 router.post('/items/:itemId/whole-family/:familyId', authMiddleware, familyAccessMiddleware('familyId'), async (req: Request, res: Response) => {
   const { itemId, familyId } = req.params;
   try {
@@ -545,6 +783,33 @@ if (!isTestEnv) {
       // Log but don't crash module import
       console.error('ensureDefaultAdmin failed:', err);
     });
+  });
+
+  // Single endpoint to fetch all data needed to edit an item in the UI.
+  // Returns family categories, categories assigned to the item, family members,
+  // members assigned to the item, and whether the item is assigned to whole family.
+  router.get('/items/:itemId/edit-data', authMiddleware, async (req: Request, res: Response) => {
+    const { itemId } = req.params;
+    // Optional familyId can be provided via query (used when impersonating)
+    const familyId = req.query.familyId as string | undefined;
+    try {
+      // Determine familyId: prefer provided familyId, otherwise try to read from item or user profile
+      let fid = familyId;
+      if (!fid && req.user && req.user.familyId) fid = req.user.familyId;
+
+      const [categories, itemCategories, members, itemMembers, wholeAssigned] = await Promise.all([
+        fid ? categoryRepo.findAll(fid) : Promise.resolve([]),
+        itemRepo.getCategoriesForItem(itemId),
+        fid ? userRepo.findByFamilyId(fid) : Promise.resolve([]),
+        itemRepo.getMembersForItem(itemId),
+        itemRepo.isAssignedToWholeFamily(itemId),
+      ]);
+
+      return res.json({ categories, itemCategories, members, itemMembers, wholeAssigned });
+    } catch (error) {
+      console.error('Error fetching edit-data for item:', error);
+      return res.status(500).json({ error: 'Failed to fetch item edit data' });
+    }
   });
 } else {
   // In test environment, do not auto-create admin here to avoid races.

@@ -7,6 +7,7 @@ import { Notifications } from '@mantine/notifications';
 import AppRoutes from './AppRoutes';
 import { ImpersonationProvider } from './contexts/ImpersonationContext';
 import { RefreshProvider } from './contexts/RefreshContext';
+import { ActivePackingListProvider } from './contexts/ActivePackingListContext';
 import '@mantine/core/styles.css';
 import '@mantine/notifications/styles.css';
 
@@ -27,7 +28,9 @@ function App(): React.ReactElement {
         <Router>
           <RefreshProvider>
             <ImpersonationProvider>
-              <AppRoutes />
+              <ActivePackingListProvider>
+                <AppRoutes />
+              </ActivePackingListProvider>
             </ImpersonationProvider>
           </RefreshProvider>
         </Router>

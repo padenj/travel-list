@@ -109,7 +109,7 @@ export default function AppRoutes(): React.ReactElement {
   return (
     <SplitRailLayout user={user} onLogout={handleLogout}>
       <Routes>
-        <Route path="/" element={<Dashboard user={user} />} />
+  <Route path="/" element={<Dashboard />} />
         <Route 
           path="/admin/system" 
           element={

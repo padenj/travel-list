@@ -22,6 +22,7 @@ export interface User {
 export interface Family {
   id: string;
   name: string;
+  active_packing_list_id?: string | null;
   created_at: string;
   updated_at: string;
   deleted_at?: string | null;
@@ -96,10 +97,20 @@ export interface PackingList {
 export interface PackingListItem {
   id: string;
   packing_list_id: string;
-  item_id: string;
+  item_id?: string | null;
+  display_name?: string | null;
   checked: boolean;
   added_during_packing: boolean;
+  not_needed?: boolean;
   created_at: string;
+}
+
+export interface PackingListItemCheck {
+  id: string;
+  packing_list_item_id: string;
+  member_id: string;
+  checked: boolean;
+  checked_at?: string | null;
 }
 
 // Item assigned to whole family

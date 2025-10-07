@@ -68,11 +68,41 @@ export const getItemsForCategory = async (categoryId: string): Promise<ApiRespon
 };
 
 export const getMembersForItem = async (itemId: string): Promise<ApiResponse> => {
-  return authenticatedApiCall(`/items/${itemId}/members`);
+  const res = await authenticatedApiCall(`/items/${itemId}/members`);
+  // If 404, treat as empty members list
+  if (res.response.status === 404) {
+    return { response: { ...res.response, ok: true }, data: [] };
+  }
+  if (res.response.ok) {
+    // server returns { members: [...] } — normalize to return the array directly
+    if (res.data && Array.isArray(res.data.members)) {
+      return { response: res.response, data: res.data.members };
+    }
+    // if server already returned an array, pass it through
+    if (Array.isArray(res.data)) {
+      return res;
+    }
+  }
+  return res;
+};
+
+export const getItemEditData = async (itemId: string, familyId?: string): Promise<ApiResponse> => {
+  const qs = familyId ? `?familyId=${encodeURIComponent(familyId)}` : '';
+  return authenticatedApiCall(`/items/${itemId}/edit-data${qs}`);
 };
 
 export const isAssignedToWholeFamily = async (itemId: string): Promise<ApiResponse> => {
-  return authenticatedApiCall(`/items/${itemId}/whole-family`);
+  const response = await authenticatedApiCall(`/items/${itemId}/whole-family`);
+  // If 404, it means no whole family assignment exists, so return false
+  if (response.response.status === 404) {
+    return { response: { ...response.response, ok: true }, data: false };
+  }
+  // If 200, return true (item is assigned to whole family)
+  if (response.response.ok) {
+    return { response: response.response, data: true };
+  }
+  // Other errors pass through
+  return response;
 };
 
 export const assignToMember = async (itemId: string, memberId: string): Promise<ApiResponse> => {
@@ -116,6 +146,81 @@ export const setChecked = async (itemId: string, checked: boolean): Promise<ApiR
 
   export const getTemplates = async (familyId: string): Promise<ApiResponse> => {
     return authenticatedApiCall(`/templates/${familyId}`);
+  };
+
+  // Packing list APIs
+  export const getFamilyPackingLists = async (familyId: string): Promise<ApiResponse> => {
+    return authenticatedApiCall(`/families/${familyId}/packing-lists`);
+  };
+
+  export const createPackingList = async (familyId: string, name: string, templateId?: string): Promise<ApiResponse> => {
+    return authenticatedApiCall(`/families/${familyId}/packing-lists`, {
+      method: 'POST',
+      body: JSON.stringify({ name, templateId })
+    });
+  };
+
+  export const getPackingList = async (listId: string): Promise<ApiResponse> => {
+    return authenticatedApiCall(`/packing-lists/${listId}`);
+  };
+
+  export const populatePackingListFromTemplate = async (listId: string, templateId: string): Promise<ApiResponse> => {
+    return authenticatedApiCall(`/packing-lists/${listId}/populate-from-template`, {
+      method: 'POST',
+      body: JSON.stringify({ templateId })
+    });
+  };
+
+  export const addItemToPackingList = async (listId: string, masterItemId?: string, oneOffName?: string): Promise<ApiResponse> => {
+    const body: any = {};
+    if (masterItemId) body.masterItemId = masterItemId;
+    if (oneOffName) body.oneOff = { name: oneOffName };
+    return authenticatedApiCall(`/packing-lists/${listId}/items`, {
+      method: 'POST',
+      body: JSON.stringify(body)
+    });
+  };
+
+  export const togglePackingListItemCheck = async (listId: string, itemId: string, userId: string | null, checked: boolean): Promise<ApiResponse> => {
+    return authenticatedApiCall(`/packing-lists/${listId}/items/${itemId}/check`, {
+      method: 'PATCH',
+      body: JSON.stringify({ userId, checked })
+    });
+  };
+
+  export const setPackingListItemNotNeeded = async (listId: string, itemId: string, notNeeded: boolean): Promise<ApiResponse> => {
+    return authenticatedApiCall(`/packing-lists/${listId}/items/${itemId}/not-needed`, {
+      method: 'PATCH',
+      body: JSON.stringify({ notNeeded })
+    });
+  };
+
+  export const updatePackingList = async (listId: string, updates: any): Promise<ApiResponse> => {
+    return authenticatedApiCall(`/packing-lists/${listId}`, {
+      method: 'PUT',
+      body: JSON.stringify(updates),
+    });
+  };
+
+  export const deletePackingList = async (listId: string): Promise<ApiResponse> => {
+    return authenticatedApiCall(`/packing-lists/${listId}`, {
+      method: 'DELETE',
+    });
+  };
+
+  export const promotePackingListOneOff = async (listId: string, packingListItemId: string, createTemplate?: boolean, templateName?: string): Promise<ApiResponse> => {
+    return authenticatedApiCall(`/packing-lists/${listId}/items/${packingListItemId}/promote`, {
+      method: 'POST',
+      body: JSON.stringify({ createTemplate: !!createTemplate, templateName }),
+    });
+  };
+
+  // Family active packing list
+  export const setActivePackingList = async (familyId: string, listId: string): Promise<ApiResponse> => {
+    return authenticatedApiCall(`/families/${familyId}/active-packing-list`, {
+      method: 'PATCH',
+      body: JSON.stringify({ listId }),
+    });
   };
 
   export const getTemplate = async (id: string): Promise<ApiResponse> => {
@@ -305,12 +410,12 @@ export const apiCall = async (endpoint: string, options: ApiCallOptions = {}): P
   const url = `${API_BASE_URL}${endpoint}`;
   console.log('🌐 API Call:', url, 'with options:', options);
 
-  // Always force Content-Type to application/json for POST/PUT requests
+  // Always force Content-Type to application/json for POST/PUT/PATCH requests
   const method = options.method?.toUpperCase();
   const headers = {
     ...options.headers,
   };
-  if (method === 'POST' || method === 'PUT') {
+  if (method === 'POST' || method === 'PUT' || method === 'PATCH') {
     headers['Content-Type'] = 'application/json';
   }
 
@@ -319,9 +424,19 @@ export const apiCall = async (endpoint: string, options: ApiCallOptions = {}): P
     headers,
   });
 
-  console.log('📡 API Response status:', response.status, response.statusText);
   const data = await response.json();
-  console.log('📋 API Response data:', data);
+  // Treat 404 as a non-exceptional case for some endpoints (e.g. whole-family lookup).
+  // Avoid logging the 404 for the whole-family lookup endpoint since it's expected when
+  // no whole-family assignment exists. Log other 404s at debug level.
+  if (response.status === 404) {
+    if (!endpoint.includes('/whole-family')) {
+      console.debug('📡 API Response status:', response.status, response.statusText);
+      console.debug('📋 API Response data:', data);
+    }
+  } else {
+    console.log('📡 API Response status:', response.status, response.statusText);
+    console.log('� API Response data:', data);
+  }
 
   return { response, data };
 };

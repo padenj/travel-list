@@ -40,6 +40,7 @@ export default function CategoryManagementPage(): React.ReactElement {
   const [editName, setEditName] = useState('');
   const [items, setItems] = useState<{ id: string; name: string }[]>([]);
   const [categoryItems, setCategoryItems] = useState<{ [categoryId: string]: { id: string; name: string }[] }>({});
+  const [itemsInAllCategories, setItemsInAllCategories] = useState<Set<string>>(new Set());
   const [selectedTab, setSelectedTab] = useState<string | null>(null);
   const [addItemValue, setAddItemValue] = useState('');
   const [addItemLoading, setAddItemLoading] = useState(false);
@@ -93,6 +94,19 @@ export default function CategoryManagementPage(): React.ReactElement {
         result[cat.id] = res.response.ok ? res.data.items || [] : [];
       }
       setCategoryItems(result);
+      // compute items that appear in every category (treat these as virtual 'All' items)
+      const counts: Record<string, number> = {};
+      const categoryCount = categories.length;
+      for (const catId of Object.keys(result)) {
+        for (const item of result[catId] || []) {
+          counts[item.id] = (counts[item.id] || 0) + 1;
+        }
+      }
+      const allSet = new Set<string>();
+      for (const id of Object.keys(counts)) {
+        if (counts[id] === categoryCount && categoryCount > 0) allSet.add(id);
+      }
+      setItemsInAllCategories(allSet);
     }
     fetchCategoryItems();
   }, [categories]);
@@ -136,6 +150,19 @@ export default function CategoryManagementPage(): React.ReactElement {
   };
 
   const handleRemoveItem = async (itemId: string, categoryId: string) => {
+    // Prevent removing items that are effectively in 'All' (present in every category)
+    if (itemsInAllCategories.has(itemId)) {
+      // Inform user that this item is assigned to all categories and cannot be removed individually.
+      // Use a notification so the user understands why the remove action is disabled.
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const { showNotification } = require('@mantine/notifications');
+        showNotification({ title: 'Cannot remove', message: 'This item is assigned to all categories and cannot be removed individually.', color: 'blue' });
+      } catch (e) {
+        // fallback: no-op
+      }
+      return;
+    }
     await removeItemFromCategory(itemId, categoryId);
     setCategoryItems(prev => ({
       ...prev,
@@ -228,9 +255,16 @@ export default function CategoryManagementPage(): React.ReactElement {
                         <List.Item key={item.id}>
                           <Group justify="space-between">
                             <Text>{item.name}</Text>
-                            <ActionIcon color="red" variant="light" onClick={() => handleRemoveItem(item.id, cat.id)}>
-                              <IconX size={16} />
-                            </ActionIcon>
+                            {itemsInAllCategories.has(item.id) ? (
+                              // show disabled remove icon (non-interactive) for 'All' items
+                              <ActionIcon color="gray" variant="light" title="Item in All categories; cannot remove individually" disabled>
+                                <IconX size={16} />
+                              </ActionIcon>
+                            ) : (
+                              <ActionIcon color="red" variant="light" onClick={() => handleRemoveItem(item.id, cat.id)}>
+                                <IconX size={16} />
+                              </ActionIcon>
+                            )}
                           </Group>
                         </List.Item>
                       ))

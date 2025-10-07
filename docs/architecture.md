@@ -47,6 +47,17 @@ This application is a Progressive Web App (PWA) for managing travel packing chec
 - **packing_lists**: Active trip packing lists (name, creation date, family-scoped)
 - **audit_log**: Security and change tracking
 
+### Packing list specific notes
+- packing lists reference master `items` by id (no copies) when items come from templates or master item lists. This ensures that updates to the master `items` (name, category assignments, member assignments) are reflected in any packing list that references them.
+- `packing_list_items` rows should include:
+  - reference to `item_id` (nullable for one-off items)
+  - `display_name` (cached for one-offs only)
+  - `added_during_packing` boolean
+  - `not_needed` boolean
+  - ordering and category snapshot (first category used for display)
+  - per-user checked state stored in a related table `packing_list_item_checks` (packing_list_item_id, member_id, checked, checked_at)
+- There is one `active_packing_list_id` stored on the `families` table. Changing the active list updates the dashboard for all family members.
+
 ### Relationship Tables
 - **item_categories**: Many-to-many items ↔ categories
 - **item_members**: Many-to-many items ↔ family members (assignments to specific members or whole family)
@@ -75,6 +86,17 @@ This application is a Progressive Web App (PWA) for managing travel packing chec
 - **Family Management**: `/api/families/*`
 - **Data Management**: `/api/categories/*`, `/api/items/*`, `/api/templates/*`, `/api/packing-lists/*`
 - **Sync**: `/api/sync/*` (future - for offline sync)
+
+### Packing list API suggestions (Milestone 5)
+- GET `/api/families/:familyId/packing-lists` — list packing lists (filter, sort)
+- POST `/api/families/:familyId/packing-lists` — create a new packing list (optional templateId to populate)
+- GET `/api/packing-lists/:listId` — detailed packing list with items and per-member checked state
+- POST `/api/packing-lists/:listId/populate-from-template` — populate an existing list with referenced items from a template
+- POST `/api/packing-lists/:listId/items` — add items to a list (supports referencing existing item_id or one-off items)
+- PATCH `/api/packing-list-items/:itemId` — update list item (toggle per-user checked, set not_needed, reassign)
+- PATCH `/api/families/:familyId/active-packing-list` — set family active packing list
+
+These endpoints should return appropriate nested structures so the frontend can render per-member columns (whole family items in a separate column, and items for each member), and support server-side filtering/sorting as required.
 
 ### Security Model
 - **Role-Based Access Control**: SystemAdmin, FamilyAdmin, FamilyMember

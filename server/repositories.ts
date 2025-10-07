@@ -1,5 +1,6 @@
 import { getDb } from './db';
 import sqlite3 from 'sqlite3';
+import crypto from 'crypto';
 import { User, Family, Category, Item, ItemCategory, ItemMember, ItemWholeFamily } from './server-types';
 
 interface CreateUserData extends Omit<User, 'password_hash'> {
@@ -67,6 +68,11 @@ export class UserRepository {
   async findAll(): Promise<User[]> {
     const db = await getDb();
     return db.all(`SELECT * FROM users WHERE deleted_at IS NULL ORDER BY created_at DESC`);
+  }
+
+  async findByFamilyId(familyId: string): Promise<User[]> {
+    const db = await getDb();
+    return db.all(`SELECT * FROM users WHERE familyId = ? AND deleted_at IS NULL ORDER BY created_at ASC`, [familyId]);
   }
 
   async softDelete(id: string): Promise<void> {
@@ -440,12 +446,123 @@ export class ItemRepository {
       return db.all(`SELECT * FROM packing_list_items WHERE packing_list_id = ?`, [packing_list_id]);
     }
 
+    // Get packing list items with assigned members and whole-family flag
+    async getItemsWithMembers(packing_list_id: string): Promise<any[]> {
+      const db = await getDb();
+  // select packing list rows and include master item name (if any) to avoid extra lookups
+  const items = await db.all(`SELECT pli.*, i.name as master_name FROM packing_list_items pli LEFT JOIN items i ON i.id = pli.item_id WHERE pli.packing_list_id = ?`, [packing_list_id]);
+
+      if (!items || items.length === 0) return [];
+
+      // Get members assigned to master items referenced by these packing list rows
+      const memberRows = await db.all(
+        `SELECT pli.id as packing_list_item_id, u.id as member_id, u.name, u.username
+         FROM packing_list_items pli
+         JOIN items i ON i.id = pli.item_id
+         JOIN item_members im ON im.item_id = i.id
+         JOIN users u ON u.id = im.member_id
+         WHERE pli.packing_list_id = ? AND u.deleted_at IS NULL`,
+        [packing_list_id]
+      );
+
+      // Whole-family flags
+      const wholeRows = await db.all(
+        `SELECT pli.id as packing_list_item_id FROM packing_list_items pli JOIN item_whole_family iwf ON iwf.item_id = pli.item_id WHERE pli.packing_list_id = ?`,
+        [packing_list_id]
+      );
+
+      const membersByPli: Record<string, any[]> = {};
+      for (const r of memberRows) {
+        if (!membersByPli[r.packing_list_item_id]) membersByPli[r.packing_list_item_id] = [];
+        membersByPli[r.packing_list_item_id].push({ id: r.member_id, name: r.name, username: r.username });
+      }
+
+      const wholeSet = new Set(wholeRows.map((r: any) => r.packing_list_item_id));
+
+      // Attach members and whole_family flag to each item
+      return items.map((it: any) => ({
+        ...it,
+        // prefer display_name on the packing list row, otherwise use the master item name we joined as master_name
+        name: it.display_name || it.master_name || it.name || '',
+        members: membersByPli[it.id] || [],
+        whole_family: wholeSet.has(it.id)
+      }));
+    }
+
+    // Add a one-off item that does not reference a master item
+    async addOneOffItem(packing_list_id: string, display_name: string, added_during_packing: boolean = true): Promise<PackingListItem> {
+      const db = await getDb();
+      const id = crypto.randomUUID();
+      await db.run(
+        `INSERT INTO packing_list_items (id, packing_list_id, display_name, checked, added_during_packing, created_at)
+         VALUES (?, ?, ?, 0, ?, ?)`,
+        [id, packing_list_id, display_name, added_during_packing ? 1 : 0, new Date().toISOString()]
+      );
+      const created = await this.findItemById(id);
+      if (!created) throw new Error('Failed to add one-off item to packing list');
+      return created;
+    }
+
+    // Per-user check state stored in packing_list_item_checks
+    async setUserItemChecked(packing_list_item_id: string, member_id: string, checked: boolean): Promise<void> {
+      const db = await getDb();
+      // Debug: log incoming values
+      console.log('setUserItemChecked called with', { packing_list_item_id, member_id, checked });
+      const existing = await db.get(`SELECT id, checked FROM packing_list_item_checks WHERE packing_list_item_id = ? AND member_id = ?`, [packing_list_item_id, member_id]);
+      console.log('Existing check row:', existing);
+      const now = new Date().toISOString();
+      if (existing) {
+        const newVal = checked ? 1 : 0;
+        await db.run(`UPDATE packing_list_item_checks SET checked = ?, checked_at = ? WHERE id = ?`, [newVal, now, existing.id]);
+        console.log('Updated check row id', existing.id, 'set to', newVal);
+      } else {
+        const id = crypto.randomUUID();
+        const newVal = checked ? 1 : 0;
+        await db.run(`INSERT INTO packing_list_item_checks (id, packing_list_item_id, member_id, checked, checked_at) VALUES (?, ?, ?, ?, ?)`, [id, packing_list_item_id, member_id, newVal, now]);
+        console.log('Inserted check row id', id, 'set to', newVal);
+      }
+    }
+
+    async getUserItemChecks(packing_list_id: string): Promise<any[]> {
+      const db = await getDb();
+      return db.all(`SELECT pc.* FROM packing_list_item_checks pc JOIN packing_list_items pli ON pc.packing_list_item_id = pli.id WHERE pli.packing_list_id = ?`, [packing_list_id]);
+    }
+
+    async setNotNeeded(packing_list_item_id: string, notNeeded: boolean): Promise<void> {
+      const db = await getDb();
+      await db.run(`UPDATE packing_list_items SET not_needed = ? WHERE id = ?`, [notNeeded ? 1 : 0, packing_list_item_id]);
+    }
+
+    // Promote a one-off list item (display_name) to a master item and convert the list row to reference it
+    async promoteOneOffToMaster(packing_list_item_id: string, family_id: string, createTemplate: boolean = false, templateName?: string): Promise<{newItemId: string, updatedRow: PackingListItem}> {
+      const db = await getDb();
+  const row = await this.findItemById(packing_list_item_id) as any;
+  if (!row) throw new Error('Packing list item not found');
+  if (row.item_id) throw new Error('Item already references a master item');
+  const newItemId = crypto.randomUUID();
+  await db.run(`INSERT INTO items (id, familyId, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`, [newItemId, family_id, row.display_name || 'Unnamed Item', new Date().toISOString(), new Date().toISOString()]);
+      await db.run(`UPDATE packing_list_items SET item_id = ?, display_name = NULL WHERE id = ?`, [newItemId, packing_list_item_id]);
+      const updated = await this.findItemById(packing_list_item_id);
+      if (createTemplate && templateName) {
+        const templateRepo = new TemplateRepository();
+        const templateId = crypto.randomUUID();
+        await templateRepo.create({ id: templateId, family_id: family_id, name: templateName, description: '', created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
+        await templateRepo.assignItem(templateId, newItemId);
+      }
+      return { newItemId, updatedRow: updated as PackingListItem };
+    }
+
     // Populate packing list from template
     async populateFromTemplate(packing_list_id: string, template_id: string): Promise<void> {
       const templateRepo = new TemplateRepository();
       const items = await templateRepo.getExpandedItems(template_id);
       for (const item of items) {
-        await this.addItem(packing_list_id, item.id);
+        // avoid adding duplicate master items to the packing list
+        const db = await getDb();
+        const exists = await db.get(`SELECT 1 FROM packing_list_items WHERE packing_list_id = ? AND item_id = ?`, [packing_list_id, item.id]);
+        if (!exists) {
+          await this.addItem(packing_list_id, item.id);
+        }
       }
     }
   }

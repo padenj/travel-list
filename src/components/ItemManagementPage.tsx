@@ -1,18 +1,26 @@
 import React, { useEffect, useState } from 'react';
 import { getItems, createItem, updateItem, deleteItem, getCategories, getCategoriesForItem, assignItemToCategory, removeItemFromCategory } from '../api';
 import { getMembersForItem, isAssignedToWholeFamily, assignToMember, removeFromMember, assignToWholeFamily, removeFromWholeFamily } from '../api';
-import { Card, Title, Stack, Group, Button, TextInput, Loader, ActionIcon, Text, Checkbox, Divider } from '@mantine/core';
+import { Card, Title, Stack, Group, Button, TextInput, Loader, ActionIcon, Text, Checkbox, Drawer } from '@mantine/core';
 import { IconTrash, IconEdit, IconPlus } from '@tabler/icons-react';
 import { useImpersonation } from '../contexts/ImpersonationContext';
 import { useRefresh } from '../contexts/RefreshContext';
+import ItemEditDrawer from './ItemEditDrawer';
 
 export default function ItemManagementPage(): React.ReactElement {
   const [items, setItems] = useState<{ id: string; name: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [familyId, setFamilyId] = useState<string | null>(null);
   const [newItem, setNewItem] = useState('');
-  const [editId, setEditId] = useState<string | null>(null);
-  const [editName, setEditName] = useState('');
+  // Drawer edit state (replaces inline editing)
+  const [showItemDrawer, setShowItemDrawer] = useState(false);
+  const [drawerItemId, setDrawerItemId] = useState<string | null>(null);
+  const [drawerName, setDrawerName] = useState('');
+  const [drawerSelectedCategories, setDrawerSelectedCategories] = useState<{ [key: string]: string[] }>({});
+  const [drawerSelectedMembers, setDrawerSelectedMembers] = useState<{ [key: string]: string[] }>({});
+  const [drawerSelectedWhole, setDrawerSelectedWhole] = useState<{ [key: string]: boolean }>({});
+  const [drawerLoading, setDrawerLoading] = useState(false);
+  const [drawerSaving, setDrawerSaving] = useState(false);
   const [categories, setCategories] = useState<{ id: string; name: string }[]>([]);
   const [itemCategories, setItemCategories] = useState<{ [key: string]: string[] }>({});
     const [itemMembers, setItemMembers] = useState<{ [key: string]: string[] }>({});
@@ -58,16 +66,27 @@ export default function ItemManagementPage(): React.ReactElement {
               } else {
                 catMap[item.id] = [];
               }
-                // Members
+                // Members: API sometimes returns { members: [...] } or the array directly.
                 const memRes = await getMembersForItem(item.id);
                 if (memRes.response.ok) {
-                  memberMap[item.id] = (memRes.data.members || []).map((m: { id: string }) => m.id);
+                  let membersArr: any[] = [];
+                  if (Array.isArray(memRes.data)) {
+                    membersArr = memRes.data;
+                  } else if (memRes.data && Array.isArray((memRes.data as any).members)) {
+                    membersArr = (memRes.data as any).members;
+                  }
+                  memberMap[item.id] = membersArr.map((m: { id: string }) => m.id);
                 } else {
                   memberMap[item.id] = [];
                 }
-                // Whole family
+                // Whole family: API may return boolean or an object; normalize to boolean
                 const wfRes = await isAssignedToWholeFamily(item.id);
-                wholeFamilyMap[item.id] = wfRes.response.ok && wfRes.data.assigned === true;
+                let wfAssigned = false;
+                if (wfRes.response.ok) {
+                  if (typeof wfRes.data === 'boolean') wfAssigned = wfRes.data;
+                  else if (wfRes.data && (wfRes.data as any).assigned === true) wfAssigned = true;
+                }
+                wholeFamilyMap[item.id] = wfAssigned;
             } catch {
               catMap[item.id] = [];
                 memberMap[item.id] = [];
@@ -102,19 +121,31 @@ export default function ItemManagementPage(): React.ReactElement {
     }
   };
 
-  const handleEdit = (id: string, name: string) => {
-    setEditId(id);
-    setEditName(name);
+  const openItemDrawer = (id: string) => {
+    const item = items.find(it => it.id === id);
+    setDrawerItemId(id);
+    setDrawerName(item ? item.name : '');
+    setShowItemDrawer(true);
   };
 
-  const handleUpdate = async () => {
-    if (!editId || !editName.trim()) return;
-    const res = await updateItem(editId, editName.trim());
-    if (res.response.ok) {
-      setItems(items.map(item => item.id === editId ? { ...item, name: editName.trim() } : item));
-      setEditId(null);
-      setEditName('');
+  const closeItemDrawer = () => {
+    setShowItemDrawer(false);
+    setDrawerItemId(null);
+    setDrawerName('');
+  };
+
+  const handleItemSaved = async (payload?: { name?: string }) => {
+    if (!drawerItemId) return;
+    try {
+      const id = drawerItemId;
+      // update local name if returned
+      if (payload?.name) {
+        setItems(prev => prev.map(it => it.id === id ? { ...it, name: payload.name as string } : it));
+      }
+      // refresh maps by triggering a data reload
       bumpRefresh();
+    } finally {
+      closeItemDrawer();
     }
   };
 
@@ -126,19 +157,7 @@ export default function ItemManagementPage(): React.ReactElement {
     }
   };
 
-  const handleCategoryChange = async (itemId: string, categoryId: string, checked: boolean) => {
-    setLoading(true);
-    if (checked) {
-      await assignItemToCategory(itemId, categoryId);
-      setItemCategories(prev => ({ ...prev, [itemId]: [...(prev[itemId] || []), categoryId] }));
-      bumpRefresh();
-    } else {
-      await removeItemFromCategory(itemId, categoryId);
-      setItemCategories(prev => ({ ...prev, [itemId]: (prev[itemId] || []).filter(id => id !== categoryId) }));
-      bumpRefresh();
-    }
-    setLoading(false);
-  };
+  // category changes are handled through the drawer save flow now
 
   if (loading) return <Loader />;
 
@@ -161,80 +180,26 @@ export default function ItemManagementPage(): React.ReactElement {
         ) : (
           items.map(item => (
             <Group key={item.id}>
-              {editId === item.id ? (
-                <>
-                  <TextInput
-                    value={editName}
-                    onChange={e => setEditName(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && handleUpdate()}
-                  />
-                  <Button size="xs" onClick={handleUpdate}>Save</Button>
-                  <Button size="xs" variant="light" onClick={() => { setEditId(null); setEditName(''); }}>Cancel</Button>
-                </>
-              ) : (
-                <>
-                  <Text>{item.name}</Text>
-                  <ActionIcon color="blue" variant="light" onClick={() => handleEdit(item.id, item.name)}>
-                    <IconEdit size={16} />
-                  </ActionIcon>
-                  <ActionIcon color="red" variant="light" onClick={() => handleDelete(item.id)}>
-                    <IconTrash size={16} />
-                  </ActionIcon>
-                  <Group>
-                    {categories.map(cat => (
-                      <Checkbox
-                        key={cat.id}
-                        label={cat.name}
-                        checked={itemCategories[item.id]?.includes(cat.id) || false}
-                        onChange={e => handleCategoryChange(item.id, cat.id, e.currentTarget.checked)}
-                      />
-                    ))}
-                    <Divider orientation="vertical" mx={8} />
-                    <Text size="sm">Assign to:</Text>
-                    <Checkbox
-                      label="Whole Family"
-                      checked={wholeFamilyAssignments[item.id] || false}
-                      onChange={async e => {
-                        setLoading(true);
-                        if (e.currentTarget.checked) {
-                          await assignToWholeFamily(item.id, familyId!);
-                          setWholeFamilyAssignments(prev => ({ ...prev, [item.id]: true }));
-                          bumpRefresh();
-                        } else {
-                          await removeFromWholeFamily(item.id);
-                          setWholeFamilyAssignments(prev => ({ ...prev, [item.id]: false }));
-                          bumpRefresh();
-                        }
-                        setLoading(false);
-                      }}
-                    />
-                    {familyMembers.map(member => (
-                      <Checkbox
-                        key={member.id}
-                        label={member.name}
-                        checked={itemMembers[item.id]?.includes(member.id) || false}
-                        onChange={async e => {
-                          setLoading(true);
-                          if (e.currentTarget.checked) {
-                            await assignToMember(item.id, member.id);
-                            setItemMembers(prev => ({ ...prev, [item.id]: [...(prev[item.id] || []), member.id] }));
-                            bumpRefresh();
-                          } else {
-                            await removeFromMember(item.id, member.id);
-                            setItemMembers(prev => ({ ...prev, [item.id]: (prev[item.id] || []).filter(id => id !== member.id) }));
-                            bumpRefresh();
-                          }
-                          setLoading(false);
-                        }}
-                      />
-                    ))}
-                  </Group>
-                </>
-              )}
+              <Text style={{ flex: '1 1 auto' }}>{item.name}</Text>
+              <ActionIcon color="blue" variant="light" onClick={() => openItemDrawer(item.id)}>
+                <IconEdit size={16} />
+              </ActionIcon>
+              <ActionIcon color="red" variant="light" onClick={() => handleDelete(item.id)}>
+                <IconTrash size={16} />
+              </ActionIcon>
             </Group>
           ))
         )}
       </Stack>
+      <ItemEditDrawer
+        opened={showItemDrawer}
+        onClose={closeItemDrawer}
+        masterItemId={drawerItemId}
+        initialName={drawerName}
+        familyId={familyId}
+        showNameField={true}
+        onSaved={handleItemSaved}
+      />
     </Card>
   );
 }

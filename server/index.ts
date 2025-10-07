@@ -1,6 +1,7 @@
 
 import '../server/env-loader';
 import express, { Application, Request, Response } from 'express';
+import { fileURLToPath } from 'url';
 import cors from 'cors';
 import { authMiddleware } from './middleware';
 import routes from './routes';
@@ -56,26 +57,36 @@ process.on('SIGINT', async () => {
   process.exit(0);
 });
 
-const server = app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Backend running on http://0.0.0.0:${PORT}`);
-});
+// Only start listening if this module is the main entry point.
+let server: any;
+// In ESM environments `require.main === module` is not available. Use import.meta.url
+// to detect direct execution. Compare the file path of this module to process.argv[1].
+const __filename = fileURLToPath(import.meta.url);
+const isMain = process.argv && process.argv[1] && __filename === process.argv[1];
+if (isMain) {
+  server = app.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 Backend running on http://0.0.0.0:${PORT}`);
+  });
 
-// Handle server errors
-server.on('error', (error: NodeJS.ErrnoException) => {
-  if (error.syscall !== 'listen') {
-    throw error;
-  }
-
-  switch (error.code) {
-    case 'EACCES':
-      console.error(`💥 Port ${PORT} requires elevated privileges`);
-      process.exit(1);
-      break;
-    case 'EADDRINUSE':
-      console.error(`💥 Port ${PORT} is already in use`);
-      process.exit(1);
-      break;
-    default:
+  // Handle server errors
+  server.on('error', (error: NodeJS.ErrnoException) => {
+    if (error.syscall !== 'listen') {
       throw error;
-  }
-});
+    }
+
+    switch (error.code) {
+      case 'EACCES':
+        console.error(`💥 Port ${PORT} requires elevated privileges`);
+        process.exit(1);
+        break;
+      case 'EADDRINUSE':
+        console.error(`💥 Port ${PORT} is already in use`);
+        process.exit(1);
+        break;
+      default:
+        throw error;
+    }
+  });
+}
+
+export default app;
