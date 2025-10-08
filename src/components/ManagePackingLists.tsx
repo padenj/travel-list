@@ -12,6 +12,7 @@ import {
   getCategoriesForItem,
   getItems,
   addItemToPackingList,
+  deletePackingListItem,
 } from '../api';
 import { showNotification } from '@mantine/notifications';
 import { useActivePackingList } from '../contexts/ActivePackingListContext';
@@ -299,9 +300,25 @@ export default function ManagePackingLists() {
                                 {it.oneOff ? <Badge color="gray" size="xs">One-off</Badge> : null}
                               </div>
                               <div style={{ flex: '0 0 auto', marginLeft: 12 }}>
-                                <Button size="xs" variant="subtle" onClick={() => openEditItemDrawerFor(it)}>
-                                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><IconEdit size={14} />Edit</span>
-                                </Button>
+                                <Group>
+                                  <Button size="xs" variant="subtle" onClick={() => openEditItemDrawerFor(it)}>
+                                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><IconEdit size={14} />Edit</span>
+                                  </Button>
+                                  <Button size="xs" color="red" variant="subtle" onClick={async () => {
+                                    if (!editListId) return;
+                                    if (!confirm('Remove this item from the packing list? This will not delete the master item.')) return;
+                                    try {
+                                      await deletePackingListItem(editListId, it.id);
+                                      showNotification({ title: 'Removed', message: 'Item removed from list', color: 'green' });
+                                      // Refresh modal items and lists
+                                      if (editListId) await openEditFor({ id: editListId, name: editListName });
+                                      await reload();
+                                    } catch (err) {
+                                      console.error('Failed to remove packing list item', err);
+                                      showNotification({ title: 'Failed', message: 'Failed to remove item from list', color: 'red' });
+                                    }
+                                  }}>Remove</Button>
+                                </Group>
                               </div>
                             </div>
                           );

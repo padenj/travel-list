@@ -10,9 +10,12 @@ import {
   assignToWholeFamily,
   removeFromWholeFamily,
   updateItem,
+  createItem,
+  getCategories,
+  getCurrentUserProfile,
 } from '../api';
 
-type OnSavedPayload = { name?: string } | undefined;
+type OnSavedPayload = { id?: string; name?: string } | undefined;
 
 export interface ItemEditDrawerProps {
   opened: boolean;
@@ -21,10 +24,11 @@ export interface ItemEditDrawerProps {
   initialName?: string;
   familyId: string | null | undefined;
   showNameField?: boolean; // whether to expose a name input (used by ItemManagementPage)
+  defaultAssignedMemberId?: string | null; // pre-select this member when creating a new item
   onSaved?: (payload?: OnSavedPayload) => Promise<void> | void;
 }
 
-export default function ItemEditDrawer({ opened, onClose, masterItemId, initialName, familyId, showNameField = false, onSaved }: ItemEditDrawerProps) {
+export default function ItemEditDrawer({ opened, onClose, masterItemId, initialName, familyId, showNameField = false, defaultAssignedMemberId, onSaved }: ItemEditDrawerProps) {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [categories, setCategories] = useState<any[]>([]);
@@ -46,44 +50,65 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
   useEffect(() => {
     if (!opened) return;
     (async () => {
-      if (!masterItemId) return;
       setLoading(true);
       try {
-        // Fetch all edit data in a single request
-        const res = await getItemEditData(masterItemId, familyId || undefined);
-        if (!res.response.ok) {
-          throw new Error('Failed to load item edit data');
+        if (masterItemId) {
+          // Fetch all edit data in a single request for existing item
+          const res = await getItemEditData(masterItemId, familyId || undefined);
+          if (!res.response.ok) throw new Error('Failed to load item edit data');
+          const payload = res.data || {};
+          setCategories(payload.categories || []);
+          const itemCats = Array.isArray(payload.itemCategories) ? payload.itemCategories : (payload.itemCategories || []);
+          const currentCats = itemCats.map((c: any) => c.id);
+          setInitialCategories(currentCats);
+          setSelectedCategories(currentCats.slice());
+          const allCatIds = (payload.categories || []).map((c: any) => c.id);
+          const isAll = allCatIds.length > 0 && allCatIds.every((id: string) => currentCats.includes(id)) && currentCats.length === allCatIds.length;
+          setInitialAll(isAll);
+          setSelectedAll(isAll);
+          setFamilyMembers(payload.members || []);
+          const itemMems = Array.isArray(payload.itemMembers) ? payload.itemMembers : (payload.itemMembers || []);
+          const assigned = itemMems.map((m: any) => m.id);
+          setInitialMembers(assigned);
+          setSelectedMembers(assigned.slice());
+          const wholeAssigned = !!payload.wholeAssigned;
+          setInitialWhole(wholeAssigned);
+          setSelectedWhole(wholeAssigned);
+        } else {
+          // New item: load family-level categories and members
+          if (familyId) {
+            try {
+              const cats = await getCategories(familyId);
+              if (cats.response.ok) setCategories(cats.data.categories || []);
+            } catch (e) {
+              // ignore
+            }
+            try {
+              const profile = await getCurrentUserProfile();
+              if (profile.response.ok && profile.data.family) {
+                setFamilyMembers(profile.data.family.members || []);
+                // if caller passed a default assigned member, pre-select them
+                if (defaultAssignedMemberId) {
+                  // only pre-select if the member exists in the family
+                  const exists = (profile.data.family.members || []).some((m: any) => m.id === defaultAssignedMemberId);
+                  if (exists) setSelectedMembers([defaultAssignedMemberId]);
+                }
+              }
+            } catch (e) {
+              // ignore
+            }
+
+            // New item initial selections are empty
+            setInitialCategories([]);
+            setSelectedCategories([]);
+            setInitialMembers([]);
+            setSelectedMembers([]);
+            setInitialWhole(false);
+            setSelectedWhole(false);
+            setInitialAll(false);
+            setSelectedAll(false);
+          }
         }
-        const payload = res.data || {};
-
-        // categories for family
-        setCategories(payload.categories || []);
-
-        // assigned categories for item (normalize shape)
-        const itemCats = Array.isArray(payload.itemCategories) ? payload.itemCategories : (payload.itemCategories || []);
-        const currentCats = itemCats.map((c: any) => c.id);
-        setInitialCategories(currentCats);
-        setSelectedCategories(currentCats.slice());
-
-        // determine virtual 'All' state
-        const allCatIds = (payload.categories || []).map((c: any) => c.id);
-        const isAll = allCatIds.length > 0 && allCatIds.every((id: string) => currentCats.includes(id)) && currentCats.length === allCatIds.length;
-        setInitialAll(isAll);
-        setSelectedAll(isAll);
-
-        // family members
-        setFamilyMembers(payload.members || []);
-
-        // assigned members
-        const itemMems = Array.isArray(payload.itemMembers) ? payload.itemMembers : (payload.itemMembers || []);
-        const assigned = itemMems.map((m: any) => m.id);
-        setInitialMembers(assigned);
-        setSelectedMembers(assigned.slice());
-
-        // whole-family flag
-        const wholeAssigned = !!payload.wholeAssigned;
-        setInitialWhole(wholeAssigned);
-        setSelectedWhole(wholeAssigned);
       } catch (err) {
         console.error('ItemEditDrawer load failed', err);
         showNotification({ title: 'Error', message: 'Failed to load item details', color: 'red' });
@@ -94,22 +119,47 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
   }, [opened, masterItemId, familyId]);
 
   const save = async () => {
-    if (!masterItemId) return;
     setSaving(true);
     try {
-      let updatedName: string | undefined = undefined;
+      let createdId: string | undefined;
+      let updatedName: string | undefined;
+      const allCatIds = (categories || []).map((c: any) => c.id);
+      const effectiveSelected = selectedAll ? allCatIds : selectedCategories;
+
+      if (!masterItemId) {
+        // Create a new master item
+        if (!familyId) throw new Error('Family not available');
+        const createRes = await createItem(familyId, name || 'New Item');
+        if (!createRes.response.ok) throw new Error('Failed to create item');
+        createdId = createRes.data?.item?.id;
+        updatedName = createRes.data?.item?.name || name;
+        if (!createdId) throw new Error('Create response missing id');
+
+        // Assign categories and members like update flow
+        const ops: Promise<any>[] = [];
+        for (const cid of effectiveSelected) ops.push(assignItemToCategory(createdId, cid));
+        if (selectedWhole && familyId) ops.push(assignToWholeFamily(createdId, familyId));
+        if (!selectedWhole) {
+          for (const mid of selectedMembers) ops.push(assignToMember(createdId, mid));
+        }
+        await Promise.all(ops);
+        showNotification({ title: 'Saved', message: 'Item created.', color: 'green' });
+        if (onSaved) await onSaved(createdId ? { id: createdId, name: updatedName } : undefined);
+        onClose();
+        return;
+      }
+
+      // Existing item update
+      if (!masterItemId) throw new Error('masterItemId missing');
       if (showNameField && name && initialName !== name) {
         const uRes = await updateItem(masterItemId, name);
         if (uRes.response.ok) updatedName = uRes.data?.item?.name || name;
       }
 
-      const ops: Promise<any>[] = [];
-
-      const allCatIds = (categories || []).map(c => c.id);
-      const effectiveSelected = selectedAll ? allCatIds : selectedCategories;
       const effectiveInitial = initialAll ? allCatIds : initialCategories;
       const toAddCats = effectiveSelected.filter((c: string) => !effectiveInitial.includes(c));
       const toRemoveCats = effectiveInitial.filter((c: string) => !effectiveSelected.includes(c));
+      const ops: Promise<any>[] = [];
       for (const cid of toAddCats) ops.push(assignItemToCategory(masterItemId, cid));
       for (const cid of toRemoveCats) ops.push(removeItemFromCategory(masterItemId, cid));
 

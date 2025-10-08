@@ -69,3 +69,118 @@ All code is organized as a single Vite application with integrated frontend and 
 ---
 
 For questions or changes, update this file and notify contributors.
+
+---
+
+## Database migrations (how to create and run)
+
+When altering the database schema or making any breaking changes to the database, create a migration file and run it using the project's migration runner. Follow these steps precisely to keep schema changes auditable, reversible, and safe.
+
+1) Backup the database before running any migration
+
+	- Always make a copy of `travel-list.sqlite` before applying migrations:
+
+		```bash
+		cp travel-list.sqlite travel-list.sqlite.bak
+		```
+
+2) Create a migration file
+
+	- Migration files live in `server/migrations/migrations/` and must be named so they sort chronologically, e.g. `YYYYMMDD_description.js` (example: `20251008_add_new_column_to_items.js`).
+	- Use ES module export style (project `package.json` uses `type: "module"`). Each migration must `export default` an object with `name`, `up`, and optionally `down` functions.
+	- The `up` and `down` functions receive a context object: `{ db }` where `db` is the sqlite database handle from the `sqlite` package. Use `await db.exec(sql)` and other `sqlite` methods.
+
+	- Example minimal migration template:
+
+		```javascript
+		export default {
+			name: '20251008_example_migration.js',
+			up: async ({ db }) => {
+				// perform schema change(s)
+				await db.exec('PRAGMA foreign_keys = OFF');
+				await db.exec(`ALTER TABLE example ADD COLUMN new_col TEXT`);
+				await db.exec('PRAGMA foreign_keys = ON');
+			},
+			down: async ({ db }) => {
+				// reverse the change if possible (optional)
+				// For destructive changes, provide a clear comment and require manual recovery.
+			}
+		};
+		```
+
+3) Make the migration idempotent where practical
+
+	- Use `CREATE TABLE IF NOT EXISTS` or `DROP TABLE IF EXISTS` when appropriate.
+	- For ALTER operations that SQLite doesn't support directly, prefer the copy-then-rename pattern:
+		- Create a `_new` table with the desired schema
+		- Copy rows over: `INSERT INTO new_table (...) SELECT ... FROM old_table`
+		- `DROP TABLE old_table` and `ALTER TABLE new_table RENAME TO old_table`
+
+4) Run the migration runner
+
+	- The project includes a simple migration runner. Install dependencies first if needed:
+
+		```bash
+		npm install
+		```
+
+	- To see status (executed vs pending):
+
+		```bash
+		npm run migrate:status
+		```
+
+	- To apply pending migrations:
+
+		```bash
+		npm run migrate
+		```
+
+	- To revert (down) the last migration or N steps:
+
+		```bash
+		# revert 1 step
+		node server/migrations/run-migrations.cjs down 1
+		# or via script
+		npm run migrate:down -- 1
+		```
+
+5) Verify and test
+
+	- After running migrations, run test suites and smoke tests:
+
+		```bash
+		npm run test
+		# and manually exercise the app in dev: npm run dev
+		```
+
+	- Check that application code and queries are compatible with the new schema.
+
+6) CI/CD recommendation
+
+	- Add a migration step to your deployment pipeline. Prefer an explicit migration job that runs before the application process starts.
+	- Example GitHub Actions step (simplified):
+
+		```yaml
+		- name: Run DB migrations
+			run: |
+				npm ci
+				node server/migrations/run-migrations.cjs up
+		```
+
+7) Safety and rollback
+
+	- Always back up the database file before running migrations on staging/production.
+	- Provide a `down` migration when feasible. For destructive operations (dropping columns/tables), document manual rollback steps.
+	- If a migration fails partially, restore from backup and investigate; do not attempt automatic retries without understanding the failure.
+
+8) When to create migrations
+
+	- Any change that alters table schemas, indexes, triggers, or constraints.
+	- Any change that requires transforming or migrating existing data (e.g., splitting a column into two, moving data between tables).
+
+9) Example: creating a migration that fixes a broken foreign key
+
+	- Follow the copy-then-rename pattern shown above (see `20251008_fix_packing_list_item_checks_fk.js` for a real example in this repo).
+
+If you have any questions about writing a specific migration, include the SQL you want and I (the agent) can draft a migration file and a safe rollback plan.

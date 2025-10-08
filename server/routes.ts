@@ -454,16 +454,31 @@ router.delete('/packing-lists/:id', authMiddleware, async (req: Request, res: Re
 // Add items to a packing list (supports masterItemId or oneOff)
 router.post('/packing-lists/:id/items', authMiddleware, async (req: Request, res: Response) => {
   const { id } = req.params;
-  const { masterItemId, oneOff } = req.body as any;
+  const { masterItemId, oneOff, memberIds } = req.body as any;
   try {
     const list = await packingListRepo.findById(id);
     if (!list) return res.status(404).json({ error: 'Packing list not found' });
     if (req.user?.role !== 'SystemAdmin' && req.user?.familyId !== list.family_id) return res.status(403).json({ error: 'Forbidden' });
     let created;
     if (masterItemId) {
+      // If masterItemId is provided and member assignments are included, assign those members to the master item
       created = await packingListRepo.addItem(id, masterItemId, false);
+      if (Array.isArray(memberIds) && memberIds.length > 0) {
+        const itemRepo = new (require('./repositories').ItemRepository)();
+        for (const m of memberIds) {
+          await itemRepo.assignToMember(masterItemId, m);
+        }
+      }
     } else if (oneOff && oneOff.name) {
-      created = await packingListRepo.addOneOffItem(id, oneOff.name, true);
+      try {
+        // Accept optional memberIds to assign the newly created master one-off to members
+        created = await packingListRepo.addOneOffItem(id, oneOff.name, true, Array.isArray(memberIds) ? memberIds : undefined);
+      } catch (err: any) {
+        // Surface DB constraint errors to the caller rather than attempting
+        // an automatic runtime migration. Migrations should be run explicitly.
+        console.error('Error adding one-off item to packing list (no runtime migration):', err);
+        throw err;
+      }
     } else {
       return res.status(400).json({ error: 'masterItemId or oneOff.name is required' });
     }
@@ -549,6 +564,32 @@ router.post('/packing-lists/:listId/items/:itemId/promote', authMiddleware, asyn
   } catch (error) {
     console.error('Error promoting one-off:', error);
     return res.status(500).json({ error: 'Failed to promote one-off' });
+  }
+});
+
+// Delete a packing list item (does NOT delete the master item). Accepts either the packing_list_item id or the master item id.
+router.delete('/packing-lists/:listId/items/:itemId', authMiddleware, async (req: Request, res: Response) => {
+  const { listId, itemId } = req.params;
+  try {
+    const list = await packingListRepo.findById(listId);
+    if (!list) return res.status(404).json({ error: 'Packing list not found' });
+    if (req.user?.role !== 'SystemAdmin' && req.user?.familyId !== list.family_id) return res.status(403).json({ error: 'Forbidden' });
+
+    // Try to find by (packing_list_id, item_id)
+    let pli = await packingListRepo.findItem(listId, itemId);
+    if (!pli) {
+      // Maybe the caller provided the packing_list_items.id directly
+      const maybe = await packingListRepo.findItemById(itemId);
+      if (maybe && maybe.packing_list_id === listId) pli = maybe;
+    }
+    if (!pli) return res.status(404).json({ error: 'List item not found' });
+
+    // Remove associated checks and the packing list row
+    await packingListRepo.removeItemByPliId(pli.id);
+    return res.json({ message: 'Packing list item removed' });
+  } catch (error) {
+    console.error('Error deleting packing list item:', error);
+    return res.status(500).json({ error: 'Failed to delete packing list item' });
   }
 });
 
@@ -643,8 +684,15 @@ router.put('/items/:id', authMiddleware, async (req: Request, res: Response) => 
 router.delete('/items/:id', authMiddleware, async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
+    // Remove item from all packing lists (and associated checks) before soft-deleting
+    try {
+      await itemRepo.removeFromAllPackingLists(id);
+    } catch (cleanErr) {
+      console.warn('Failed to remove item from packing lists prior to delete:', cleanErr);
+      // continue to soft-delete even if cleanup failed
+    }
     await itemRepo.softDelete(id);
-    return res.json({ message: 'Item deleted' });
+    return res.json({ message: 'Item deleted and removed from packing lists' });
   } catch (error) {
     console.error('Error deleting item:', error);
     return res.status(500).json({ error: 'Failed to delete item' });

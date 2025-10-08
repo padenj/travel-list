@@ -36,6 +36,7 @@ const SCHEMAS = {
       familyId TEXT NOT NULL,
       name TEXT NOT NULL,
       checked INTEGER DEFAULT 0,
+      isOneOff INTEGER DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
       deleted_at TEXT,
@@ -189,8 +190,35 @@ async function initializeDatabase(db: Database): Promise<void> {
       await db.exec(SCHEMAS.users);
       await db.exec(SCHEMAS.audit_log);
       await db.exec(SCHEMAS.indexes);
+
+      // Migration: ensure expected columns exist on legacy databases
+      try {
+        // helper to check and add a column if missing
+        const ensureColumn = async (table: string, column: string, definition: string) => {
+          const cols: any[] = await db.all(`PRAGMA table_info(${table})`);
+          const found = cols.some(c => c.name === column);
+          if (!found) {
+            console.log(`⚙️ Adding missing column ${column} to ${table}`);
+            await db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+          }
+        };
+
+        // packing_list_items should have display_name TEXT and not_needed INTEGER defaults
+        await ensureColumn('packing_list_items', 'display_name', 'TEXT');
+        await ensureColumn('packing_list_items', 'not_needed', "INTEGER DEFAULT 0");
+  // Ensure items.isOneOff exists
+  await ensureColumn('items', 'isOneOff', 'INTEGER DEFAULT 0');
       
+        // No automatic packing_list_items schema rebuild here. Schema migrations
+        // are handled via an explicit migration framework (see project notes).
+
+        // ...existing migration logic complete. No automatic cleanup here.
+      } catch (merr) {
+        console.warn('Migration step failed (non-fatal):', merr);
+      }
+
       console.log('📄 Database schema initialized successfully');
+      // (One-time cleanup removed)
     } catch (error) {
       console.error('❌ Database initialization failed:', error);
       throw error;
@@ -244,6 +272,8 @@ export async function getDb(): Promise<Database> {
   }
   return dbInstance;
 }
+
+// Migration helpers removed: automatic packing_list_items rebuilds are no longer performed here.
 
 // Graceful shutdown
 export async function closeDb(): Promise<void> {

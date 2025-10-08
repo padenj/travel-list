@@ -77,6 +77,8 @@ if (!hasTestingLibs) {
       (api.getCategoriesForItem as any).mockResolvedValue({ response: { ok: true }, data: [] });
       (api.getCategories as any).mockResolvedValue({ response: { ok: true }, data: { categories: [{ id: 'c1', name: 'Documents' }, { id: 'c2', name: 'Electronics' }] } });
       (api.getMembersForItem as any).mockResolvedValue({ response: { ok: true }, data: [] });
+  // New consolidated endpoint (used by ItemEditDrawer) — keep test compatibility by mocking it
+  (api.getItemEditData as any).mockResolvedValue({ response: { ok: true }, data: { categories: [{ id: 'c1', name: 'Documents' }, { id: 'c2', name: 'Electronics' }], itemCategories: [], members: [{ id: 'm1', name: 'Alice' }, { id: 'm2', name: 'Bob' }], itemMembers: [], wholeAssigned: false } });
 
       // assignment/category APIs
       (api.assignItemToCategory as any).mockResolvedValue({ response: { ok: true }, data: {} });
@@ -115,9 +117,8 @@ if (!hasTestingLibs) {
       // Click the second Edit (item-level)
       await user.click(editButtonsAfter[1]);
 
-      // Expect the item details APIs to be called
-      await waitFor(() => expect(api.getCategories).toHaveBeenCalled());
-      await waitFor(() => expect(api.getMembersForItem).toHaveBeenCalled());
+  // Expect the consolidated item edit API to be called
+  await waitFor(() => expect(api.getItemEditData).toHaveBeenCalled());
     });
 
     it('saves with no-op when nothing changed', async () => {

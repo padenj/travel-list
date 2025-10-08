@@ -6,6 +6,9 @@
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
     "dev:client": "vite",
     "dev:server": "tsx watch server/index.ts",
+    "migrate": "node server/migrations/run-migrations.cjs up",
+    "migrate:down": "node server/migrations/run-migrations.cjs down",
+    "migrate:status": "node server/migrations/run-migrations.cjs status",
     "build": "vite build",
     "preview": "vite preview",
   "test": "vitest --run",
@@ -54,6 +57,7 @@
     "tsx": "^4.19.2",
     "typescript": "^5.9.2",
     "vite": "^5.4.10",
-    "vitest": "^2.1.8"
+    "vitest": "^2.1.8",
+    "umzug": "^3.8.2"
   }
 }

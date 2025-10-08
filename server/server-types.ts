@@ -43,6 +43,7 @@ export interface Item {
   id: string;
   familyId: string;
   name: string;
+  isOneOff?: boolean;
   created_at: string;
   updated_at: string;
   deleted_at?: string | null;

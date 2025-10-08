@@ -160,9 +160,9 @@ export class ItemRepository {
   async create(item: Item): Promise<Item> {
     const db = await getDb();
     await db.run(
-      `INSERT INTO items (id, familyId, name, created_at, updated_at, deleted_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [item.id, item.familyId, item.name, item.created_at, item.updated_at, null]
+      `INSERT INTO items (id, familyId, name, isOneOff, created_at, updated_at, deleted_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [item.id, item.familyId, item.name, item.isOneOff ? 1 : 0, item.created_at, item.updated_at, null]
     );
     return this.findById(item.id) as Promise<Item>;
   }
@@ -182,12 +182,35 @@ export class ItemRepository {
 
   async findAll(familyId: string): Promise<Item[]> {
     const db = await getDb();
-    return db.all(`SELECT * FROM items WHERE familyId = ? AND deleted_at IS NULL ORDER BY created_at DESC`, [familyId]);
+    // By default exclude one-off items from master lists
+    return db.all(`SELECT * FROM items WHERE familyId = ? AND (isOneOff IS NULL OR isOneOff = 0) AND deleted_at IS NULL ORDER BY created_at DESC`, [familyId]);
   }
 
   async softDelete(id: string): Promise<void> {
     const db = await getDb();
     await db.run(`UPDATE items SET deleted_at = ? WHERE id = ?`, [new Date().toISOString(), id]);
+  }
+
+  // Remove references to an item from all packing lists (and related checks)
+  async removeFromAllPackingLists(item_id: string): Promise<void> {
+    const db = await getDb();
+    try {
+      await db.run('BEGIN TRANSACTION');
+      // Find packing list rows referencing this item
+      const rows: any[] = await db.all(`SELECT id FROM packing_list_items WHERE item_id = ?`, [item_id]);
+      const ids = rows.map(r => r.id).filter(Boolean);
+      if (ids.length > 0) {
+        // Delete related checks
+        const placeholders = ids.map(() => '?').join(',');
+        await db.run(`DELETE FROM packing_list_item_checks WHERE packing_list_item_id IN (${placeholders})`, ids);
+        // Delete packing list items
+        await db.run(`DELETE FROM packing_list_items WHERE id IN (${placeholders})`, ids);
+      }
+      await db.run('COMMIT');
+    } catch (err) {
+      try { await db.run('ROLLBACK'); } catch (e) {}
+      throw err;
+    }
   }
 
   // Assignment methods
@@ -422,7 +445,24 @@ export class ItemRepository {
 
     async removeItem(packing_list_id: string, item_id: string): Promise<void> {
       const db = await getDb();
+      // Find packing list item rows matching the packing_list_id and item_id
+      const rows: any[] = await db.all(`SELECT id FROM packing_list_items WHERE packing_list_id = ? AND item_id = ?`, [packing_list_id, item_id]);
+      if (rows && rows.length > 0) {
+        const ids = rows.map(r => r.id);
+        // Delete associated checks first
+        for (const id of ids) {
+          await db.run(`DELETE FROM packing_list_item_checks WHERE packing_list_item_id = ?`, [id]);
+        }
+      }
+      // Remove the packing list item rows
       await db.run(`DELETE FROM packing_list_items WHERE packing_list_id = ? AND item_id = ?`, [packing_list_id, item_id]);
+    }
+
+    // Remove a packing-list item by its packing_list_items.id (safe for one-off and legacy rows)
+    async removeItemByPliId(packing_list_item_id: string): Promise<void> {
+      const db = await getDb();
+      await db.run(`DELETE FROM packing_list_item_checks WHERE packing_list_item_id = ?`, [packing_list_item_id]);
+      await db.run(`DELETE FROM packing_list_items WHERE id = ?`, [packing_list_item_id]);
     }
 
     async setItemChecked(packing_list_id: string, item_id: string, checked: boolean): Promise<PackingListItem | undefined> {
@@ -449,54 +489,76 @@ export class ItemRepository {
     // Get packing list items with assigned members and whole-family flag
     async getItemsWithMembers(packing_list_id: string): Promise<any[]> {
       const db = await getDb();
-  // select packing list rows and include master item name (if any) to avoid extra lookups
-  const items = await db.all(`SELECT pli.*, i.name as master_name FROM packing_list_items pli LEFT JOIN items i ON i.id = pli.item_id WHERE pli.packing_list_id = ?`, [packing_list_id]);
+  // Only include packing-list rows that reference an existing, non-deleted master item.
+  // This enforces the invariant: packing list items are references to master items.
+  const items = await db.all(
+    `SELECT pli.*, i.name as master_name, i.id as master_id
+     FROM packing_list_items pli
+     JOIN items i ON i.id = pli.item_id AND i.deleted_at IS NULL
+     WHERE pli.packing_list_id = ?`,
+    [packing_list_id]
+  );
 
-      if (!items || items.length === 0) return [];
+  if (!items || items.length === 0) return [];
 
-      // Get members assigned to master items referenced by these packing list rows
-      const memberRows = await db.all(
-        `SELECT pli.id as packing_list_item_id, u.id as member_id, u.name, u.username
-         FROM packing_list_items pli
-         JOIN items i ON i.id = pli.item_id
-         JOIN item_members im ON im.item_id = i.id
-         JOIN users u ON u.id = im.member_id
-         WHERE pli.packing_list_id = ? AND u.deleted_at IS NULL`,
-        [packing_list_id]
-      );
+  // Get members assigned to the referenced master items
+  const memberRows = await db.all(
+    `SELECT pli.id as packing_list_item_id, u.id as member_id, u.name, u.username
+     FROM packing_list_items pli
+     JOIN items i ON i.id = pli.item_id AND i.deleted_at IS NULL
+     JOIN item_members im ON im.item_id = i.id
+     JOIN users u ON u.id = im.member_id
+     WHERE pli.packing_list_id = ? AND u.deleted_at IS NULL`,
+    [packing_list_id]
+  );
 
-      // Whole-family flags
-      const wholeRows = await db.all(
-        `SELECT pli.id as packing_list_item_id FROM packing_list_items pli JOIN item_whole_family iwf ON iwf.item_id = pli.item_id WHERE pli.packing_list_id = ?`,
-        [packing_list_id]
-      );
+  // Whole-family flags for the referenced master items
+  const wholeRows = await db.all(
+    `SELECT pli.id as packing_list_item_id FROM packing_list_items pli JOIN items i ON i.id = pli.item_id AND i.deleted_at IS NULL JOIN item_whole_family iwf ON iwf.item_id = i.id WHERE pli.packing_list_id = ?`,
+    [packing_list_id]
+  );
 
-      const membersByPli: Record<string, any[]> = {};
-      for (const r of memberRows) {
-        if (!membersByPli[r.packing_list_item_id]) membersByPli[r.packing_list_item_id] = [];
-        membersByPli[r.packing_list_item_id].push({ id: r.member_id, name: r.name, username: r.username });
-      }
+  const membersByPli: Record<string, any[]> = {};
+  for (const r of memberRows) {
+    if (!membersByPli[r.packing_list_item_id]) membersByPli[r.packing_list_item_id] = [];
+    membersByPli[r.packing_list_item_id].push({ id: r.member_id, name: r.name, username: r.username });
+  }
 
-      const wholeSet = new Set(wholeRows.map((r: any) => r.packing_list_item_id));
+  const wholeSet = new Set(wholeRows.map((r: any) => r.packing_list_item_id));
 
-      // Attach members and whole_family flag to each item
-      return items.map((it: any) => ({
-        ...it,
-        // prefer display_name on the packing list row, otherwise use the master item name we joined as master_name
-        name: it.display_name || it.master_name || it.name || '',
-        members: membersByPli[it.id] || [],
-        whole_family: wholeSet.has(it.id)
-      }));
+  // For each packing-list row, derive name and assignments from the master item (no display_name fallback)
+  return items.map((it: any) => ({
+    ...it,
+    name: it.master_name || '',
+    members: membersByPli[it.id] || [],
+    whole_family: wholeSet.has(it.id)
+  }));
     }
 
     // Add a one-off item that does not reference a master item
-    async addOneOffItem(packing_list_id: string, display_name: string, added_during_packing: boolean = true): Promise<PackingListItem> {
+    async addOneOffItem(packing_list_id: string, display_name: string, added_during_packing: boolean = true, memberIds?: string[]): Promise<PackingListItem> {
       const db = await getDb();
+      // Create a master item marked as one-off, then add it to the packing list by referencing the master item.
+      const newItemId = crypto.randomUUID();
+      const now = new Date().toISOString();
+      const familyRow: any = await db.get(`SELECT family_id FROM packing_lists WHERE id = ?`, [packing_list_id]);
+      const familyId = familyRow ? familyRow.family_id : null;
+      await db.run(
+        `INSERT INTO items (id, familyId, name, isOneOff, created_at, updated_at, deleted_at) VALUES (?, ?, ?, 1, ?, ?, NULL)`,
+        [newItemId, familyId, display_name, now, now]
+      );
+      // Assign to specified members if provided
+      if (Array.isArray(memberIds) && memberIds.length > 0) {
+        for (const m of memberIds) {
+          await db.run(`INSERT OR IGNORE INTO item_members (item_id, member_id) VALUES (?, ?)`, [newItemId, m]);
+        }
+      }
+      // Insert packing_list_items referencing the new master item, and also store display_name
       const id = crypto.randomUUID();
       await db.run(
-        `INSERT INTO packing_list_items (id, packing_list_id, display_name, checked, added_during_packing, created_at)
-         VALUES (?, ?, ?, 0, ?, ?)`,
-        [id, packing_list_id, display_name, added_during_packing ? 1 : 0, new Date().toISOString()]
+        `INSERT INTO packing_list_items (id, packing_list_id, item_id, display_name, checked, added_during_packing, created_at)
+         VALUES (?, ?, ?, ?, 0, ?, ?)`,
+        [id, packing_list_id, newItemId, display_name, added_during_packing ? 1 : 0, now]
       );
       const created = await this.findItemById(id);
       if (!created) throw new Error('Failed to add one-off item to packing list');
@@ -538,10 +600,13 @@ export class ItemRepository {
       const db = await getDb();
   const row = await this.findItemById(packing_list_item_id) as any;
   if (!row) throw new Error('Packing list item not found');
-  if (row.item_id) throw new Error('Item already references a master item');
+  if (row.item_id) {
+    // Already promoted — return existing master id and the current row
+    return { newItemId: row.item_id, updatedRow: row as PackingListItem };
+  }
   const newItemId = crypto.randomUUID();
   await db.run(`INSERT INTO items (id, familyId, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`, [newItemId, family_id, row.display_name || 'Unnamed Item', new Date().toISOString(), new Date().toISOString()]);
-      await db.run(`UPDATE packing_list_items SET item_id = ?, display_name = NULL WHERE id = ?`, [newItemId, packing_list_item_id]);
+  await db.run(`UPDATE packing_list_items SET item_id = ?, display_name = NULL WHERE id = ?`, [newItemId, packing_list_item_id]);
       const updated = await this.findItemById(packing_list_item_id);
       if (createTemplate && templateName) {
         const templateRepo = new TemplateRepository();

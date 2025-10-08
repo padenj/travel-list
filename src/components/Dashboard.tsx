@@ -3,14 +3,22 @@ import { Title, Container, Card, Group, Stack } from '@mantine/core';
 import { showNotification } from '@mantine/notifications';
 import ActivePackingListSelector from './ActivePackingListSelector';
 import { PackingListsSideBySide } from './PackingListsSideBySide';
+import ItemEditDrawer from './ItemEditDrawer';
 import { useActivePackingList } from '../contexts/ActivePackingListContext';
-import { getCurrentUserProfile, getItems, getPackingList, togglePackingListItemCheck } from '../api';
+import { getCurrentUserProfile, getItems, getPackingList, togglePackingListItemCheck, addItemToPackingList } from '../api';
 
 export default function Dashboard(): React.ReactElement {
   const { activeListId } = useActivePackingList();
   const [userLists, setUserLists] = useState<any[]>([]);
   const [wholeFamilyItems, setWholeFamilyItems] = useState<any[]>([]);
+  // local UI state: items marked as 'not needed' (not persisted)
+  const [notNeededByUser, setNotNeededByUser] = useState<Record<string, string[]>>({});
+  const [notNeededWhole, setNotNeededWhole] = useState<string[]>([]);
   const [listSelectionCount, setListSelectionCount] = useState(0);
+  const [familyId, setFamilyId] = useState<string | null>(null);
+  // familyMembers not needed in dashboard now that one-off drawer was removed
+  const [showItemDrawer, setShowItemDrawer] = useState(false);
+  const [itemDrawerDefaultMember, setItemDrawerDefaultMember] = useState<string | null>(null);
 
   // Increment counter whenever activeListId changes to force refresh
   useEffect(() => {
@@ -24,7 +32,7 @@ export default function Dashboard(): React.ReactElement {
     (async () => {
       try {
         const profile = await getCurrentUserProfile();
-  const fid = profile.response.ok && profile.data.family ? profile.data.family.id : null;
+          const fid = profile.response.ok && profile.data.family ? profile.data.family.id : null;
   const membersFromProfile = profile.response.ok && profile.data.family ? profile.data.family.members || [] : [];
   const currentUserId = profile.response.ok && profile.data.user ? profile.data.user.id : null;
         if (!activeListId || !fid) {
@@ -34,8 +42,8 @@ export default function Dashboard(): React.ReactElement {
         }
         
         // fetch master items for name lookup
-        const itemsRes = await getItems(fid);
-        const items = itemsRes.response.ok ? itemsRes.data.items || [] : [];
+  const itemsRes = await getItems(fid);
+  const items = itemsRes.response.ok ? itemsRes.data.items || [] : [];
         const listRes = await getPackingList(activeListId);
         if (!listRes.response.ok) {
           setUserLists([]);
@@ -45,7 +53,7 @@ export default function Dashboard(): React.ReactElement {
         const listItems = listRes.data.items || [];
         const checks = listRes.data.checks || [];
 
-        const userListsData: any[] = [];
+  const userListsData: any[] = [];
         for (const member of membersFromProfile) {
           const memberItems: any[] = [];
           for (const pli of listItems) {
@@ -61,6 +69,8 @@ export default function Dashboard(): React.ReactElement {
           }
           userListsData.push({ userId: member.id, userName: member.name || member.username, items: memberItems });
         }
+
+  // members info not stored locally here; add-drawer will load members when opened
 
         const wholeItems: any[] = [];
         for (const pli of listItems) {
@@ -79,6 +89,7 @@ export default function Dashboard(): React.ReactElement {
 
         setUserLists(userListsData);
         setWholeFamilyItems(wholeItems);
+    setFamilyId(fid);
       } catch (err) {
         console.error('Failed to load dashboard packing lists', err);
         setUserLists([]);
@@ -120,6 +131,52 @@ export default function Dashboard(): React.ReactElement {
         showNotification({ title: 'Network Error', message: 'Failed to update item check', color: 'red' });
       });
   };
+
+  const toggleNotNeeded = (userId: string | null, itemId: string) => {
+    if (userId) {
+      setNotNeededByUser(prev => {
+        const copy: Record<string, string[]> = { ...prev };
+        const setForUser = new Set(prev[userId] || []);
+        if (setForUser.has(itemId)) setForUser.delete(itemId);
+        else setForUser.add(itemId);
+        copy[userId] = Array.from(setForUser);
+        return copy;
+      });
+    } else {
+      setNotNeededWhole(prev => prev.includes(itemId) ? prev.filter(id => id !== itemId) : [...prev, itemId]);
+    }
+  };
+
+  const openAddDrawerFor = (userId: string | null) => {
+    setItemDrawerDefaultMember(userId);
+    setShowItemDrawer(true);
+  };
+
+  const handleItemDrawerSaved = async (payload?: { id?: string; name?: string }) => {
+    // If the drawer created a new master item, add it to the active packing list
+    try {
+      if (!activeListId) return;
+      if (payload?.id) {
+        // add the created master item to the packing list and respect any member assignment
+        const res = await addItemToPackingList(activeListId, payload.id);
+        if (!res.response.ok) {
+          showNotification({ title: 'Failed', message: 'Failed to add item to packing list', color: 'red' });
+        } else {
+          const newItem = res.data.item;
+          // if a default member was set, add to that member's column in the UI
+          const assignedMemberId = itemDrawerDefaultMember;
+          if (assignedMemberId) {
+            setUserLists(prev => prev.map(ul => ul.userId === assignedMemberId ? { ...ul, items: [{ id: newItem.id, name: newItem.display_name || newItem.name || payload.name || 'Item', checked: false, masterId: newItem.item_id || null }, ...ul.items] } : ul));
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Failed to add created item to packing list', err);
+    } finally {
+      setShowItemDrawer(false);
+      setItemDrawerDefaultMember(null);
+    }
+  };
   // Family setup wizard removed: families are created via System Administration
   
 
@@ -136,7 +193,16 @@ export default function Dashboard(): React.ReactElement {
       <Card shadow="sm" padding="lg" radius="md" withBorder mt="md">
         <Stack>
           <ActivePackingListSelector onChange={(_id) => { /* optionally notify parent */ }} />
-          <PackingListsSideBySide userLists={userLists} wholeFamilyItems={wholeFamilyItems} onCheckItem={handleCheckItem} />
+          <PackingListsSideBySide
+            userLists={userLists}
+            wholeFamilyItems={wholeFamilyItems}
+            onCheckItem={handleCheckItem}
+            notNeededByUser={notNeededByUser}
+            notNeededWhole={notNeededWhole}
+            onToggleNotNeeded={toggleNotNeeded}
+            onOpenAddDrawer={openAddDrawerFor}
+          />
+          <ItemEditDrawer opened={showItemDrawer} onClose={() => { setShowItemDrawer(false); setItemDrawerDefaultMember(null); }} masterItemId={null} initialName={undefined} familyId={familyId} showNameField={true} defaultAssignedMemberId={itemDrawerDefaultMember} onSaved={handleItemDrawerSaved} />
         </Stack>
       </Card>
 

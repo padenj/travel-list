@@ -171,6 +171,12 @@ export const setChecked = async (itemId: string, checked: boolean): Promise<ApiR
     });
   };
 
+  export const deletePackingListItem = async (listId: string, packingListItemId: string): Promise<ApiResponse> => {
+    return authenticatedApiCall(`/packing-lists/${listId}/items/${packingListItemId}`, {
+      method: 'DELETE',
+    });
+  };
+
   export const addItemToPackingList = async (listId: string, masterItemId?: string, oneOffName?: string): Promise<ApiResponse> => {
     const body: any = {};
     if (masterItemId) body.masterItemId = masterItemId;
