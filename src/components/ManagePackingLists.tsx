@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Card, Title, Group, Button, Stack, Text, Drawer, TextInput, Select, Badge, Checkbox } from '@mantine/core';
+import { Card, Title, Group, Button, Stack, Text, Drawer, TextInput, Badge, Checkbox, MultiSelect } from '@mantine/core';
 import { IconEdit } from '@tabler/icons-react';
 import {
   getFamilyPackingLists,
@@ -8,7 +8,7 @@ import {
   getCurrentUserProfile,
   getPackingList,
   getTemplates,
-  populatePackingListFromTemplate,
+  
   getCategoriesForItem,
   getItems,
   addItemToPackingList,
@@ -31,7 +31,8 @@ export default function ManagePackingLists() {
   const [categoryByItem, setCategoryByItem] = useState<Record<string, string>>({});
   const [editLoading, setEditLoading] = useState(false);
   const [templates, setTemplates] = useState<any[]>([]);
-  const [editSelectedTemplate, setEditSelectedTemplate] = useState<string | null>(null);
+  
+  const [editAssignedTemplates, setEditAssignedTemplates] = useState<string[]>([]);
   const [showAddPane, setShowAddPane] = useState(false);
   const [allItems, setAllItems] = useState<any[]>([]);
   const [selectedToAdd, setSelectedToAdd] = useState<string[]>([]);
@@ -40,6 +41,7 @@ export default function ManagePackingLists() {
   // Item edit drawer state (moved to shared component)
   const [showEditItemDrawer, setShowEditItemDrawer] = useState(false);
   const [editTargetItem, setEditTargetItem] = useState<any | null>(null); // packing-list item object from editItems
+  const [itemDrawerDefaultMember, setItemDrawerDefaultMember] = useState<string | null | undefined>(undefined);
 
   useEffect(() => {
     (async () => {
@@ -130,6 +132,9 @@ export default function ManagePackingLists() {
         return { id: li.id, itemId: li.item_id || null, name, assigned, whole, oneOff: !li.item_id };
       });
       setEditItems(enriched);
+  // load templates assigned to this packing list (if server provides them)
+  const assigned = Array.isArray(res.data.template_ids) ? res.data.template_ids : (Array.isArray(res.data.templates) ? res.data.templates.map((t: any) => t.id) : []);
+  setEditAssignedTemplates(assigned || []);
       // Fetch categories for master items (first category will be used for grouping)
         try {
         const itemIds = Array.from(new Set(enriched.map((e: any) => String(e.itemId)).filter(Boolean))) as string[];
@@ -157,11 +162,7 @@ export default function ManagePackingLists() {
   };
 
   const openEditItemDrawerFor = (it: any) => {
-    // Only allow editing master items (items that have an itemId). One-off packing-list items do not have a global master item to edit.
-    if (!it.itemId) {
-      showNotification({ title: 'Not editable', message: 'One-off items cannot be edited here. Promote to a master item first.', color: 'blue' });
-      return;
-    }
+    // If editing a one-off packing-list item, allow opening the drawer in promote mode (so user can promote to master)
     setEditTargetItem(it);
     setShowEditItemDrawer(true);
   };
@@ -176,26 +177,7 @@ export default function ManagePackingLists() {
     }
   };
 
-  const applyTemplateToEditList = async (templateId: string | null) => {
-    if (!editListId || !templateId) return;
-    setEditLoading(true);
-    try {
-      const res = await populatePackingListFromTemplate(editListId, templateId);
-      if (res.response.ok) {
-        showNotification({ title: 'Applied', message: 'Template applied to list', color: 'green' });
-        await reload();
-        // reload modal items
-        if (editListId) await openEditFor({ id: editListId, name: editListName });
-      } else {
-        showNotification({ title: 'Failed', message: res.data?.error || 'Failed to apply template', color: 'red' });
-      }
-    } catch (err) {
-      console.error(err);
-      showNotification({ title: 'Error', message: String(err), color: 'red' });
-    } finally {
-      setEditLoading(false);
-    }
-  };
+  // Note: single-use "apply template" remains available via direct API call if needed.
 
   const openAddItemsPane = async () => {
     if (!familyId) return;
@@ -333,19 +315,45 @@ export default function ManagePackingLists() {
 
           <Group mt="md" style={{ justifyContent: 'space-between' }}>
             <Group style={{ alignItems: 'center' }}>
-              <Select
-                data={[{ value: '', label: '-- apply template --' }, ...templates.map(t => ({ value: t.id, label: t.name }))]}
-                value={editSelectedTemplate || ''}
-                onChange={(val) => setEditSelectedTemplate(val || null)}
-                placeholder="Apply template to this list"
+              {/* Allow assigning multiple templates to this packing list. These assignments are persisted on save. */}
+              <Text style={{ marginRight: 8 }}>Assigned templates:</Text>
+              <MultiSelect
+                data={templates.map(t => ({ value: t.id, label: t.name }))}
+                value={editAssignedTemplates}
+                onChange={(vals) => setEditAssignedTemplates(vals)}
+                placeholder="Select templates to assign..."
+                searchable
+                
                 style={{ minWidth: 260 }}
               />
-              <Button onClick={() => applyTemplateToEditList(editSelectedTemplate)} disabled={!editSelectedTemplate || editLoading}>Apply</Button>
-              <Button onClick={openAddItemsPane} disabled={editLoading}>Add Items</Button>
-              <Group>
-                <Button variant="default" onClick={() => setShowEditModal(false)}>Close</Button>
-              </Group>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Button onClick={async () => {
+                  if (!editListId) return;
+                  setEditLoading(true);
+                  try {
+                    await updatePackingList(editListId, { templateIds: editAssignedTemplates });
+                    showNotification({ title: 'Saved', message: 'Template assignments saved', color: 'green' });
+                    await reload();
+                    if (editListId) await openEditFor({ id: editListId, name: editListName });
+                  } catch (err) {
+                    console.error('Failed to save template assignments', err);
+                    showNotification({ title: 'Failed', message: 'Could not save template assignments', color: 'red' });
+                  } finally {
+                    setEditLoading(false);
+                  }
+                }} disabled={editLoading}>Save Assignments</Button>
+                <Button onClick={openAddItemsPane} disabled={editLoading}>Add Items</Button>
+                <Group>
+                  <Button variant="default" onClick={() => setShowEditModal(false)}>Close</Button>
+                </Group>
+              </div>
             </Group>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              {editAssignedTemplates.map(tid => {
+                const t = templates.find(tt => tt.id === tid);
+                return t ? <Badge key={tid}>{t.name}</Badge> : null;
+              })}
+            </div>
           </Group>
         </div>
       </Drawer>
@@ -357,6 +365,13 @@ export default function ManagePackingLists() {
             <Text fw={700}>Add Items</Text>
             <Group>
               <Button variant="default" size="xs" onClick={() => setShowAddPane(false)}>Cancel</Button>
+              <Button size="xs" onClick={() => {
+                // Open ItemEditDrawer in create mode for a one-off item
+                setEditTargetItem({ itemId: null, name: '' });
+                // defaultAssignedMember left undefined; caller can set to null for whole-family if needed
+                setItemDrawerDefaultMember(undefined);
+                setShowEditItemDrawer(true);
+              }}>New Item</Button>
               <Button size="xs" onClick={applyAddItems} loading={addingLoading}>Apply</Button>
             </Group>
           </div>
@@ -421,12 +436,39 @@ export default function ManagePackingLists() {
       
       <ItemEditDrawer
         opened={showEditItemDrawer}
-        onClose={() => { setShowEditItemDrawer(false); setEditTargetItem(null); }}
+        onClose={() => { setShowEditItemDrawer(false); setEditTargetItem(null); setItemDrawerDefaultMember(undefined); }}
         masterItemId={editTargetItem?.itemId}
         initialName={editTargetItem?.name}
         familyId={familyId}
-        showNameField={false}
-        onSaved={handleItemSaved}
+  // Show the name input when creating a new item (editTargetItem exists and has no itemId)
+  showNameField={!!(editTargetItem && !editTargetItem.itemId)}
+  defaultAssignedMemberId={itemDrawerDefaultMember}
+  zIndex={3000}
+        onSaved={async (payload) => {
+          // When a new master item is created from the add-items pane, refresh the available items list so it can be added
+          try {
+            // If an item was created and we're editing a packing list from the Add Items pane,
+            // add the created item to that packing list so it appears in the modal immediately.
+            if (payload && (payload as any).id && showAddPane && editListId) {
+              try {
+                await addItemToPackingList(editListId, (payload as any).id);
+                showNotification({ title: 'Added', message: 'New item added to the packing list', color: 'green' });
+              } catch (addErr) {
+                console.error('Failed to auto-add created item to packing list', addErr);
+                // continue to refresh available items even if auto-add failed
+              }
+            }
+            if (showAddPane && familyId) {
+              const res = await getItems(familyId);
+              if (res.response.ok) setAllItems((res.data.items || []).filter((it: any) => !new Set(editItems.map(e => e.itemId).filter(Boolean)).has(it.id)));
+            }
+          } catch (e) {
+            // ignore
+          }
+          if (handleItemSaved) await handleItemSaved(payload as any);
+        }}
+        showIsOneOffCheckbox={true}
+        promoteContext={editTargetItem && !editTargetItem.itemId ? { listId: editListId || '', packingListItemId: editTargetItem.id } : null}
       />
     </Card>
   );

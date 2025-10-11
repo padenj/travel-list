@@ -13,6 +13,7 @@ export interface User {
   must_change_password?: boolean;
   email?: string;
   familyId?: string | null;
+  position?: number | null;
   created_at: string;
   updated_at: string;
   deleted_at?: string | null;

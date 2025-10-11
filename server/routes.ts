@@ -32,6 +32,25 @@ const templateRepo = new TemplateRepository();
 import { PackingListRepository } from './repositories';
 const packingListRepo = new PackingListRepository();
 
+// Async propagation helper: when a template changes, update all packing lists assigned to it
+function propagateTemplateToAssignedLists(templateId: string) {
+  // run asynchronously to avoid blocking API responses
+  setImmediate(async () => {
+    try {
+      const lists = await packingListRepo.getPackingListsForTemplate(templateId);
+      for (const l of lists) {
+        try {
+          await packingListRepo.reconcilePackingListAgainstTemplate(l.id, templateId);
+        } catch (err) {
+          console.error('Error reconciling packing list from template during propagation', { listId: l.id, templateId, err });
+        }
+      }
+    } catch (err) {
+      console.error('Error during template propagation task for templateId', templateId, err);
+    }
+  });
+}
+
 // Note: family access enforcement is handled by familyAccessMiddleware in middleware.ts
 
 // Template CRUD
@@ -100,7 +119,9 @@ router.put('/template/:id', authMiddleware, async (req: Request, res: Response) 
       }
     }
     const updated = await templateRepo.update(id, updates);
-    return res.json({ template: updated });
+  // enqueue propagation to assigned packing lists (async)
+  propagateTemplateToAssignedLists(id);
+  return res.json({ template: updated });
   } catch (error) {
     console.error('Error updating template:', error);
     return res.status(500).json({ error: 'Failed to update template' });
@@ -137,7 +158,9 @@ router.post('/template/:id/categories/:categoryId', authMiddleware, async (req: 
       }
     }
     await templateRepo.assignCategory(id, categoryId);
-    return res.json({ message: 'Category assigned to template' });
+  // propagate changes to assigned lists
+  propagateTemplateToAssignedLists(id);
+  return res.json({ message: 'Category assigned to template' });
   } catch (error) {
     console.error('Error assigning category:', error);
     return res.status(500).json({ error: 'Failed to assign category' });
@@ -155,7 +178,8 @@ router.delete('/template/:id/categories/:categoryId', authMiddleware, async (req
       }
     }
     await templateRepo.removeCategory(id, categoryId);
-    return res.json({ message: 'Category removed from template' });
+  propagateTemplateToAssignedLists(id);
+  return res.json({ message: 'Category removed from template' });
   } catch (error) {
     console.error('Error removing category:', error);
     return res.status(500).json({ error: 'Failed to remove category' });
@@ -173,7 +197,16 @@ router.post('/template/:id/items/:itemId', authMiddleware, async (req: Request, 
       }
     }
     await templateRepo.assignItem(id, itemId);
-    return res.json({ message: 'Item assigned to template' });
+  // Propagate changes to assigned lists synchronously to ensure consistency in tests
+  try {
+    const lists = await packingListRepo.getPackingListsForTemplate(id);
+    for (const l of lists) {
+      await packingListRepo.reconcilePackingListAgainstTemplate(l.id, id);
+    }
+  } catch (err) {
+    console.error('Error propagating template changes synchronously', { templateId: id, err });
+  }
+  return res.json({ message: 'Item assigned to template' });
   } catch (error) {
     console.error('Error assigning item:', error);
     return res.status(500).json({ error: 'Failed to assign item' });
@@ -191,7 +224,16 @@ router.delete('/template/:id/items/:itemId', authMiddleware, async (req: Request
       }
     }
     await templateRepo.removeItem(id, itemId);
-    return res.json({ message: 'Item removed from template' });
+  // Propagate changes to assigned lists synchronously to ensure consistency in tests
+  try {
+    const lists = await packingListRepo.getPackingListsForTemplate(id);
+    for (const l of lists) {
+      await packingListRepo.reconcilePackingListAgainstTemplate(l.id, id);
+    }
+  } catch (err) {
+    console.error('Error propagating template changes synchronously', { templateId: id, err });
+  }
+  return res.json({ message: 'Item removed from template' });
   } catch (error) {
     console.error('Error removing item:', error);
     return res.status(500).json({ error: 'Failed to remove item' });
@@ -231,8 +273,10 @@ router.post('/template/:id/sync-items', authMiddleware, async (req: Request, res
       await templateRepo.removeItem(id, itemId);
     }
 
-    const updatedItems = await templateRepo.getItemsForTemplate(id);
-    return res.json({ templateId: id, items: updatedItems });
+  const updatedItems = await templateRepo.getItemsForTemplate(id);
+  // propagate changes to assigned lists
+  propagateTemplateToAssignedLists(id);
+  return res.json({ templateId: id, items: updatedItems });
   } catch (error) {
     console.error('Error syncing template items:', error);
     return res.status(500).json({ error: 'Failed to sync template items' });
@@ -364,7 +408,9 @@ router.post('/families/:familyId/packing-lists', authMiddleware, familyAccessMid
   try {
     const newList = await packingListRepo.create({ id: uuidv4(), family_id: familyId, name: name.trim(), created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
     if (templateId) {
-      await packingListRepo.populateFromTemplate(newList.id, templateId);
+      // record assignment and reconcile immediately for newly created list
+      await packingListRepo.setTemplatesForPackingList(newList.id, [templateId]);
+      await packingListRepo.reconcilePackingListAgainstTemplate(newList.id, templateId);
     }
     return res.json({ list: newList });
   } catch (error) {
@@ -396,7 +442,9 @@ router.get('/packing-lists/:id', authMiddleware, async (req: Request, res: Respo
       checkCount: checks.length,
       checks: checks.map(c => ({ packing_list_item_id: c.packing_list_item_id, member_id: c.member_id, checked: c.checked }))
     });
-    return res.json({ list, items: sanitizedItems, checks });
+    // Also include any template assignments for this packing list so the UI can display them
+    const templateIds = await packingListRepo.getTemplatesForPackingList(id);
+    return res.json({ list, items: sanitizedItems, checks, template_ids: templateIds });
   } catch (error) {
     console.error('Error fetching packing list:', error);
     return res.status(500).json({ error: 'Failed to fetch packing list' });
@@ -412,8 +460,10 @@ router.post('/packing-lists/:id/populate-from-template', authMiddleware, async (
     const list = await packingListRepo.findById(id);
     if (!list) return res.status(404).json({ error: 'Packing list not found' });
     if (req.user?.role !== 'SystemAdmin' && req.user?.familyId !== list.family_id) return res.status(403).json({ error: 'Forbidden' });
-    await packingListRepo.populateFromTemplate(id, templateId);
-    return res.json({ message: 'Populated from template' });
+    // persist assignment if not already assigned
+    await packingListRepo.setTemplatesForPackingList(id, Array.from(new Set([...(await packingListRepo.getTemplatesForPackingList(id)), templateId])));
+    await packingListRepo.reconcilePackingListAgainstTemplate(id, templateId);
+    return res.json({ message: 'Populated from template and reconciled' });
   } catch (error) {
     console.error('Error populating packing list from template:', error);
     return res.status(500).json({ error: 'Failed to populate packing list' });
@@ -428,6 +478,14 @@ router.put('/packing-lists/:id', authMiddleware, async (req: Request, res: Respo
     const existing = await packingListRepo.findById(id);
     if (!existing) return res.status(404).json({ error: 'Packing list not found' });
     if (req.user?.role !== 'SystemAdmin' && req.user?.familyId !== existing.family_id) return res.status(403).json({ error: 'Forbidden' });
+    // If templateIds provided, persist assignments
+    if (Array.isArray(updates.templateIds)) {
+      await packingListRepo.setTemplatesForPackingList(id, updates.templateIds);
+      // enqueue propagation for each assigned template
+      for (const tid of updates.templateIds) propagateTemplateToAssignedLists(tid);
+      // remove templateIds from updates passed to generic update
+      delete updates.templateIds;
+    }
     const updated = await packingListRepo.update(id, updates);
     return res.json({ list: updated });
   } catch (error) {
@@ -616,6 +674,13 @@ router.put('/categories/:id', authMiddleware, async (req: Request, res: Response
   }
   try {
     const updated = await categoryRepo.update(id, { name: name.trim() });
+    // find templates referencing this category and propagate changes
+    try {
+      const templateIds = await templateRepo.getTemplatesReferencingCategory(id);
+      for (const tid of templateIds) propagateTemplateToAssignedLists(tid);
+    } catch (e) {
+      console.error('Error enqueuing propagation after category update', e);
+    }
     return res.json({ category: updated });
   } catch (error) {
     console.error('Error updating category:', error);
@@ -627,6 +692,13 @@ router.delete('/categories/:id', authMiddleware, async (req: Request, res: Respo
   const { id } = req.params;
   try {
     await categoryRepo.softDelete(id);
+    // propagate for templates referencing this category
+    try {
+      const templateIds = await templateRepo.getTemplatesReferencingCategory(id);
+      for (const tid of templateIds) propagateTemplateToAssignedLists(tid);
+    } catch (e) {
+      console.error('Error enqueuing propagation after category delete', e);
+    }
     return res.json({ message: 'Category deleted' });
   } catch (error) {
     console.error('Error deleting category:', error);
@@ -641,10 +713,12 @@ router.post('/items', authMiddleware, async (req: Request, res: Response) => {
     return res.status(400).json({ error: 'Family ID and item name are required' });
   }
   try {
+    const isOneOff = typeof req.body.isOneOff !== 'undefined' ? (!!req.body.isOneOff) : false;
     const item = await itemRepo.create({
       id: uuidv4(),
       familyId,
       name: name.trim(),
+      isOneOff: isOneOff,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     });
@@ -674,6 +748,13 @@ router.put('/items/:id', authMiddleware, async (req: Request, res: Response) => 
   }
   try {
     const updated = await itemRepo.update(id, { name: name.trim() });
+    // enqueue propagation for templates that reference this item
+    try {
+      const templateIds = await templateRepo.getTemplatesReferencingItem(id);
+      for (const tid of templateIds) propagateTemplateToAssignedLists(tid);
+    } catch (e) {
+      console.error('Error enqueuing propagation after item update', e);
+    }
     return res.json({ item: updated });
   } catch (error) {
     console.error('Error updating item:', error);
@@ -692,6 +773,13 @@ router.delete('/items/:id', authMiddleware, async (req: Request, res: Response) 
       // continue to soft-delete even if cleanup failed
     }
     await itemRepo.softDelete(id);
+    // Also propagate for templates referencing this item so lists can reconcile
+    try {
+      const templateIds = await templateRepo.getTemplatesReferencingItem(id);
+      for (const tid of templateIds) propagateTemplateToAssignedLists(tid);
+    } catch (e) {
+      console.error('Error enqueuing propagation after item delete', e);
+    }
     return res.json({ message: 'Item deleted and removed from packing lists' });
   } catch (error) {
     console.error('Error deleting item:', error);
@@ -704,6 +792,13 @@ router.post('/items/:itemId/categories/:categoryId', authMiddleware, async (req:
   const { itemId, categoryId } = req.params;
   try {
     await itemRepo.assignToCategory(itemId, categoryId);
+    // templates referencing this category may now include this item; propagate those templates
+    try {
+      const templateIds = await templateRepo.getTemplatesReferencingCategory(categoryId);
+      for (const tid of templateIds) propagateTemplateToAssignedLists(tid);
+    } catch (e) {
+      console.error('Error enqueuing propagation after item->category assign', e);
+    }
     return res.json({ message: 'Item assigned to category' });
   } catch (error) {
     console.error('Error assigning item to category:', error);
@@ -715,6 +810,13 @@ router.delete('/items/:itemId/categories/:categoryId', authMiddleware, async (re
   const { itemId, categoryId } = req.params;
   try {
     await itemRepo.removeFromCategory(itemId, categoryId);
+    // templates referencing this category may now exclude this item; propagate those templates
+    try {
+      const templateIds = await templateRepo.getTemplatesReferencingCategory(categoryId);
+      for (const tid of templateIds) propagateTemplateToAssignedLists(tid);
+    } catch (e) {
+      console.error('Error enqueuing propagation after item->category remove', e);
+    }
     return res.json({ message: 'Item removed from category' });
   } catch (error) {
     console.error('Error removing item from category:', error);
@@ -981,6 +1083,79 @@ router.post('/families/:familyId/members', authMiddleware, async (req: Request, 
   }
 });
 
+// Update family member order (SystemAdmin or FamilyAdmin for the family) - MUST come before :memberId route
+router.put('/families/:familyId/members/order', authMiddleware, async (req: Request, res: Response): Promise<Response> => {
+  // Allow SystemAdmin, or FamilyAdmin of the target family
+  console.log('🔄 Member order endpoint hit - familyId:', req.params.familyId);
+  console.log('🔄 Request body:', JSON.stringify(req.body));
+  console.log('🔄 User role:', req.user?.role, 'User familyId:', req.user?.familyId);
+  
+  const { familyId } = req.params;
+  if (req.user?.role !== 'SystemAdmin') {
+    if (!(req.user?.familyId === familyId && req.user?.role === 'FamilyAdmin')) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+  }
+  const { memberIds } = req.body;
+  if (!Array.isArray(memberIds)) {
+    return res.status(400).json({ error: 'memberIds must be an array' });
+  }
+  try {
+    // Validate family exists
+    const family = await familyRepo.findById(familyId);
+    if (!family) return res.status(404).json({ error: 'Family not found' });
+
+    // Fetch current members for the family
+    const currentMembers = await userRepo.findByFamilyId(familyId);
+    const currentIds = new Set(currentMembers.map(m => m.id));
+
+    // Ensure supplied ids are a permutation/subset of current members
+    for (const id of memberIds) {
+      if (!currentIds.has(id)) {
+        return res.status(400).json({ error: `Invalid member id: ${id}` });
+      }
+    }
+
+    // Update positions in a transaction-like loop
+    console.log('🔄 About to update positions for memberIds:', memberIds);
+    const db = await (await import('./db')).getDb();
+    try {
+      console.log('🔄 Starting transaction');
+      await db.run('BEGIN TRANSACTION');
+      for (let idx = 0; idx < memberIds.length; idx++) {
+        const id = memberIds[idx];
+        // position lower means earlier/left-most
+        console.log(`🔄 Updating member ${id} to position ${idx}`);
+        const result = await db.run(`UPDATE users SET position = ?, updated_at = ? WHERE id = ?`, [idx, new Date().toISOString(), id]);
+        console.log(`🔄 Update result for ${id}:`, result);
+      }
+      console.log('🔄 Committing transaction');
+      await db.run('COMMIT');
+      console.log('✅ Transaction committed successfully');
+    } catch (e) {
+      console.error('❌ Transaction error:', e);
+      try { 
+        console.log('🔄 Rolling back transaction');
+        await db.run('ROLLBACK'); 
+      } catch (er) {
+        console.error('❌ Rollback error:', er);
+      }
+      throw e;
+    }
+
+    // Debug: Check what the repository returns after update
+    console.log('🔍 Checking members order after update...');
+    const updatedMembers = await userRepo.findByFamilyId(familyId);
+    console.log('🔍 Updated members from DB:', updatedMembers.map(m => ({ id: m.id, name: m.name, username: m.username, position: m.position })));
+
+    return res.json({ message: 'Member order updated' });
+  } catch (error) {
+    console.error('❌ Error updating member order:', error);
+    console.error('❌ Error stack:', error instanceof Error ? error.stack : 'No stack trace');
+    return res.status(500).json({ error: 'Failed to update member order' });
+  }
+});
+
 // Edit family member (SystemAdmin only)
 router.put('/families/:familyId/members/:memberId', authMiddleware, async (req: Request, res: Response): Promise<Response> => {
   if (req.user?.role !== 'SystemAdmin') {
@@ -1004,6 +1179,7 @@ router.put('/families/:familyId/members/:memberId', authMiddleware, async (req: 
     return res.status(500).json({ error: 'Failed to update family member' });
   }
 });
+
 
 // Reset password for family member (SystemAdmin only)
 router.post('/families/:familyId/members/:memberId/reset-password', authMiddleware, async (req: Request, res: Response): Promise<Response> => {
@@ -1081,9 +1257,8 @@ router.get('/users/me', authMiddleware, async (req: Request, res: Response): Pro
     if (user.familyId) {
       family = await familyRepo.findById(user.familyId);
       if (family) {
-        // Get all users in this family
-        members = await userRepo.findAll();
-        members = members.filter(u => u.familyId === user.familyId && !u.deleted_at);
+        // Get all users in this family (using findByFamilyId for proper position ordering)
+        members = await userRepo.findByFamilyId(user.familyId);
         // Remove sensitive info from each member
         members = members.map(({ password_hash, ...rest }) => rest);
         family = { ...family, members };
@@ -1154,10 +1329,10 @@ router.get('/families/:id', authMiddleware, familyAccessMiddleware('id'), async 
   try {
     const family = await familyRepo.findById(id);
     if (!family) return res.status(404).json({ error: 'Family not found' });
-    // Include members for convenience (users in this family)
-    const allUsers = await userRepo.findAll();
-    const members = allUsers.filter(u => u.familyId === id && !u.deleted_at).map(({ password_hash, ...rest }) => rest);
-    return res.json({ family: { ...family, members } });
+    // Include members for convenience (users in this family, with proper position ordering)
+    const members = await userRepo.findByFamilyId(id);
+    const safeMembers = members.map(({ password_hash, ...rest }) => rest);
+    return res.json({ family: { ...family, members: safeMembers } });
   } catch (error) {
     console.error('Error fetching family:', error);
     return res.status(500).json({ error: 'Failed to fetch family' });

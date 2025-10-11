@@ -90,6 +90,24 @@ const SCHEMAS = {
         FOREIGN KEY (item_id) REFERENCES items(id)
       );
 
+      CREATE TABLE IF NOT EXISTS packing_list_templates (
+        packing_list_id TEXT NOT NULL,
+        template_id TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (packing_list_id, template_id),
+        FOREIGN KEY (packing_list_id) REFERENCES packing_lists(id),
+        FOREIGN KEY (template_id) REFERENCES templates(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS packing_list_item_templates (
+        packing_list_item_id TEXT NOT NULL,
+        template_id TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (packing_list_item_id, template_id),
+        FOREIGN KEY (packing_list_item_id) REFERENCES packing_list_items(id),
+        FOREIGN KEY (template_id) REFERENCES templates(id)
+      );
+
       CREATE TABLE IF NOT EXISTS packing_lists (
         id TEXT PRIMARY KEY,
         family_id TEXT NOT NULL,
@@ -208,6 +226,8 @@ async function initializeDatabase(db: Database): Promise<void> {
         await ensureColumn('packing_list_items', 'not_needed', "INTEGER DEFAULT 0");
   // Ensure items.isOneOff exists
   await ensureColumn('items', 'isOneOff', 'INTEGER DEFAULT 0');
+    // Ensure users.position exists for ordering family members
+    await ensureColumn('users', 'position', 'INTEGER');
       
         // No automatic packing_list_items schema rebuild here. Schema migrations
         // are handled via an explicit migration framework (see project notes).

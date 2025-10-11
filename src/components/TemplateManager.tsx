@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Button, TextInput, Textarea, Group, Modal, Checkbox, Stack, Tabs, Card, Title, Text, List, ActionIcon, Autocomplete } from '@mantine/core';
+import { Button, TextInput, Textarea, Group, Modal, Checkbox, Stack, Tabs, Card, Title, Text, List, ActionIcon } from '@mantine/core';
 import { useNavigate } from 'react-router-dom';
 import {
   getTemplates,
@@ -13,13 +13,13 @@ import {
   getCategoriesForTemplate,
   getItemsForTemplate,
   getItemsForCategory,
-  createItem,
   removeItemFromTemplate
 } from '../api';
 import { getCurrentUserProfile } from '../api';
 import { useImpersonation } from '../contexts/ImpersonationContext';
 import { useRefresh } from '../contexts/RefreshContext';
 import { IconEdit, IconTrash, IconPlus, IconX } from '@tabler/icons-react';
+import AddItemsDrawer from './AddItemsDrawer';
 
 type Template = {
   id: string;
@@ -41,8 +41,8 @@ export default function TemplateManager() {
   const [form, setForm] = useState<{ name: string; description: string; categories: string[]; items: string[] }>({ name: '', description: '', categories: [], items: [] });
   const [familyId, setFamilyId] = useState<string | null>(null);
   const [templateDetails, setTemplateDetails] = useState<{ [templateId: string]: { categories: Category[]; items: Item[]; categoryItems: { [categoryId: string]: Item[] } } }>({});
-  const [addItemValue, setAddItemValue] = useState('');
-  const [addItemLoading, setAddItemLoading] = useState(false);
+  // addItemValue removed; AddItemsDrawer will handle creating/selecting items
+  const [showAddItemsDrawer, setShowAddItemsDrawer] = useState<{ open: boolean; templateId?: string }>({ open: false });
 
   const { impersonatingFamilyId } = useImpersonation();
   const { refreshKey } = useRefresh();
@@ -193,31 +193,20 @@ export default function TemplateManager() {
 
   // Add individual item to template (existing or new)
   async function handleAddIndividualItem(templateId: string) {
-    setAddItemLoading(true);
-    let itemToAdd = items.find(i => i.name.toLowerCase() === addItemValue.trim().toLowerCase());
-    let newItem: Item | undefined;
-    if (!itemToAdd && familyId) {
-      // Create new item
-      const res = await createItem(familyId, addItemValue.trim());
-      if (res.response.ok) {
-        newItem = res.data.item;
-        if (newItem) setItems([...items, newItem]);
-        itemToAdd = newItem;
-      }
-    }
-    if (itemToAdd) {
-      await assignItemToTemplate(templateId, itemToAdd.id);
-      setTemplateDetails(prev => ({
-        ...prev,
-        [templateId]: {
-          ...prev[templateId],
-          items: [...prev[templateId].items, itemToAdd]
-        }
-      }));
-    }
-    setAddItemValue('');
-    setAddItemLoading(false);
+    // open AddItemsDrawer for this template
+    setShowAddItemsDrawer({ open: true, templateId });
   }
+
+  // Prepare excluded item ids for the AddItemsDrawer in a clear, typed local variable
+  const excludedItemIdsForDrawer: string[] = (() => {
+    if (!showAddItemsDrawer.open || !showAddItemsDrawer.templateId) return [];
+    const tid = showAddItemsDrawer.templateId;
+    const details = templateDetails[tid] || { categories: [], items: [], categoryItems: {} };
+    const itemIds = (details.items || []).map(i => i.id);
+    const categoryItemIds = (details.categories || []).flatMap(c => (details.categoryItems[c.id] || []).map(i => i.id));
+    // dedupe just in case
+    return Array.from(new Set([...itemIds, ...categoryItemIds]));
+  })();
 
   return (
     <div>
@@ -305,23 +294,7 @@ export default function TemplateManager() {
                             )}
                           </List>
                           <Group>
-                            <Autocomplete
-                              data={items.filter(i => !(details.items || []).some(ti => ti.id === i.id) && !details.categories.some(cat => (details.categoryItems[cat.id] || []).some(ci => ci.id === i.id))).map(i => i.name)}
-                              value={addItemValue}
-                              onChange={setAddItemValue}
-                              placeholder="Add item to template"
-                              disabled={addItemLoading}
-                              onKeyDown={async e => {
-                                if (e.key === 'Enter' && addItemValue.trim()) {
-                                  await handleAddIndividualItem(template.id);
-                                }
-                              }}
-                            />
-                            <Button
-                              leftSection={<IconPlus size={16} />}
-                              onClick={() => handleAddIndividualItem(template.id)}
-                              disabled={!addItemValue.trim() || addItemLoading}
-                            >
+                            <Button leftSection={<IconPlus size={16} />} onClick={() => handleAddIndividualItem(template.id)}>
                               Add Item
                             </Button>
                           </Group>
@@ -398,6 +371,51 @@ export default function TemplateManager() {
           <Button variant="outline" onClick={() => setModalOpen(false)}>Cancel</Button>
         </Group>
       </Modal>
+      <AddItemsDrawer
+        opened={showAddItemsDrawer.open}
+        onClose={() => setShowAddItemsDrawer({ open: false })}
+        familyId={familyId}
+        excludedItemIds={excludedItemIdsForDrawer}
+        showIsOneOffCheckbox={false}
+        autoApplyOnCreate={true}
+        onApply={async (ids: string[]) => {
+          const tid = showAddItemsDrawer.templateId;
+          if (!tid) return;
+          // assign items to template on the server
+          for (const id of ids) {
+            await assignItemToTemplate(tid, id);
+          }
+          // reload template items from server to ensure we have up-to-date metadata
+          try {
+            const itemRes = await getItemsForTemplate(tid);
+            if (itemRes.response.ok && itemRes.data && itemRes.data.items) {
+              setTemplateDetails(prev => ({
+                ...prev,
+                [tid]: {
+                  ...prev[tid],
+                  items: itemRes.data.items
+                }
+              }));
+            }
+          } catch (e) {
+            // fallback: try to append by id lookup in master items list
+            for (const id of ids) {
+              const it = items.find(i => i.id === id);
+              if (it) {
+                setTemplateDetails(prev => ({
+                  ...prev,
+                  [tid]: {
+                    ...prev[tid],
+                    items: [...(prev[tid].items || []), it]
+                  }
+                }));
+              }
+            }
+          }
+          setShowAddItemsDrawer({ open: false });
+        }}
+        title="Add items to template"
+      />
     </div>
   );
 }

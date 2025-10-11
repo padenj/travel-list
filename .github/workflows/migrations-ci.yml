@@ -1,0 +1,41 @@
+name: Migrations CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  migrations:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        db: [ sqlite, postgres ]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      - name: Install deps
+        run: npm ci
+      - name: Run migrations (SQLite)
+        if: matrix.db == 'sqlite'
+        run: |
+          node server/migrations/run-migrations-knex.cjs status
+          node server/migrations/run-migrations-knex.cjs up
+          node server/migrations/run-migrations-knex.cjs status
+      - name: Run migrations (Postgres)
+        if: matrix.db == 'postgres'
+        env:
+          DB_CLIENT: pg
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/travel_list
+        run: |
+          sudo apt-get update && sudo apt-get install -y postgresql
+          sudo service postgresql start
+          psql -c "CREATE USER postgres WITH PASSWORD 'postgres';" -U postgres || true
+          psql -c "CREATE DATABASE travel_list;" -U postgres || true
+          node server/migrations/run-migrations-knex.cjs status
+          node server/migrations/run-migrations-knex.cjs up
+          node server/migrations/run-migrations-knex.cjs status

@@ -11,9 +11,9 @@
     "migrate:status": "node server/migrations/run-migrations.cjs status",
     "build": "vite build",
     "preview": "vite preview",
-  "test": "vitest --run",
+    "test": "vitest --run",
     "test:e2e": "playwright test",
-  "test:wait": "vitest",
+    "test:wait": "vitest",
     "test:ci": "npx vitest --run && npx playwright test"
   },
   "dependencies": {
@@ -38,6 +38,9 @@
     "uuid": "^13.0.0"
   },
   "devDependencies": {
+    "@dnd-kit/core": "6.1.5",
+    "@dnd-kit/sortable": "6.1.5",
+    "@dnd-kit/utilities": "6.1.5",
     "@playwright/test": "^1.37.0",
     "@testing-library/react": "^14.0.0",
     "@testing-library/user-event": "^14.4.3",
@@ -58,6 +61,8 @@
     "typescript": "^5.9.2",
     "vite": "^5.4.10",
     "vitest": "^2.1.8",
-    "umzug": "^3.8.2"
+    "umzug": "^3.8.2",
+    "knex": "^2.5.1",
+    "pg": "^8.10.0"
   }
 }

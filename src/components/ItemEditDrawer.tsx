@@ -26,9 +26,16 @@ export interface ItemEditDrawerProps {
   showNameField?: boolean; // whether to expose a name input (used by ItemManagementPage)
   defaultAssignedMemberId?: string | null; // pre-select this member when creating a new item
   onSaved?: (payload?: OnSavedPayload) => Promise<void> | void;
+  // Whether to show the "Also add this item for future trips" checkbox when creating a new item
+  showIsOneOffCheckbox?: boolean;
+  // When present, indicates we're editing a packing-list one-off item and can promote it to a master
+  promoteContext?: { listId: string; packingListItemId: string } | null;
+  zIndex?: number;
 }
 
-export default function ItemEditDrawer({ opened, onClose, masterItemId, initialName, familyId, showNameField = false, defaultAssignedMemberId, onSaved }: ItemEditDrawerProps) {
+export default function ItemEditDrawer({ opened, onClose, masterItemId, initialName, familyId, showNameField = false, defaultAssignedMemberId, onSaved, promoteContext, zIndex }: ItemEditDrawerProps) {
+  // default showIsOneOffCheckbox to false if not provided (ItemManagementPage will keep it hidden)
+  const showIsOneOffCheckbox = (arguments[0] as ItemEditDrawerProps)?.showIsOneOffCheckbox || false;
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [categories, setCategories] = useState<any[]>([]);
@@ -42,10 +49,17 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
   const [selectedWhole, setSelectedWhole] = useState<boolean>(false);
   const [initialWhole, setInitialWhole] = useState<boolean>(false);
   const [name, setName] = useState(initialName || '');
+  // Checkbox state: when checked => also add for future trips => isOneOff = 0
+  const [alsoAddForFutureTrips, setAlsoAddForFutureTrips] = useState<boolean>(false);
 
   useEffect(() => {
     setName(initialName || '');
   }, [initialName]);
+
+  useEffect(() => {
+    // default checkbox state: unchecked (isOneOff = 1) when creating from dashboard/edit packing list drawer
+    setAlsoAddForFutureTrips(false);
+  }, [opened, masterItemId, promoteContext]);
 
   useEffect(() => {
     if (!opened) return;
@@ -77,6 +91,7 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
         } else {
           // New item: load family-level categories and members
           if (familyId) {
+            let familyMembersFromProfile: any[] = [];
             try {
               const cats = await getCategories(familyId);
               if (cats.response.ok) setCategories(cats.data.categories || []);
@@ -86,25 +101,34 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
             try {
               const profile = await getCurrentUserProfile();
               if (profile.response.ok && profile.data.family) {
-                setFamilyMembers(profile.data.family.members || []);
-                // if caller passed a default assigned member, pre-select them
-                if (defaultAssignedMemberId) {
-                  // only pre-select if the member exists in the family
-                  const exists = (profile.data.family.members || []).some((m: any) => m.id === defaultAssignedMemberId);
-                  if (exists) setSelectedMembers([defaultAssignedMemberId]);
-                }
+                familyMembersFromProfile = profile.data.family.members || [];
+                setFamilyMembers(familyMembersFromProfile);
               }
             } catch (e) {
               // ignore
             }
 
-            // New item initial selections are empty
+            // New item initial selections are empty, except possibly a caller-provided default
             setInitialCategories([]);
             setSelectedCategories([]);
             setInitialMembers([]);
-            setSelectedMembers([]);
+            // If caller explicitly passed `null` as the defaultAssignedMemberId,
+            // that indicates "open for Whole Family" (PackingListsSideBySide uses
+            // onOpenAddDrawer(null) for the Whole Family add button). In that
+            // case pre-select the Whole Family checkbox. If a specific member id
+            // was passed, pre-select that member instead.
+            if (defaultAssignedMemberId === null) {
+              setSelectedWhole(true);
+              setSelectedMembers([]);
+            } else if (defaultAssignedMemberId && familyMembersFromProfile.some((m: any) => m.id === defaultAssignedMemberId)) {
+              setSelectedMembers([defaultAssignedMemberId]);
+              setSelectedWhole(false);
+            } else {
+              setSelectedMembers([]);
+              setSelectedWhole(false);
+            }
+            // initialWhole reflects persisted state; new items start false
             setInitialWhole(false);
-            setSelectedWhole(false);
             setInitialAll(false);
             setSelectedAll(false);
           }
@@ -116,7 +140,7 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
         setLoading(false);
       }
     })();
-  }, [opened, masterItemId, familyId]);
+  }, [opened, masterItemId, familyId, defaultAssignedMemberId]);
 
   const save = async () => {
     setSaving(true);
@@ -129,7 +153,10 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
       if (!masterItemId) {
         // Create a new master item
         if (!familyId) throw new Error('Family not available');
-        const createRes = await createItem(familyId, name || 'New Item');
+        // Determine isOneOff: when checkbox shown, unchecked => isOneOff=1, checked => isOneOff=0
+        // When checkbox is hidden (management page), isOneOff should always be 0
+        const isOneOffValue = showIsOneOffCheckbox ? (alsoAddForFutureTrips ? 0 : 1) : 0;
+        const createRes = await createItem(familyId, name || 'New Item', isOneOffValue);
         if (!createRes.response.ok) throw new Error('Failed to create item');
         createdId = createRes.data?.item?.id;
         updatedName = createRes.data?.item?.name || name;
@@ -189,26 +216,27 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
   };
 
   return (
-    <Drawer opened={opened} onClose={onClose} title={masterItemId ? `Edit Item` : 'Edit Item'} position="right" size={720} padding="md">
+    <Drawer opened={opened} onClose={onClose} title={masterItemId ? 'Edit Item' : 'New Item'} position="right" size={720} padding="md" zIndex={zIndex}>
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
         <Text size="sm" c="dimmed">Note: changing categories or assignments here updates the master item and will apply to all lists.</Text>
         {loading ? (<div style={{ padding: 16 }}>Loading item details...</div>) : null}
+
+        {/* Name - full width row */}
+        {showNameField ? (
+          <div style={{ marginTop: 12 }}>
+            <TextInput label="Name" value={name} onChange={(e) => setName(e.currentTarget.value)} />
+          </div>
+        ) : null}
+
+        {/* Two column section: Categories (left) | Members/Assignments (right) */}
         <div style={{ display: 'flex', gap: 12, marginTop: 12, alignItems: 'stretch', flex: '1 1 auto' }}>
           <div style={{ flex: '1 1 50%', overflow: 'auto', borderRight: '1px solid rgba(0,0,0,0.04)', paddingRight: 12 }}>
-            {showNameField ? (
-              <div style={{ marginBottom: 8 }}>
-                <TextInput label="Name" value={name} onChange={(e) => setName(e.currentTarget.value)} />
-              </div>
-            ) : null}
             <Text fw={700} mb="xs">Categories</Text>
             <div style={{ padding: '6px 0' }}>
               <Checkbox checked={selectedAll} onChange={(e) => {
                 const checked = e.currentTarget.checked;
                 setSelectedAll(checked);
-                if (checked) {
-                  // when All is selected, clear the explicit per-category selection to avoid visual mismatch
-                  setSelectedCategories([]);
-                }
+                if (checked) setSelectedCategories([]);
               }} label="All categories (virtual)" />
             </div>
             {categories.length === 0 ? (
@@ -219,7 +247,6 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
                   <Checkbox disabled={selectedAll} checked={selectedCategories.includes(c.id)} onChange={(e) => {
                     const checked = e.currentTarget.checked;
                     setSelectedCategories(prev => checked ? [...prev, c.id] : prev.filter(x => x !== c.id));
-                    // turning off any per-category should also clear the All flag
                     if (!checked && selectedAll) setSelectedAll(false);
                   }} label={c.name} />
                 </div>
@@ -251,13 +278,27 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
           </div>
         </div>
 
-        <Group mt="md" style={{ justifyContent: 'space-between' }}>
-          <div />
-          <Group>
-            <Button variant="default" onClick={onClose}>Cancel</Button>
-            <Button onClick={save} loading={saving}>Save</Button>
+        {/* Checkbox and buttons below in single column */}
+        <div style={{ marginTop: 12 }}>
+          {!masterItemId && (showIsOneOffCheckbox || promoteContext) ? (
+            <div style={{ marginBottom: 8 }}>
+              <Checkbox
+                checked={alsoAddForFutureTrips}
+                onChange={(e) => setAlsoAddForFutureTrips(e.currentTarget.checked)}
+                label={promoteContext ? "Also add this item to the master list" : "Also add this item for future trips"}
+              />
+              <Text size="xs" c="dimmed">If checked, this will create a master item and convert the packing-list row to reference it. This cannot be undone.</Text>
+            </div>
+          ) : null}
+
+          <Group mt="md" style={{ justifyContent: 'space-between' }}>
+            <div />
+            <Group>
+              <Button variant="default" onClick={onClose}>Cancel</Button>
+              <Button onClick={save} loading={saving}>Save</Button>
+            </Group>
           </Group>
-        </Group>
+        </div>
       </div>
     </Drawer>
   );

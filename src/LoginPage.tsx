@@ -14,13 +14,19 @@ export default function LoginPage({ onLogin }: LoginPageProps): React.ReactEleme
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>): Promise<void> {
     e.preventDefault();
-    console.log('🎯 Login form submitted with username:', username);
+    // Trim leading/trailing spaces from inputs before submitting
+    const trimmedUsername = username.trim();
+    const trimmedPassword = password.trim();
+    // Update state so the UI reflects trimmed values
+    setUsername(trimmedUsername);
+    setPassword(trimmedPassword);
+    console.log('🎯 Login form submitted with username:', trimmedUsername);
     setLoading(true);
     setError('');
     
     try {
       console.log('📡 Calling login API...');
-      const { response: res, data } = await login(username, password);
+      const { response: res, data } = await login(trimmedUsername, trimmedPassword);
       console.log('📨 Login API response status:', res.status, 'data:', data);
       
       if (!res.ok) {

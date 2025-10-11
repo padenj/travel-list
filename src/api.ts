@@ -39,10 +39,12 @@ export const getItems = async (familyId: string): Promise<ApiResponse> => {
   return authenticatedApiCall(`/items/${familyId}`);
 };
 
-export const createItem = async (familyId: string, name: string): Promise<ApiResponse> => {
+export const createItem = async (familyId: string, name: string, isOneOff?: number): Promise<ApiResponse> => {
+  const body: any = { familyId, name };
+  if (typeof isOneOff !== 'undefined') body.isOneOff = isOneOff;
   return authenticatedApiCall('/items', {
     method: 'POST',
-    body: JSON.stringify({ familyId, name }),
+    body: JSON.stringify(body),
   });
 };
 
@@ -317,6 +319,13 @@ export const resetFamilyMemberPassword = async (familyId: string, memberId: stri
   return authenticatedApiCall(`/families/${familyId}/members/${memberId}/reset-password`, {
     method: 'POST',
     body: JSON.stringify({ newPassword }),
+  });
+};
+
+export const updateFamilyMemberOrder = async (familyId: string, memberIds: string[]): Promise<ApiResponse> => {
+  return authenticatedApiCall(`/families/${familyId}/members/order`, {
+    method: 'PUT',
+    body: JSON.stringify({ memberIds }),
   });
 };
 // API utility functions with improved error handling and type safety

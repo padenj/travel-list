@@ -9,7 +9,6 @@ import {
   getItemsForCategory,
   assignItemToCategory,
   removeItemFromCategory,
-  createItem,
 } from '../api';
 import { useImpersonation } from '../contexts/ImpersonationContext';
 import { useRefresh } from '../contexts/RefreshContext';
@@ -25,8 +24,8 @@ import {
   Text,
   Tabs,
   List,
-  Autocomplete,
 } from '@mantine/core';
+import AddItemsDrawer from './AddItemsDrawer';
 import { IconTrash, IconEdit, IconPlus, IconX } from '@tabler/icons-react';
 
 
@@ -42,8 +41,8 @@ export default function CategoryManagementPage(): React.ReactElement {
   const [categoryItems, setCategoryItems] = useState<{ [categoryId: string]: { id: string; name: string }[] }>({});
   const [itemsInAllCategories, setItemsInAllCategories] = useState<Set<string>>(new Set());
   const [selectedTab, setSelectedTab] = useState<string | null>(null);
-  const [addItemValue, setAddItemValue] = useState('');
-  const [addItemLoading, setAddItemLoading] = useState(false);
+  // no local addItemLoading state needed when using AddItemsDrawer
+  const [showAddPaneForCategory, setShowAddPaneForCategory] = useState<{ open: boolean; categoryId?: string }>({ open: false });
 
   const { impersonatingFamilyId } = useImpersonation();
   const { bumpRefresh } = useRefresh();
@@ -170,29 +169,23 @@ export default function CategoryManagementPage(): React.ReactElement {
     }));
   };
 
-  const handleAddItem = async (categoryId: string) => {
-    setAddItemLoading(true);
-    let itemToAdd = items.find(i => i.name.toLowerCase() === addItemValue.trim().toLowerCase());
-    let newItem;
-    if (!itemToAdd && familyId) {
-      // Create new item
-      const res = await createItem(familyId, addItemValue.trim());
-      if (res.response.ok) {
-        newItem = res.data.item;
-        setItems([...items, newItem]);
-        itemToAdd = newItem;
+  // AddItemsDrawer onApply handler
+  const handleAddItemsToCategory = async (selectedItemIds: string[]) => {
+    if (!showAddPaneForCategory.categoryId) return;
+    const categoryId = showAddPaneForCategory.categoryId;
+    for (const id of selectedItemIds) {
+      await assignItemToCategory(id, categoryId);
+      // find item name
+      const it = items.find(i => i.id === id);
+      if (it) {
+        setCategoryItems(prev => ({
+          ...prev,
+          [categoryId]: [...(prev[categoryId] || []), it],
+        }));
       }
     }
-    if (itemToAdd) {
-      await assignItemToCategory(itemToAdd.id, categoryId);
-      setCategoryItems(prev => ({
-        ...prev,
-        [categoryId]: [...prev[categoryId], itemToAdd!],
-      }));
-      bumpRefresh();
-    }
-    setAddItemValue('');
-    setAddItemLoading(false);
+    bumpRefresh();
+    setShowAddPaneForCategory({ open: false });
   };
 
   if (loading) return <Loader />;
@@ -214,89 +207,88 @@ export default function CategoryManagementPage(): React.ReactElement {
         {categories.length === 0 ? (
           <Text c="dimmed">No categories yet.</Text>
         ) : (
-          <Tabs value={selectedTab} onChange={setSelectedTab} keepMounted={false}>
-            <Tabs.List>
+          <>
+            <Tabs value={selectedTab} onChange={setSelectedTab} keepMounted={false}>
+              <Tabs.List>
+                {categories.map(cat => (
+                  <Tabs.Tab key={cat.id} value={cat.id}>{cat.name}</Tabs.Tab>
+                ))}
+              </Tabs.List>
               {categories.map(cat => (
-                <Tabs.Tab key={cat.id} value={cat.id}>{cat.name}</Tabs.Tab>
-              ))}
-            </Tabs.List>
-            {categories.map(cat => (
-              <Tabs.Panel key={cat.id} value={cat.id}>
-                <Card withBorder mt="md">
-                  <Group justify="space-between" mb="md">
-                    {editId === cat.id ? (
-                      <>
-                        <TextInput
-                          value={editName}
-                          onChange={e => setEditName(e.target.value)}
-                          onKeyDown={e => e.key === 'Enter' && handleUpdate()}
-                        />
-                        <Button size="xs" onClick={handleUpdate}>Save</Button>
-                        <Button size="xs" variant="light" onClick={() => { setEditId(null); setEditName(''); }}>Cancel</Button>
-                      </>
-                    ) : (
-                      <>
-                        <Title order={4}>{cat.name}</Title>
-                        <Group>
-                          <ActionIcon color="blue" variant="light" onClick={() => handleEdit(cat.id, cat.name)}>
-                            <IconEdit size={16} />
-                          </ActionIcon>
-                          <ActionIcon color="red" variant="light" onClick={() => handleDelete(cat.id)}>
-                            <IconTrash size={16} />
-                          </ActionIcon>
-                        </Group>
-                      </>
-                    )}
-                  </Group>
-                  <Title order={5} mb="sm">Items in this category</Title>
-                  <List mb="md">
-                    {categoryItems[cat.id]?.length > 0 ? (
-                      categoryItems[cat.id].map(item => (
-                        <List.Item key={item.id}>
-                          <Group justify="space-between">
-                            <Text>{item.name}</Text>
-                            {itemsInAllCategories.has(item.id) ? (
-                              // show disabled remove icon (non-interactive) for 'All' items
-                              <ActionIcon color="gray" variant="light" title="Item in All categories; cannot remove individually" disabled>
-                                <IconX size={16} />
-                              </ActionIcon>
-                            ) : (
-                              <ActionIcon color="red" variant="light" onClick={() => handleRemoveItem(item.id, cat.id)}>
-                                <IconX size={16} />
-                              </ActionIcon>
-                            )}
+                <Tabs.Panel key={cat.id} value={cat.id}>
+                  <Card withBorder mt="md">
+                    <Group justify="space-between" mb="md">
+                      {editId === cat.id ? (
+                        <>
+                          <TextInput
+                            value={editName}
+                            onChange={e => setEditName(e.target.value)}
+                            onKeyDown={e => e.key === 'Enter' && handleUpdate()}
+                          />
+                          <Button size="xs" onClick={handleUpdate}>Save</Button>
+                          <Button size="xs" variant="light" onClick={() => { setEditId(null); setEditName(''); }}>Cancel</Button>
+                        </>
+                      ) : (
+                        <>
+                          <Title order={4}>{cat.name}</Title>
+                          <Group>
+                            <ActionIcon color="blue" variant="light" onClick={() => handleEdit(cat.id, cat.name)}>
+                              <IconEdit size={16} />
+                            </ActionIcon>
+                            <ActionIcon color="red" variant="light" onClick={() => handleDelete(cat.id)}>
+                              <IconTrash size={16} />
+                            </ActionIcon>
                           </Group>
-                        </List.Item>
-                      ))
-                    ) : (
-                      <List.Item><Text c="dimmed">No items in this category</Text></List.Item>
-                    )}
-                  </List>
-                  <Group>
-                    <Autocomplete
-                      data={items.filter(i => !categoryItems[cat.id]?.some(ci => ci.id === i.id)).map(i => i.name)}
-                      value={addItemValue}
-                      onChange={setAddItemValue}
-                      placeholder="Add item to category"
-                      disabled={addItemLoading}
-                      onKeyDown={e => {
-                        if (e.key === 'Enter' && addItemValue.trim()) {
-                          handleAddItem(cat.id);
-                        }
-                      }}
-                    />
-                    <Button
-                      leftSection={<IconPlus size={16} />}
-                      onClick={() => handleAddItem(cat.id)}
-                      disabled={!addItemValue.trim() || addItemLoading}
-                    >
-                      Add Item
-                    </Button>
-                  </Group>
-                </Card>
-              </Tabs.Panel>
-            ))}
-          </Tabs>
+                        </>
+                      )}
+                    </Group>
+                    <Title order={5} mb="sm">Items in this category</Title>
+                    <List mb="md">
+                      {categoryItems[cat.id]?.length > 0 ? (
+                        categoryItems[cat.id].map(item => (
+                          <List.Item key={item.id}>
+                            <Group justify="space-between">
+                              <Text>{item.name}</Text>
+                              {itemsInAllCategories.has(item.id) ? (
+                                // show disabled remove icon (non-interactive) for 'All' items
+                                <ActionIcon color="gray" variant="light" title="Item in All categories; cannot remove individually" disabled>
+                                  <IconX size={16} />
+                                </ActionIcon>
+                              ) : (
+                                <ActionIcon color="red" variant="light" onClick={() => handleRemoveItem(item.id, cat.id)}>
+                                  <IconX size={16} />
+                                </ActionIcon>
+                              )}
+                            </Group>
+                          </List.Item>
+                        ))
+                      ) : (
+                        <List.Item><Text c="dimmed">No items in this category</Text></List.Item>
+                      )}
+                    </List>
+                    <Group>
+                      <Button leftSection={<IconPlus size={16} />} onClick={() => {
+                        // open AddItemsDrawer for this category
+                        setSelectedTab(cat.id);
+                        // use a small modal approach: open AddItemsDrawer by toggling a per-category state
+                        // reuse existing addItemValue flow by delegating to AddItemsDrawer below
+                        setShowAddPaneForCategory({ open: true, categoryId: cat.id });
+                      }}>Add Item</Button>
+                    </Group>
+                  </Card>
+                </Tabs.Panel>
+              ))}
+            </Tabs>
+            <AddItemsDrawer
+              opened={showAddPaneForCategory.open}
+              onClose={() => setShowAddPaneForCategory({ open: false })}
+              familyId={familyId}
+              excludedItemIds={(showAddPaneForCategory.categoryId && categoryItems[showAddPaneForCategory.categoryId] ? categoryItems[showAddPaneForCategory.categoryId].map(i => i.id) : [])}
+              onApply={handleAddItemsToCategory}
+              showIsOneOffCheckbox={false}
+              title="Add items to category"
+            />
+          </>
         )}
       </Stack>
     </Card>

@@ -1,3 +1,5 @@
-[
-  "20251008_fix_packing_list_item_checks_fk.js"
+[ 
+  "20251008_fix_packing_list_item_checks_fk.js",
+  "20251010_create_packing_list_templates.js",
+  "20251010_create_packing_list_item_templates.js"
 ]

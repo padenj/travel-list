@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Title, Container, Card, Group, Stack } from '@mantine/core';
+import { Container, Group, Stack } from '@mantine/core';
 import { showNotification } from '@mantine/notifications';
 import ActivePackingListSelector from './ActivePackingListSelector';
 import { PackingListsSideBySide } from './PackingListsSideBySide';
@@ -184,13 +184,12 @@ export default function Dashboard(): React.ReactElement {
     <Container size="lg">
       {/* Global impersonation banner is displayed in Layout; no local banner needed here */}
       <Group justify="space-between" mb="xl">
-        <Title order={1}>Dashboard</Title>
         {/* System Administration button removed per request */}
       </Group>
       
       {/* Active Packing List selector is the top element on the dashboard */}
 
-      <Card shadow="sm" padding="lg" radius="md" withBorder mt="md">
+      <div style={{ marginTop: 16 }}>
         <Stack>
           <ActivePackingListSelector onChange={(_id) => { /* optionally notify parent */ }} />
           <PackingListsSideBySide
@@ -202,9 +201,9 @@ export default function Dashboard(): React.ReactElement {
             onToggleNotNeeded={toggleNotNeeded}
             onOpenAddDrawer={openAddDrawerFor}
           />
-          <ItemEditDrawer opened={showItemDrawer} onClose={() => { setShowItemDrawer(false); setItemDrawerDefaultMember(null); }} masterItemId={null} initialName={undefined} familyId={familyId} showNameField={true} defaultAssignedMemberId={itemDrawerDefaultMember} onSaved={handleItemDrawerSaved} />
+          <ItemEditDrawer opened={showItemDrawer} onClose={() => { setShowItemDrawer(false); setItemDrawerDefaultMember(null); }} masterItemId={null} initialName={undefined} familyId={familyId} showNameField={true} defaultAssignedMemberId={itemDrawerDefaultMember} onSaved={handleItemDrawerSaved} showIsOneOffCheckbox={true} />
         </Stack>
-      </Card>
+      </div>
 
       {/* ManagePackingLists moved to the Packing Lists page */}
 

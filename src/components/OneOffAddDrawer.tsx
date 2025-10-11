@@ -57,7 +57,7 @@ export default function OneOffAddDrawer({ opened, onClose, defaultAssignedUserId
           )}
         </div>
 
-        <Group position="right">
+  <Group style={{ justifyContent: 'flex-end' }}>
           <Button variant="default" onClick={onClose}>Cancel</Button>
           <Button onClick={handleAdd} loading={submitting} disabled={!name.trim()}>Add</Button>
         </Group>

@@ -143,6 +143,7 @@ export default function ItemManagementPage(): React.ReactElement {
         familyId={familyId}
         showNameField={true}
         onSaved={handleItemSaved}
+        showIsOneOffCheckbox={false}
       />
     </Card>
   );
