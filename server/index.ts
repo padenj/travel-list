@@ -2,6 +2,8 @@
 import '../server/env-loader';
 import express, { Application, Request, Response } from 'express';
 import { fileURLToPath } from 'url';
+import path from 'path';
+import fs from 'fs';
 import cors from 'cors';
 import { authMiddleware } from './middleware';
 import routes from './routes';
@@ -24,6 +26,25 @@ app.use(cors({
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Serve built frontend when available (production). The builder places the
+// frontend build at ./frontend/dist inside the image. If present, serve it and
+// fallback to index.html for SPA routing. This keeps the frontend and backend
+// on the same origin (port), so client-side proxying to /api continues to work.
+try {
+  const frontendDist = path.resolve(process.cwd(), 'frontend', 'dist');
+  if (fs.existsSync(frontendDist)) {
+    app.use(express.static(frontendDist));
+    // SPA fallback — ensure API routes remain under /api
+    app.get('*', (req: Request, res: Response, next) => {
+      if (req.path.startsWith('/api')) return next();
+      res.sendFile(path.join(frontendDist, 'index.html'));
+    });
+    console.log('📦 Serving frontend from', frontendDist);
+  }
+} catch (err) {
+  console.warn('⚠️ Frontend static serve setup failed', err);
+}
 
 // Health check endpoint
 app.get('/', (req: Request, res: Response) => {

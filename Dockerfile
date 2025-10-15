@@ -16,14 +16,8 @@ RUN npm run build:pwa
 FROM node:22-alpine AS final
 WORKDIR /app
 
-# Install runtime deps and nginx
-RUN apk add --no-cache nginx
-
-# Copy built frontend into nginx html root
-COPY --from=builder /app/dist /usr/share/nginx/html
-
-# Copy custom nginx conf
-COPY docker/nginx-site.conf /etc/nginx/conf.d/default.conf
+# Copy built frontend into a path the server will serve from
+COPY --from=builder /app/dist ./frontend/dist
 
 # Copy server code and package manifests
 COPY --from=builder /app/server ./server
@@ -38,12 +32,12 @@ RUN chmod +x /usr/local/bin/backend-entrypoint.sh
 
 EXPOSE 3000
 
-# Start migrations via entrypoint, then start the backend on port 3001 and nginx
-# in the foreground. Nginx will serve the static frontend on port 3000 and proxy
-# /api to localhost:3001 where the backend listens.
+# Start migrations via entrypoint, then start the backend which will serve both API
+# and static frontend on the same port (3000). This avoids running a separate
+# nginx process and eliminates nginx config errors.
 ENTRYPOINT ["/usr/local/bin/backend-entrypoint.sh"]
-CMD ["/bin/sh", "-c", "PORT=3001 npx tsx server/index.ts & nginx -g 'daemon off;'"]
+CMD ["/bin/sh", "-c", "PORT=3000 npx tsx server/index.ts"]
 
 # Note:
-# - Nginx listens on port 3000 (see nginx-site.conf) and proxies /api to 127.0.0.1:3001
-# - Backend listens on port 3001 (server/index.ts default) and is not exposed externally
+# - Backend listens on port 3000 (server/index.ts default override via PORT env)
+# - Frontend is served from ./frontend/dist by the server when present
