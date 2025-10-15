@@ -10,7 +10,7 @@ COPY server ./server
 COPY tsconfig.node.json ./tsconfig.node.json
 # Emit ESM modules targeting Node 20 so `import.meta` and ESM features are preserved.
 # Keep moduleResolution=node to match runtime resolution semantics.
-RUN npx tsc -p tsconfig.node.json --outDir server-dist --module node20 --moduleResolution node
+RUN npx tsc -p tsconfig.node.json --outDir server-dist --module node20 --moduleResolution node16
 
 FROM node:22-alpine AS final
 WORKDIR /app
