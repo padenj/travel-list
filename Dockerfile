@@ -1,14 +1,14 @@
 # Combined Dockerfile for Travel Packing Checklist App
 
 # --- Backend ---
-FROM node:20-alpine AS backend
+FROM node:22-alpine AS backend
 WORKDIR /app/backend
 COPY backend/package*.json ./
 RUN npm install
 COPY backend/ ./
 
 # --- Frontend ---
-FROM node:20-alpine AS frontend
+FROM node:22-alpine AS frontend
 WORKDIR /app/frontend
 COPY frontend/package*.json ./
 RUN npm install
@@ -16,7 +16,7 @@ COPY frontend/ ./
 RUN npm run build
 
 # --- Final Image ---
-FROM node:20-alpine AS final
+FROM node:22-alpine AS final
 WORKDIR /app
 
 # Copy backend
