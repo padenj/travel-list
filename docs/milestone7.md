@@ -32,7 +32,7 @@ Progress: The project uses a manual post-build injection script (`tools/inject-p
 
 7) Deployment & Docker
 - [ ] Update Dockerfile and multi-stage build to copy `manifest.json`, `sw.js`, and icons into the image
-- [ ] Provide docker-compose example with nginx reverse proxy and TLS guidance (production will use external reverse proxy)
+- [ ] Provide docker-compose example (backend serves static assets) and TLS guidance — production should use an external reverse proxy/load-balancer for TLS
 
 8) Testing, QA & rollout
 - [ ] Add Lighthouse PWA checks to CI (baseline + thresholds)

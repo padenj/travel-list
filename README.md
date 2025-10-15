@@ -3,8 +3,8 @@
 This README covers deploying the Travel List application using Docker / Portainer with SQLite and a bind-mounted host path for persistence. It also shows how to integrate a Cloudflared tunnel for external exposure.
 
 ## Overview
-- Frontend: served by `Dockerfile.pwa` (nginx) on port 80 inside container
-- Backend: Node server (build via `docker/backend.Dockerfile`) listening on port 5000
+- Frontend: built with Vite and served as static assets by the backend server (or a reverse proxy) in production
+- Backend: Node server (built with TypeScript) listening on port 3001 by default
 - Database: SQLite file located at `/data/travel-list.sqlite` inside the backend container. Mount a host path to `/data` to persist.
 
 ## Important notes
@@ -25,11 +25,11 @@ This README covers deploying the Travel List application using Docker / Portaine
 3. Add the `CLOUDFLARED_TOKEN` secret in Portainer or set an environment variable for the cloudflared service if you plan to run it there.
 
 4. Start the stack. The backend container's entrypoint will:
-   - Ensure `/data` exists
-   - Run migrations (using `server/migrations/run-migrations-knex.cjs up`)
-   - Start the backend server
+  - Ensure `/data` exists
+  - Run migrations (using `server/migrations/run-migrations-knex.cjs up`)
+  - Start the backend server
 
-5. Use Cloudflared to expose the web service externally. For example, create a tunnel that forwards traffic to your host on port 80 and/or 5000. Alternatively manage Cloudflared outside Portainer.
+5. Use Cloudflared or your preferred external proxy to expose the backend. If you want a separate web-facing container to serve static assets, configure it to proxy `/api` to the backend service. For most deployments serving the built `client/dist` from the backend is simpler (we copy `client/dist` into the server image in the provided `Dockerfile`).
 
 ## Local development (optional)
 - Use `docker-compose.sample.yml` with the `web-dev` service to build locally and run against a local Postgres or SQLite.
