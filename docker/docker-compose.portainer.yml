@@ -2,10 +2,7 @@ version: '3.8'
 
 services:
   web:
-    build:
-      context: ..
-      dockerfile: Dockerfile.pwa
-    image: travel-list-web:latest
+    image: ghcr.io/padenj/travel-list:latest
     ports:
       - "80:80"
     healthcheck:
@@ -20,10 +17,7 @@ services:
     # Note: do not bind-mount the entire repo into the container in production.
 
   backend:
-    build:
-      context: ..
-      dockerfile: docker/backend.Dockerfile
-    image: travel-list-backend:latest
+    image: ghcr.io/padenj/travel-list-backend:latest
     environment:
       - NODE_ENV=production
       - DB_FILE=/data/travel-list.sqlite
