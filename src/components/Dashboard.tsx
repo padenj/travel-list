@@ -6,7 +6,6 @@ import { PackingListsSideBySide } from './PackingListsSideBySide';
 import ItemEditDrawer from './ItemEditDrawer';
 import { useActivePackingList } from '../contexts/ActivePackingListContext';
 import { getCurrentUserProfile, getItems, getPackingList, togglePackingListItemCheck, addItemToPackingList, setPackingListItemNotNeeded, setPackingListItemNotNeededForMember } from '../api';
-import { saveCheckLocally, getLocalCheckState, clearCheckAfterSync } from '../lib/simpleOffline';
 
 export default function Dashboard(): React.ReactElement {
   const { activeListId } = useActivePackingList();
@@ -90,9 +89,8 @@ export default function Dashboard(): React.ReactElement {
               const name = pli.display_name || pli.master_name || (master ? master.name : '') || 'Item';
               const checkRow = checks.find((c: any) => c.packing_list_item_id === pli.id && c.member_id === member.id);
               
-              // Check localStorage for pending offline checks first
-              const localCheck = getLocalCheckState(activeListId, pli.id, member.id);
-              const checked = localCheck !== null ? localCheck : !!checkRow?.checked;
+              // Prefer server-provided check state; no local offline backup used
+              const checked = !!checkRow?.checked;
               
               // use the packing-list-item id (pli.id) for toggling checks so the API can locate the row
               memberItems.push({ id: pli.id, name, checked, masterId: pli.item_id || null, added_during_packing: !!pli.added_during_packing, display_name: pli.display_name || null, masterIsOneOff: !!pli.master_is_one_off });
@@ -116,9 +114,8 @@ export default function Dashboard(): React.ReactElement {
             // current user actually checked.
             const checkRow = checks.find((c: any) => c.packing_list_item_id === pli.id && (c.member_id === currentUserId || !c.member_id));
             
-            // Check localStorage for pending offline checks first
-            const localCheck = getLocalCheckState(activeListId, pli.id, null);
-            const checked = localCheck !== null ? localCheck : !!checkRow?.checked;
+            // Prefer server-provided check state; no local offline backup used
+            const checked = !!checkRow?.checked;
             
             // use packing-list-item id for whole-family items as well
             wholeItems.push({ id: pli.id, name, checked, masterId: pli.item_id || null, added_during_packing: !!pli.added_during_packing, display_name: pli.display_name || null, masterIsOneOff: !!pli.master_is_one_off });
@@ -166,22 +163,20 @@ export default function Dashboard(): React.ReactElement {
       setWholeFamilyItems(items => items.map(it => it.id === itemId ? { ...it, checked } : it));
     }
 
-    // Save to localStorage immediately as backup
-    saveCheckLocally(activeListId, itemId, userId, checked);
-
     // Try to send to server
     try {
       const result = await togglePackingListItemCheck(activeListId, itemId, userId, checked);
       if (result.response.ok) {
-        // Server accepted it - clear from localStorage backup
-        clearCheckAfterSync(activeListId, itemId, userId);
+        // Server accepted it
         console.log('[Dashboard] Check synced to server successfully');
       } else {
-        console.warn('[Dashboard] Server rejected check, keeping in localStorage');
+        console.warn('[Dashboard] Server rejected check');
+        showNotification({ title: 'Sync failed', message: 'Server rejected check update', color: 'yellow' });
       }
     } catch (err) {
-      // Network error - keep in localStorage, will retry on next load
-      console.warn('[Dashboard] Failed to sync check (offline?), saved locally', err);
+      // Network error - notify user (no local backup persists)
+      console.warn('[Dashboard] Failed to sync check (offline?)', err);
+      showNotification({ title: 'Offline', message: 'Failed to sync check - please try again when online', color: 'yellow' });
     }
   };
 
