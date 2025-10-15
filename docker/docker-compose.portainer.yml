@@ -1,36 +1,44 @@
 version: '3.8'
 
 services:
-  app:
-    image: ghcr.io/padenj/travel-list:latest
-    # The single image is expected to run both the frontend (static site) and the backend
-    # in the same container. The default combined Dockerfile in the repo exposes
-    # the frontend on port 3000 and the backend on port 5000; adjust ports if your
-    # published image uses different ports.
+  web:
+    image: ghcr.io/padenj/travel-list-web:latest
     ports:
-      - "3000:3000"    # host 3000 -> container frontend (3000)
+      - "3000:80"    # host 3000 -> container nginx (80)
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:80/ >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  backend:
+    image: ghcr.io/padenj/travel-list-backend:latest
     environment:
       - NODE_ENV=production
-      - PORT=3000
+      - PORT=3001
       - DB_FILE=/data/travel-list.sqlite
     volumes:
       - <localvolumepath>:/data
+    # Internal-only service: not published to host
+    expose:
+      - "3001"
     healthcheck:
-      # Verify the frontend responds on port 3000 (nginx)
-      test: ["CMD-SHELL", "curl -f http://localhost:3000/ >/dev/null 2>&1 || exit 1"]
-      interval: 30s
-      timeout: 10s
+      test: ["CMD-SHELL", "curl -f http://localhost:3001/ || exit 1"]
+      interval: 15s
+      timeout: 5s
       retries: 5
     restart: unless-stopped
 
   # One-shot migration helper. Use this with `docker compose run --rm migrate`
-  # or configure Portainer to run it once before starting/updating the app.
   migrate:
-    image: ghcr.io/padenj/travel-list:latest
+    image: ghcr.io/padenj/travel-list-backend:latest
     environment:
       - NODE_ENV=production
       - DB_FILE=/data/travel-list.sqlite
-      - PORT=3000
+      - PORT=3001
     volumes:
       - <localvolumepath>:/data
     entrypoint: ["/bin/sh", "-c", "node server/migrations/run-migrations-knex.cjs up || true"]
@@ -49,16 +57,10 @@ volumes:
   data:
 
 # Usage notes:
-# - This compose assumes the published image `ghcr.io/padenj/travel-list:latest` is a
-#   single combined image that runs both the frontend and the backend. If you are
-#   currently publishing a frontend-only image (built from `Dockerfile.pwa`), you
-#   will need to either:
-#     a) change your CI to build & publish the combined image (e.g. build the
-#        repository `Dockerfile` or another single-image Dockerfile that starts
-#        both services), or
-#     b) publish a separate backend image at `ghcr.io/<owner>/travel-list-backend`
-#        and use the two-service compose (the previous version of this file).
 # - Replace <localvolumepath> with the host path you want mounted, for example:
 #     /srv/travel-list/db:/data
-# - The backend is expected to read/write the SQLite DB at /data/travel-list.sqlite
-# - Configure cloudflared outside of Portainer or supply a valid token as a secret/variable
+# - The backend is configured to read/write the SQLite DB at /data/travel-list.sqlite
+# - The web image (frontend) will proxy /api to the backend service name (backend:3001)
+#   via the nginx config in `docker/nginx-site.conf` which is set to proxy to 127.0.0.1
+#   when used inside the web container. If you prefer nginx to proxy to the docker
+#   network name, update `docker/nginx-site.conf` proxy_pass to http://backend:3001

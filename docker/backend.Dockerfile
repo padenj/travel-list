@@ -1,15 +1,24 @@
-FROM node:22-alpine
+FROM node:22-alpine AS builder
 WORKDIR /app
 
-# Copy package manifests and install dependencies (including dev tools like tsx)
+# Build-time deps
 COPY package.json package-lock.json* ./
 RUN npm ci --no-audit --no-fund
 
-# Copy the application server code
+# Copy server source and compile
 COPY server ./server
-COPY src ./src
-COPY public ./public
-COPY server ./server
+COPY tsconfig.node.json ./tsconfig.node.json
+RUN npx tsc -p tsconfig.node.json --outDir server-dist
+
+FROM node:22-alpine AS final
+WORKDIR /app
+
+# Copy compiled server and package files
+COPY --from=builder /app/server-dist ./server-dist
+COPY package.json package-lock.json* ./
+
+# Install runtime deps only
+RUN npm ci --production --no-audit --no-fund
 
 # Copy entrypoint
 COPY docker/backend-entrypoint.sh /usr/local/bin/backend-entrypoint.sh
@@ -17,8 +26,8 @@ RUN chmod +x /usr/local/bin/backend-entrypoint.sh
 
 ENV NODE_ENV=production
 
-# Expose the server port
-EXPOSE 5000
+# Backend listens on 3001 internally
+EXPOSE 3001
 
 ENTRYPOINT ["/usr/local/bin/backend-entrypoint.sh"]
-CMD ["npx", "tsx", "server/index.ts"]
+CMD ["node", "server-dist/index.js"]

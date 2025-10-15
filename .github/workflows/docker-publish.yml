@@ -56,14 +56,20 @@ jobs:
           fi
           echo "tag=$TAG" >> $GITHUB_OUTPUT
 
-      - name: Build and push Docker image (combined frontend+backend)
+      - name: Build and push frontend image (PWA)
         uses: docker/build-push-action@v4
         with:
           context: .
-          # Use the repo root Dockerfile which builds a combined image that
-          # runs both the backend and serves the frontend. This produces a single
-          # image suitable for Portainer single-container deployments.
-          file: Dockerfile
+          file: Dockerfile.pwa
           push: true
           tags: |
-            ${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }}
+            ${{ env.IMAGE_NAME }}-web:${{ steps.tag.outputs.tag }}
+
+      - name: Build and push backend image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: docker/backend.Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME }}-backend:${{ steps.tag.outputs.tag }}
