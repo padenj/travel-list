@@ -11,20 +11,25 @@ RUN npm ci --no-audit --no-fund
 # Copy repo and build the PWA frontend
 COPY . .
 RUN npm run build:pwa
+  
+# Compile server TypeScript to runnable JS for production
+RUN npx tsc -p tsconfig.node.json --outDir server-dist
 
 # Final image: include the built frontend and the server code
 FROM node:22-alpine AS final
 WORKDIR /app
 
 # Copy built frontend into a path the server will serve from
+
+# Copy built frontend
 COPY --from=builder /app/dist ./frontend/dist
 
-# Copy server code and package manifests
-COPY --from=builder /app/server ./server
+# Copy compiled server JS and package files
+COPY --from=builder /app/server-dist ./server-dist
 COPY package.json package-lock.json* ./
 
-# Install runtime dependencies (including tsx which is used to run TypeScript directly)
-RUN npm ci --no-audit --no-fund
+# Install runtime dependencies only (no dev deps)
+RUN npm ci --production --no-audit --no-fund
 
 # Copy entrypoint that runs migrations on startup
 COPY docker/backend-entrypoint.sh /usr/local/bin/backend-entrypoint.sh
@@ -36,7 +41,8 @@ EXPOSE 3000
 # and static frontend on the same port (3000). This avoids running a separate
 # nginx process and eliminates nginx config errors.
 ENTRYPOINT ["/usr/local/bin/backend-entrypoint.sh"]
-CMD ["/bin/sh", "-c", "PORT=3000 npx tsx server/index.ts"]
+# Run compiled server JS with node on PORT 3000
+CMD ["/bin/sh", "-c", "PORT=3000 node server-dist/index.js"]
 
 # Note:
 # - Backend listens on port 3000 (server/index.ts default override via PORT env)
