@@ -8,8 +8,9 @@ RUN npm ci --no-audit --no-fund
 # Copy server source and compile to CommonJS for Node runtime
 COPY server ./server
 COPY tsconfig.node.json ./tsconfig.node.json
-# Emit CommonJS modules so Node's require/ESM resolution is not problematic in the container
-RUN npx tsc -p tsconfig.node.json --outDir server-dist --module CommonJS
+# Emit CommonJS modules so Node's require/ESM resolution is not problematic in the container.
+# Override moduleResolution to 'node' for the build to avoid the 'bundler' compatibility error.
+RUN npx tsc -p tsconfig.node.json --outDir server-dist --module CommonJS --moduleResolution node
 
 FROM node:22-alpine AS final
 WORKDIR /app
