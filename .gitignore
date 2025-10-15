@@ -1,3 +1,10 @@
+node_modules/
+dist/
+.env
+data/
+travel-list.sqlite
+travel-list.sqlite.bak
+travel-list.sqlite.bak2
 # Node.js
 node_modules/
 .env

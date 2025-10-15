@@ -292,7 +292,7 @@ export async function getDb(): Promise<Database> {
   // eslint-disable-next-line @typescript-eslint/ban-ts-comment
   // @ts-ignore
   const isTest = process.env.NODE_ENV === 'test' || (typeof global !== 'undefined' && (global as any).VITEST) || process.env.VITEST;
-      const filename = isTest ? ':memory:' : './travel-list.sqlite';
+  const filename = isTest ? ':memory:' : (process.env.DB_FILE || './data/travel-list.sqlite');
       
       dbInstance = await open({
         filename,

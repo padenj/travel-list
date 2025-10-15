@@ -2,7 +2,7 @@ const bcrypt = require('bcrypt');
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 
-const DB_PATH = process.env.DB_PATH || path.resolve(__dirname, '../../travel-list.sqlite');
+const DB_PATH = process.env.DB_FILE || process.env.DB_PATH || path.resolve(__dirname, '../../data/travel-list.sqlite');
 const NEW_PASSWORD = process.env.NEW_PASSWORD || 'test123!@#';
 const SALT_ROUNDS = 10; // matches hashPasswordSync in server/auth.ts
 
