@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  web:
+    build:
+      context: ..
+      dockerfile: Dockerfile.pwa
+    image: travel-list-web:latest
+    ports:
+      - "80:80"
+    environment:
+      - NODE_ENV=production
+    depends_on:
+      - backend
+    # Note: do not bind-mount the entire repo into the container in production.
+
+  backend:
+    build:
+      context: ..
+      dockerfile: docker/backend.Dockerfile
+    image: travel-list-backend:latest
+    environment:
+      - NODE_ENV=production
+      - DB_FILE=/data/travel-list.sqlite
+    volumes:
+      - <localvolumepath>:/data
+    ports:
+      - "5000:5000"
+
+  # cloudflared is mentioned as the external proxy; this is a placeholder service
+  # In Portainer you'd configure cloudflared separately or as a service like below.
+  cloudflared:
+    image: cloudflare/cloudflared:2024.3.0
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARED_TOKEN}
+    environment:
+      - CLOUDFLARED_TOKEN=${CLOUDFLARED_TOKEN}
+    restart: unless-stopped
+
+volumes:
+  data:
+
+# Usage notes:
+# - Replace <localvolumepath> with the host path you want mounted, for example:
+#     /srv/travel-list/db:/data
+# - The backend is configured to read/write the SQLite DB at /data/travel-list.sqlite
+# - Configure cloudflared outside of Portainer or supply a valid token as a secret/variable
