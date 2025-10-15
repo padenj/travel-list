@@ -30,4 +30,4 @@ ENV NODE_ENV=production
 EXPOSE 3001
 
 ENTRYPOINT ["/usr/local/bin/backend-entrypoint.sh"]
-CMD ["node", "server-dist/index.js"]
+CMD ["node", "server-dist/server/index.js"]
