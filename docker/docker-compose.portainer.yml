@@ -3,6 +3,7 @@ version: '3.8'
 services:
   web:
     image: ghcr.io/padenj/travel-list-web:latest
+    user: "0"
     ports:
       - "3000:80"    # host 3000 -> container nginx (80)
     healthcheck:
