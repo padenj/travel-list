@@ -3,11 +3,37 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#0d6efd" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Travel List</title>
   </head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
+    <script>
+      // Register service worker if available
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', function() {
+          navigator.serviceWorker.register('/sw.js').then(function(reg) {
+            console.log('Service worker registered.', reg);
+          }).catch(function(err) {
+            console.warn('Service worker registration failed:', err);
+          });
+        });
+      }
+
+      // Capture beforeinstallprompt for custom Add to Home Screen UI
+      window.addEventListener('beforeinstallprompt', (e) => {
+        // Prevent the mini-infobar from appearing on mobile
+        e.preventDefault();
+        // Save the event for a later user gesture
+        window.deferredPrompt = e;
+        // You can now show your custom install button
+        console.log('beforeinstallprompt captured');
+      });
+    </script>
   </body>
 </html>

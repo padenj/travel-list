@@ -13,13 +13,16 @@ import {
   getCategoriesForTemplate,
   getItemsForTemplate,
   getItemsForCategory,
-  removeItemFromTemplate
+  removeItemFromTemplate,
+  removeCategoryFromTemplate
 } from '../api';
+import { getMembersForItem } from '../api';
 import { getCurrentUserProfile } from '../api';
 import { useImpersonation } from '../contexts/ImpersonationContext';
 import { useRefresh } from '../contexts/RefreshContext';
-import { IconEdit, IconTrash, IconPlus, IconX } from '@tabler/icons-react';
+import { IconEdit, IconTrash, IconPlus } from '@tabler/icons-react';
 import AddItemsDrawer from './AddItemsDrawer';
+import ItemEditDrawer from './ItemEditDrawer';
 
 type Template = {
   id: string;
@@ -43,6 +46,13 @@ export default function TemplateManager() {
   const [templateDetails, setTemplateDetails] = useState<{ [templateId: string]: { categories: Category[]; items: Item[]; categoryItems: { [categoryId: string]: Item[] } } }>({});
   // addItemValue removed; AddItemsDrawer will handle creating/selecting items
   const [showAddItemsDrawer, setShowAddItemsDrawer] = useState<{ open: boolean; templateId?: string }>({ open: false });
+  const [showEditDrawer, setShowEditDrawer] = useState(false);
+  const [editMasterItemId, setEditMasterItemId] = useState<string | null>(null);
+  const [itemMembers, setItemMembers] = useState<{ [itemId: string]: { id: string; name: string }[] }>({});
+  const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
+  const [editingTemplateNameDraft, setEditingTemplateNameDraft] = useState<string>('');
+  const [showAddCategoryModal, setShowAddCategoryModal] = useState<{ open: boolean; templateId?: string }>({ open: false });
+  const [addCategorySelections, setAddCategorySelections] = useState<string[]>([]);
 
   const { impersonatingFamilyId } = useImpersonation();
   const { refreshKey } = useRefresh();
@@ -61,10 +71,11 @@ export default function TemplateManager() {
         setFamilyId(fid);
         const templatesRes = await getTemplates(fid);
         const templates = templatesRes.data?.templates || [];
-        setTemplates(templates);
-        getCategories(fid).then(res => setCategories(res.data?.categories || []));
+  setTemplates(templates);
+  getCategories(fid).then(res => setCategories((res.data?.categories || []).slice().sort((a: Category, b: Category) => (a.name || '').localeCompare(b.name || ''))));
         getItems(fid).then(res => setItems(res.data?.items || []));
-        await loadTemplateDetails(templates);
+        const details = await loadTemplateDetails(templates);
+        await fetchMembersForDetails(details);
       }
     }
     fetchFamilyIdAndData();
@@ -78,7 +89,9 @@ export default function TemplateManager() {
           getCategoriesForTemplate(template.id),
           getItemsForTemplate(template.id)
         ]);
-        const templateCategories = catRes.response.ok && catRes.data ? catRes.data.categories : [];
+  const templateCategories = catRes.response.ok && catRes.data ? catRes.data.categories : [];
+  // sort categories alphabetically
+  const sortedTemplateCategories = (templateCategories || []).slice().sort((a: Category, b: Category) => (a.name || '').localeCompare(b.name || ''));
         const templateItems = itemRes.response.ok && itemRes.data ? itemRes.data.items : [];
         // Get items for each category
         const categoryItems: { [categoryId: string]: Item[] } = {};
@@ -86,7 +99,8 @@ export default function TemplateManager() {
           try {
             const categoryItemsRes = await getItemsForCategory(category.id);
             if (categoryItemsRes.response.ok && categoryItemsRes.data && categoryItemsRes.data.items) {
-              categoryItems[category.id] = categoryItemsRes.data.items;
+              // sort category items alphabetically by name
+              categoryItems[category.id] = (categoryItemsRes.data.items || []).slice().sort((a: Item, b: Item) => (a.name || '').localeCompare(b.name || ''));
             } else {
               categoryItems[category.id] = [];
             }
@@ -94,9 +108,11 @@ export default function TemplateManager() {
             categoryItems[category.id] = [];
           }
         }
+        // sort template-level items alphabetically as well
+        const sortedTemplateItems = (templateItems || []).slice().sort((a: Item, b: Item) => (a.name || '').localeCompare(b.name || ''));
         details[template.id] = {
-          categories: templateCategories,
-          items: templateItems,
+          categories: sortedTemplateCategories,
+          items: sortedTemplateItems,
           categoryItems
         };
       } catch (e) {
@@ -104,6 +120,30 @@ export default function TemplateManager() {
       }
     }
     setTemplateDetails(details);
+    return details;
+  };
+
+  const fetchMembersForDetails = async (detailsParam?: { [templateId: string]: { categories: Category[]; items: Item[]; categoryItems: { [categoryId: string]: Item[] } } }) => {
+    const details = detailsParam || templateDetails;
+    const ids = new Set<string>();
+    for (const tid of Object.keys(details || {})) {
+      const d = details[tid];
+      (d.items || []).forEach(i => ids.add(i.id));
+      for (const cid of Object.keys(d.categoryItems || {})) {
+        (d.categoryItems[cid] || []).forEach(i => ids.add(i.id));
+      }
+    }
+    const map: { [itemId: string]: { id: string; name: string }[] } = {};
+    await Promise.all(Array.from(ids).map(async (itemId) => {
+      try {
+        const res = await getMembersForItem(itemId);
+        if (res.response.ok) map[itemId] = Array.isArray(res.data) ? res.data : (res.data?.members || []);
+        else map[itemId] = [];
+      } catch (e) {
+        map[itemId] = [];
+      }
+    }));
+    setItemMembers(map);
   };
 
 
@@ -113,43 +153,7 @@ export default function TemplateManager() {
     setModalOpen(true);
   };
 
-  const openEditModal = async (template: Template) => {
-    // Reset form first to prevent stale data
-    setForm({ name: template.name, description: template.description || '', categories: [], items: [] });
-    setSelectedTemplate(template);
-    setModalOpen(true);
-    
-    // Then fetch assigned data asynchronously
-    let assignedCategories: string[] = [];
-    let assignedItems: string[] = [];
-    if (template.id) {
-      try {
-        const catRes = await getCategoriesForTemplate(template.id);
-        if (catRes.response.ok && catRes.data && catRes.data.categories) {
-          assignedCategories = catRes.data.categories.map((c: { id: string }) => c.id);
-        }
-      } catch (e) {
-        console.warn('Failed to fetch template categories:', e);
-        assignedCategories = [];
-      }
-      try {
-        const itemRes = await getItemsForTemplate(template.id);
-        if (itemRes.response.ok && itemRes.data && itemRes.data.items) {
-          assignedItems = itemRes.data.items.map((i: { id: string }) => i.id);
-        }
-      } catch (e) {
-        console.warn('Failed to fetch template items:', e);
-        assignedItems = [];
-      }
-      
-      // Update form with fetched data
-      setForm(prevForm => ({
-        ...prevForm,
-        categories: assignedCategories,
-        items: assignedItems,
-      }));
-    }
-  };
+  // editing via inline controls; the full modal is still used for creating new templates
 
 
   const handleSave = async () => {
@@ -226,66 +230,129 @@ export default function TemplateManager() {
           </Tabs.List>
           {templates.map(template => (
             <Tabs.Panel key={template.id} value={template.id}>
-              <Card withBorder mt="md">
+              <Card withBorder mt="md" style={{ display: 'flex', flexDirection: 'column', minHeight: 'calc(100vh - 220px)', paddingBottom: 'calc(env(safe-area-inset-bottom, 12px) + 12px)' }}>
                 {(() => {
                   const details = templateDetails[template.id] || { categories: [], items: [], categoryItems: {} };
                   return (
                 <>
                 <Group justify="space-between" mb="md">
                   <div>
-                    <Title order={3}>{template.name}</Title>
-                    {template.description && <Text c="dimmed">{template.description}</Text>}
+                    {editingTemplateId === template.id ? (
+                      <Group>
+                        <TextInput value={editingTemplateNameDraft} onChange={e => setEditingTemplateNameDraft(e.target.value)} size="sm" />
+                        <ActionIcon color="green" variant="light" onClick={async () => {
+                          if (!editingTemplateId) return;
+                          const newName = editingTemplateNameDraft.trim();
+                          if (!newName) return;
+                          await updateTemplate(editingTemplateId, { name: newName });
+                          // refresh templates list and details
+                          if (familyId) {
+                            const templatesRes = await getTemplates(familyId);
+                            const updatedTemplates = templatesRes.data?.templates || [];
+                            setTemplates(updatedTemplates);
+                            await loadTemplateDetails(updatedTemplates);
+                          }
+                          setEditingTemplateId(null);
+                          setEditingTemplateNameDraft('');
+                        }}>
+                          <IconEdit size={16} />
+                        </ActionIcon>
+                        <ActionIcon color="gray" variant="light" onClick={() => { setEditingTemplateId(null); setEditingTemplateNameDraft(''); }}>
+                          <IconTrash size={16} />
+                        </ActionIcon>
+                      </Group>
+                    ) : (
+                      <Group>
+                        <Title order={3}>{template.name}</Title>
+                        {template.description && <Text c="dimmed">{template.description}</Text>}
+                        <ActionIcon color="blue" variant="light" onClick={() => { setEditingTemplateId(template.id); setEditingTemplateNameDraft(template.name || ''); }}>
+                          <IconEdit size={16} />
+                        </ActionIcon>
+                      </Group>
+                    )}
                   </div>
-                  <Group>
-                    <ActionIcon color="blue" variant="light" onClick={() => openEditModal(template)}>
-                      <IconEdit size={16} />
-                    </ActionIcon>
-                    <ActionIcon color="red" variant="light" onClick={() => handleDelete(template.id)}>
-                      <IconTrash size={16} />
-                    </ActionIcon>
-                  </Group>
+                  <div />
                 </Group>
-                      <Stack>
-                        {details.categories.length > 0 && (
-                          <div>
-                            <Title order={4} mb="sm">Categories & Items</Title>
-                            {details.categories.map(category => (
-                              <Card key={category.id} withBorder mb="sm">
-                                <Group justify="space-between" mb="xs">
-                                  <Text fw={500}>{category.name}</Text>
-                                  <Button size="xs" variant="light" onClick={() => navigate(`/categories?open=${category.id}`)}>
-                                    Edit Category
-                                  </Button>
-                                </Group>
-                                <List size="sm">
-                                  {details.categoryItems[category.id]?.map(item => (
-                                    <List.Item key={item.id}>{item.name}</List.Item>
-                                  )) || <List.Item><Text c="dimmed">No items in this category</Text></List.Item>}
-                                </List>
-                              </Card>
-                            ))}
-                          </div>
-                        )}
+                      <Stack style={{ flex: 1, overflow: 'auto' }}>
                         <div>
-                          <Title order={4} mb="sm">Individual Items</Title>
-                          <List mb="md">
-                            {details.items && details.items.length > 0 ? (
-                              details.items.map(item => (
-                                <List.Item key={item.id}>
-                                  <Group justify="space-between">
-                                    <Text>{item.name}</Text>
+                            <Group style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+                            <Title order={4} mb="sm">Categories & Items</Title>
+                            <Button size="xs" variant="outline" onClick={() => setShowAddCategoryModal({ open: true, templateId: template.id })}>Add category</Button>
+                          </Group>
+                          {details.categories.length > 0 ? (
+                            details.categories.map(category => (
+                              <Card key={category.id} withBorder mb="sm">
+                                <Group style={{ justifyContent: 'space-between', alignItems: 'center' }} mb="xs">
+                                  <Text fw={500}>{category.name}</Text>
+                                  <Group>
+                                    <ActionIcon color="blue" variant="light" onClick={() => navigate(`/categories?open=${category.id}`)}>
+                                      <IconEdit size={16} />
+                                    </ActionIcon>
                                     <ActionIcon color="red" variant="light" onClick={async () => {
-                                      await removeItemFromTemplate(template.id, item.id);
+                                      // remove category from template
+                                      try {
+                                        await removeCategoryFromTemplate(template.id, category.id);
+                                      } catch (e) {
+                                        // ignore
+                                      }
                                       setTemplateDetails(prev => ({
                                         ...prev,
                                         [template.id]: {
                                           ...prev[template.id],
-                                          items: prev[template.id].items.filter(i => i.id !== item.id)
+                                          categories: prev[template.id].categories.filter(c => c.id !== category.id),
+                                          categoryItems: Object.fromEntries(Object.entries(prev[template.id].categoryItems).filter(([k]) => k !== category.id))
                                         }
                                       }));
                                     }}>
-                                      <IconX size={16} />
+                                      <IconTrash size={16} />
                                     </ActionIcon>
+                                  </Group>
+                                </Group>
+                                <List size="sm">
+                                  {details.categoryItems[category.id]?.map(item => (
+                                    <List.Item key={item.id}>
+                                      <Group justify="space-between">
+                                        <Text>{item.name}</Text>
+                                        <Text c="dimmed" size="sm">{(itemMembers[item.id] || []).map(m => m.name).join(', ')}</Text>
+                                      </Group>
+                                    </List.Item>
+                                  )) || <List.Item><Text c="dimmed">No items in this category</Text></List.Item>}
+                                </List>
+                              </Card>
+                            ))
+                          ) : (
+                            <Text c="dimmed">No categories on this template</Text>
+                          )}
+                        </div>
+                        <div>
+                          <Group style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+                            <Title order={4} mb="sm">Individual Items</Title>
+                            <Button size="xs" leftSection={<IconPlus size={16} />} onClick={() => handleAddIndividualItem(template.id)}>Add Item</Button>
+                          </Group>
+                          <List mb="md">
+                                  {details.items && details.items.length > 0 ? (
+                              details.items.map(item => (
+                                <List.Item key={item.id}>
+                                  <Group justify="space-between">
+                                    <Text>{item.name}</Text>
+                                    <Group>
+                                      <Text c="dimmed" size="sm">{(itemMembers[item.id] || []).map(m => m.name).join(', ')}</Text>
+                                      <ActionIcon color="blue" variant="light" onClick={() => { setEditMasterItemId(item.id); setShowEditDrawer(true); }}>
+                                        <IconEdit size={16} />
+                                      </ActionIcon>
+                                      <ActionIcon color="red" variant="light" onClick={async () => {
+                                        await removeItemFromTemplate(template.id, item.id);
+                                        setTemplateDetails(prev => ({
+                                          ...prev,
+                                          [template.id]: {
+                                            ...prev[template.id],
+                                            items: prev[template.id].items.filter(i => i.id !== item.id)
+                                          }
+                                        }));
+                                      }}>
+                                        <IconTrash size={16} />
+                                      </ActionIcon>
+                                    </Group>
                                   </Group>
                                 </List.Item>
                               ))
@@ -293,11 +360,7 @@ export default function TemplateManager() {
                               <List.Item><Text c="dimmed">No individual items</Text></List.Item>
                             )}
                           </List>
-                          <Group>
-                            <Button leftSection={<IconPlus size={16} />} onClick={() => handleAddIndividualItem(template.id)}>
-                              Add Item
-                            </Button>
-                          </Group>
+                          {/* moved Add Item button to header */}
                         </div>
                         {(details.categories.length === 0 && (!details.items || details.items.length === 0)) && (
                           <Text c="dimmed">This template has no categories or items assigned yet.</Text>
@@ -306,7 +369,46 @@ export default function TemplateManager() {
         </>
           );
         })()}
-              </Card>
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
+                    <ActionIcon color="red" variant="light" onClick={() => handleDelete(template.id)}>
+                      <IconTrash size={16} />
+                    </ActionIcon>
+                  </div>
+                </Card>
+
+                <Modal opened={showAddCategoryModal.open && showAddCategoryModal.templateId === template.id} onClose={() => setShowAddCategoryModal({ open: false })} title="Add category to template">
+                  <div>
+                    <Text mb="sm">Select categories to add to this template:</Text>
+                    <Stack>
+                      {categories.map(c => (
+                        <Checkbox key={c.id} label={c.name} checked={addCategorySelections.includes(c.id)} onChange={e => {
+                          const checked = e.target.checked;
+                          setAddCategorySelections(prev => checked ? [...prev, c.id] : prev.filter(id => id !== c.id));
+                        }} />
+                      ))}
+                    </Stack>
+                    <Group mt="md">
+                      <Button onClick={async () => {
+                        const tid = showAddCategoryModal.templateId;
+                        if (!tid) return;
+                        for (const cid of addCategorySelections) {
+                          await assignCategoryToTemplate(tid, cid);
+                        }
+                        // reload template details
+                        if (familyId) {
+                          const templatesRes = await getTemplates(familyId);
+                          const updatedTemplates = templatesRes.data?.templates || [];
+                          setTemplates(updatedTemplates);
+                          await loadTemplateDetails(updatedTemplates);
+                          await fetchMembersForDetails();
+                        }
+                        setAddCategorySelections([]);
+                        setShowAddCategoryModal({ open: false });
+                      }}>Add</Button>
+                      <Button variant="outline" onClick={() => { setAddCategorySelections([]); setShowAddCategoryModal({ open: false }); }}>Cancel</Button>
+                    </Group>
+                  </div>
+                </Modal>
             </Tabs.Panel>
           ))}
         </Tabs>
@@ -389,11 +491,13 @@ export default function TemplateManager() {
           try {
             const itemRes = await getItemsForTemplate(tid);
             if (itemRes.response.ok && itemRes.data && itemRes.data.items) {
+              // sort items alphabetically before setting
+              const sorted = (itemRes.data.items || []).slice().sort((a: Item, b: Item) => (a.name || '').localeCompare(b.name || ''));
               setTemplateDetails(prev => ({
                 ...prev,
                 [tid]: {
                   ...prev[tid],
-                  items: itemRes.data.items
+                  items: sorted
                 }
               }));
             }
@@ -402,19 +506,39 @@ export default function TemplateManager() {
             for (const id of ids) {
               const it = items.find(i => i.id === id);
               if (it) {
-                setTemplateDetails(prev => ({
-                  ...prev,
-                  [tid]: {
-                    ...prev[tid],
-                    items: [...(prev[tid].items || []), it]
-                  }
-                }));
+                setTemplateDetails(prev => {
+                  const merged = [...(prev[tid].items || []), it].slice().sort((a: Item, b: Item) => (a.name || '').localeCompare(b.name || ''));
+                  return ({
+                    ...prev,
+                    [tid]: {
+                      ...prev[tid],
+                      items: merged
+                    }
+                  });
+                });
               }
             }
           }
           setShowAddItemsDrawer({ open: false });
         }}
         title="Add items to template"
+      />
+      <ItemEditDrawer
+        opened={showEditDrawer}
+        onClose={() => { setShowEditDrawer(false); setEditMasterItemId(null); }}
+        masterItemId={editMasterItemId || undefined}
+        familyId={familyId}
+        showNameField={true}
+        onSaved={async () => {
+          try {
+            await loadTemplateDetails(templates);
+          } catch (e) {
+            // ignore
+          }
+          setShowEditDrawer(false);
+          setEditMasterItemId(null);
+        }}
+        showIsOneOffCheckbox={false}
       />
     </div>
   );

@@ -7,6 +7,7 @@ import {
   deleteCategory,
   getItems,
   getItemsForCategory,
+  getMembersForItem,
   assignItemToCategory,
   removeItemFromCategory,
 } from '../api';
@@ -26,7 +27,8 @@ import {
   List,
 } from '@mantine/core';
 import AddItemsDrawer from './AddItemsDrawer';
-import { IconTrash, IconEdit, IconPlus, IconX } from '@tabler/icons-react';
+import ItemEditDrawer from './ItemEditDrawer';
+import { IconTrash, IconEdit, IconPlus } from '@tabler/icons-react';
 
 
 export default function CategoryManagementPage(): React.ReactElement {
@@ -39,6 +41,7 @@ export default function CategoryManagementPage(): React.ReactElement {
   const [editName, setEditName] = useState('');
   const [items, setItems] = useState<{ id: string; name: string }[]>([]);
   const [categoryItems, setCategoryItems] = useState<{ [categoryId: string]: { id: string; name: string }[] }>({});
+  const [itemMembers, setItemMembers] = useState<{ [itemId: string]: { id: string; name: string }[] }>({});
   const [itemsInAllCategories, setItemsInAllCategories] = useState<Set<string>>(new Set());
   const [selectedTab, setSelectedTab] = useState<string | null>(null);
   // no local addItemLoading state needed when using AddItemsDrawer
@@ -47,6 +50,8 @@ export default function CategoryManagementPage(): React.ReactElement {
   const { impersonatingFamilyId } = useImpersonation();
   const { bumpRefresh } = useRefresh();
 
+    const [showEditDrawer, setShowEditDrawer] = useState(false);
+    const [editMasterItemId, setEditMasterItemId] = useState<string | null>(null);
   useEffect(() => {
     async function fetchData() {
       setLoading(true);
@@ -84,29 +89,46 @@ export default function CategoryManagementPage(): React.ReactElement {
     fetchData();
   }, []);
 
-  useEffect(() => {
-    async function fetchCategoryItems() {
-      if (!categories.length) return;
-      const result: { [categoryId: string]: { id: string; name: string }[] } = {};
-      for (const cat of categories) {
-        const res = await getItemsForCategory(cat.id);
-        result[cat.id] = res.response.ok ? res.data.items || [] : [];
-      }
-      setCategoryItems(result);
-      // compute items that appear in every category (treat these as virtual 'All' items)
-      const counts: Record<string, number> = {};
-      const categoryCount = categories.length;
-      for (const catId of Object.keys(result)) {
-        for (const item of result[catId] || []) {
-          counts[item.id] = (counts[item.id] || 0) + 1;
-        }
-      }
-      const allSet = new Set<string>();
-      for (const id of Object.keys(counts)) {
-        if (counts[id] === categoryCount && categoryCount > 0) allSet.add(id);
-      }
-      setItemsInAllCategories(allSet);
+  const fetchCategoryItems = async () => {
+    if (!categories.length) return;
+    const result: { [categoryId: string]: { id: string; name: string }[] } = {};
+    for (const cat of categories) {
+      const res = await getItemsForCategory(cat.id);
+      result[cat.id] = res.response.ok ? res.data.items || [] : [];
     }
+    setCategoryItems(result);
+    // fetch members for all items found across categories
+    const ids = new Set<string>();
+    for (const catId of Object.keys(result)) {
+      for (const item of result[catId] || []) ids.add(item.id);
+    }
+    const membersMap: { [itemId: string]: { id: string; name: string }[] } = {};
+    await Promise.all(Array.from(ids).map(async (itemId) => {
+      try {
+        const mres = await getMembersForItem(itemId);
+        if (mres.response.ok) membersMap[itemId] = Array.isArray(mres.data) ? mres.data : [];
+        else membersMap[itemId] = [];
+      } catch (e) {
+        membersMap[itemId] = [];
+      }
+    }));
+    setItemMembers(membersMap);
+    // compute items that appear in every category (treat these as virtual 'All' items)
+    const counts: Record<string, number> = {};
+    const categoryCount = categories.length;
+    for (const catId of Object.keys(result)) {
+      for (const item of result[catId] || []) {
+        counts[item.id] = (counts[item.id] || 0) + 1;
+      }
+    }
+    const allSet = new Set<string>();
+    for (const id of Object.keys(counts)) {
+      if (counts[id] === categoryCount && categoryCount > 0) allSet.add(id);
+    }
+    setItemsInAllCategories(allSet);
+  };
+
+  useEffect(() => {
     fetchCategoryItems();
   }, [categories]);
 
@@ -217,29 +239,29 @@ export default function CategoryManagementPage(): React.ReactElement {
               {categories.map(cat => (
                 <Tabs.Panel key={cat.id} value={cat.id}>
                   <Card withBorder mt="md">
-                    <Group justify="space-between" mb="md">
+                    <Group mb="md">
                       {editId === cat.id ? (
-                        <>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%' }}>
                           <TextInput
                             value={editName}
                             onChange={e => setEditName(e.target.value)}
                             onKeyDown={e => e.key === 'Enter' && handleUpdate()}
+                            style={{ flex: '1 1 auto' }}
                           />
-                          <Button size="xs" onClick={handleUpdate}>Save</Button>
-                          <Button size="xs" variant="light" onClick={() => { setEditId(null); setEditName(''); }}>Cancel</Button>
-                        </>
+                          <ActionIcon color="green" onClick={handleUpdate} title="Save">
+                            <IconEdit size={16} />
+                          </ActionIcon>
+                          <ActionIcon color="gray" onClick={() => { setEditId(null); setEditName(''); }} title="Cancel">
+                            <IconTrash size={16} />
+                          </ActionIcon>
+                        </div>
                       ) : (
-                        <>
-                          <Title order={4}>{cat.name}</Title>
-                          <Group>
-                            <ActionIcon color="blue" variant="light" onClick={() => handleEdit(cat.id, cat.name)}>
-                              <IconEdit size={16} />
-                            </ActionIcon>
-                            <ActionIcon color="red" variant="light" onClick={() => handleDelete(cat.id)}>
-                              <IconTrash size={16} />
-                            </ActionIcon>
-                          </Group>
-                        </>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%' }}>
+                          <Title order={4} style={{ margin: 0 }}>{cat.name}</Title>
+                          <ActionIcon color="blue" variant="light" onClick={() => handleEdit(cat.id, cat.name)} title="Edit category name">
+                            <IconEdit size={16} />
+                          </ActionIcon>
+                        </div>
                       )}
                     </Group>
                     <Title order={5} mb="sm">Items in this category</Title>
@@ -247,18 +269,28 @@ export default function CategoryManagementPage(): React.ReactElement {
                       {categoryItems[cat.id]?.length > 0 ? (
                         categoryItems[cat.id].map(item => (
                           <List.Item key={item.id}>
-                            <Group justify="space-between">
-                              <Text>{item.name}</Text>
-                              {itemsInAllCategories.has(item.id) ? (
-                                // show disabled remove icon (non-interactive) for 'All' items
-                                <ActionIcon color="gray" variant="light" title="Item in All categories; cannot remove individually" disabled>
-                                  <IconX size={16} />
+                            <Group justify="space-between" align="center">
+                              <div>
+                                <Text>{item.name}</Text>
+                                {itemMembers[item.id] && itemMembers[item.id].length > 0 && (
+                                  <Text c="dimmed" size="sm">{itemMembers[item.id].map(m => m.name).join(', ')}</Text>
+                                )}
+                              </div>
+                              <Group>
+                                <ActionIcon color="blue" variant="light" onClick={() => { setEditMasterItemId(item.id); setShowEditDrawer(true); }} title="Edit item">
+                                  <IconEdit size={16} />
                                 </ActionIcon>
-                              ) : (
-                                <ActionIcon color="red" variant="light" onClick={() => handleRemoveItem(item.id, cat.id)}>
-                                  <IconX size={16} />
-                                </ActionIcon>
-                              )}
+                                {itemsInAllCategories.has(item.id) ? (
+                                  // show disabled remove icon (non-interactive) for 'All' items
+                                  <ActionIcon color="gray" variant="light" title="Item in All categories; cannot remove individually" disabled>
+                                    <IconTrash size={16} />
+                                  </ActionIcon>
+                                ) : (
+                                  <ActionIcon color="red" variant="light" onClick={() => handleRemoveItem(item.id, cat.id)}>
+                                    <IconTrash size={16} />
+                                  </ActionIcon>
+                                )}
+                              </Group>
                             </Group>
                           </List.Item>
                         ))
@@ -266,15 +298,18 @@ export default function CategoryManagementPage(): React.ReactElement {
                         <List.Item><Text c="dimmed">No items in this category</Text></List.Item>
                       )}
                     </List>
-                    <Group>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <Button leftSection={<IconPlus size={16} />} onClick={() => {
                         // open AddItemsDrawer for this category
                         setSelectedTab(cat.id);
-                        // use a small modal approach: open AddItemsDrawer by toggling a per-category state
-                        // reuse existing addItemValue flow by delegating to AddItemsDrawer below
                         setShowAddPaneForCategory({ open: true, categoryId: cat.id });
                       }}>Add Item</Button>
-                    </Group>
+                      <div>
+                        <ActionIcon color="red" variant="light" onClick={() => handleDelete(cat.id)} title="Delete category">
+                          <IconTrash size={16} />
+                        </ActionIcon>
+                      </div>
+                    </div>
                   </Card>
                 </Tabs.Panel>
               ))}
@@ -287,6 +322,20 @@ export default function CategoryManagementPage(): React.ReactElement {
               onApply={handleAddItemsToCategory}
               showIsOneOffCheckbox={false}
               title="Add items to category"
+            />
+            <ItemEditDrawer
+              opened={showEditDrawer}
+              onClose={() => { setShowEditDrawer(false); setEditMasterItemId(null); }}
+              masterItemId={editMasterItemId || undefined}
+              familyId={familyId}
+              showNameField={true}
+              onSaved={async () => {
+                await fetchCategoryItems();
+                setShowEditDrawer(false);
+                setEditMasterItemId(null);
+                bumpRefresh();
+              }}
+              showIsOneOffCheckbox={false}
             />
           </>
         )}

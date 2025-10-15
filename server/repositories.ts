@@ -1,6 +1,11 @@
 import { getDb } from './db';
 import sqlite3 from 'sqlite3';
 import crypto from 'crypto';
+// If a packing_list_item.created_at is within this threshold of its provenance created_at
+// treat it as template-generated (not manually added). This tolerates tiny timing skew
+// from separate INSERT statements executed in quick succession.
+const MANUAL_ADDED_THRESHOLD_MS = 100; // 100ms
+import { broadcastEvent } from './sse';
 import { User, Family, Category, Item, ItemCategory, ItemMember, ItemWholeFamily } from './server-types';
 
 interface CreateUserData extends Omit<User, 'password_hash'> {
@@ -204,6 +209,8 @@ export class ItemRepository {
         // Delete related checks
         const placeholders = ids.map(() => '?').join(',');
         await db.run(`DELETE FROM packing_list_item_checks WHERE packing_list_item_id IN (${placeholders})`, ids);
+        // Delete provenance rows that reference these packing-list items to satisfy foreign keys
+        await db.run(`DELETE FROM packing_list_item_templates WHERE packing_list_item_id IN (${placeholders})`, ids);
         // Delete packing list items
         await db.run(`DELETE FROM packing_list_items WHERE id IN (${placeholders})`, ids);
       }
@@ -433,9 +440,16 @@ export class ItemRepository {
 
     async update(id: string, updates: Partial<PackingList>): Promise<PackingList | undefined> {
       const db = await getDb();
-      const fields = Object.keys(updates).map(k => `${k} = ?`).join(', ');
-      const values = Object.values(updates);
-      await db.run(`UPDATE packing_lists SET ${fields}, updated_at = ? WHERE id = ?`, [...values, new Date().toISOString(), id]);
+      const keys = Object.keys(updates || {});
+      // If no fields to update (common when callers remove auxiliary props like templateIds),
+      // just touch updated_at to avoid generating invalid SQL like `SET , updated_at = ?`.
+      if (keys.length === 0) {
+        await db.run(`UPDATE packing_lists SET updated_at = ? WHERE id = ?`, [new Date().toISOString(), id]);
+      } else {
+        const fields = keys.map(k => `${k} = ?`).join(', ');
+        const values = Object.values(updates);
+        await db.run(`UPDATE packing_lists SET ${fields}, updated_at = ? WHERE id = ?`, [...values, new Date().toISOString(), id]);
+      }
       return this.findById(id);
     }
 
@@ -455,6 +469,10 @@ export class ItemRepository {
       );
       const created = await this.findItemById(id);
       if (!created) throw new Error('Failed to add item to packing list');
+      try {
+        // Broadcast so dashboards and other clients update in real-time
+        broadcastEvent({ type: 'packing_list_changed', listId: packing_list_id, data: { item: created, change: 'add_item' } });
+      } catch (e) {}
       return created;
     }
 
@@ -465,28 +483,56 @@ export class ItemRepository {
       if (rows && rows.length > 0) {
         const ids = rows.map(r => r.id);
         // Delete associated checks first
-        for (const id of ids) {
-          await db.run(`DELETE FROM packing_list_item_checks WHERE packing_list_item_id = ?`, [id]);
-        }
+        const placeholders = ids.map(() => '?').join(',');
+        await db.run(`DELETE FROM packing_list_item_checks WHERE packing_list_item_id IN (${placeholders})`, ids);
+        // Also remove provenance rows referencing these packing-list items to satisfy FKs
+        await db.run(`DELETE FROM packing_list_item_templates WHERE packing_list_item_id IN (${placeholders})`, ids);
       }
       // Remove the packing list item rows
       await db.run(`DELETE FROM packing_list_items WHERE packing_list_id = ? AND item_id = ?`, [packing_list_id, item_id]);
     }
 
     // Remove a packing-list item by its packing_list_items.id (safe for one-off and legacy rows)
-    async removeItemByPliId(packing_list_item_id: string): Promise<void> {
+    async removeItemByPliId(packing_list_item_id: string, broadcast: boolean = false): Promise<void> {
       const db = await getDb();
-      try {
-        await db.run(`DELETE FROM packing_list_item_checks WHERE packing_list_item_id = ?`, [packing_list_item_id]);
-      } catch (e) {
-        console.error('Error deleting packing_list_item_checks for pli', { packing_list_item_id, err: e });
-        throw e;
+      
+      // Get packing list info before deletion for broadcast
+      let listId: string | undefined;
+      if (broadcast) {
+        try {
+          const pli = await db.get(`SELECT packing_list_id FROM packing_list_items WHERE id = ?`, [packing_list_item_id]);
+          listId = pli?.packing_list_id;
+        } catch (e) {
+          // Continue without broadcast if we can't get list info
+        }
       }
-
+      
+      // Use a SAVEPOINT so this operation can be nested inside an outer transaction.
+      const sp = 'sp_remove_pli_' + crypto.randomUUID().replace(/-/g, '');
       try {
+        await db.run(`SAVEPOINT ${sp}`);
+        await db.run(`DELETE FROM packing_list_item_checks WHERE packing_list_item_id = ?`, [packing_list_item_id]);
+        // Also delete any provenance rows that reference this packing-list-item (packing_list_item_templates)
+        await db.run(`DELETE FROM packing_list_item_templates WHERE packing_list_item_id = ?`, [packing_list_item_id]);
         await db.run(`DELETE FROM packing_list_items WHERE id = ?`, [packing_list_item_id]);
+        await db.run(`RELEASE ${sp}`);
+        
+        // Broadcast removal event if requested and we have list info
+        if (broadcast && listId) {
+          try {
+            broadcastEvent({ type: 'packing_list_changed', listId: listId, data: { itemId: packing_list_item_id, change: 'remove_item' } });
+          } catch (e) {
+            console.warn('Failed to broadcast item removal event', { packing_list_item_id, listId, err: e });
+          }
+        }
       } catch (e) {
-        console.error('Error deleting packing_list_items row', { packing_list_item_id, err: e });
+        try {
+          await db.run(`ROLLBACK TO ${sp}`);
+          await db.run(`RELEASE ${sp}`);
+        } catch (rb) {
+          // ignore rollback errors
+        }
+        console.error('Error removing packing_list_item by pli id', { packing_list_item_id, err: e });
         throw e;
       }
     }
@@ -517,24 +563,43 @@ export class ItemRepository {
       const db = await getDb();
   // Only include packing-list rows that reference an existing, non-deleted master item.
   // This enforces the invariant: packing list items are references to master items.
+  // Use LEFT JOIN so packing_list_items that were added as one-off (no master item)
+  // are still returned. Previously a JOIN excluded those rows which caused UI
+  // state like not_needed to be lost on refresh for one-off items.
   const items = await db.all(
-    `SELECT pli.*, i.name as master_name, i.id as master_id
+    `SELECT pli.*, i.name as master_name, i.id as master_id, i.isOneOff as master_is_one_off
      FROM packing_list_items pli
-     JOIN items i ON i.id = pli.item_id AND i.deleted_at IS NULL
+     LEFT JOIN items i ON i.id = pli.item_id AND i.deleted_at IS NULL
      WHERE pli.packing_list_id = ?`,
     [packing_list_id]
   );
 
   if (!items || items.length === 0) return [];
 
+  // Bulk-fetch categories for master items so we can return categories array for each packing-list row (items can belong to multiple categories)
+  const masterIds = Array.from(new Set(items.map((it: any) => it.master_id).filter(Boolean)));
+  let categoriesByMaster: Record<string, { id: string; name: string }[]> = {};
+  if (masterIds.length > 0) {
+    const catRows = await db.all(
+      `SELECT ic.item_id, c.id as category_id, c.name as category_name FROM item_categories ic JOIN categories c ON c.id = ic.category_id WHERE ic.item_id IN (${masterIds.map(() => '?').join(',')}) AND c.deleted_at IS NULL`,
+      masterIds
+    );
+    // collect all categories per master item
+    for (const r of catRows) {
+      categoriesByMaster[r.item_id] = categoriesByMaster[r.item_id] || [];
+      categoriesByMaster[r.item_id].push({ id: r.category_id, name: r.category_name });
+    }
+  }
+
   // Get members assigned to the referenced master items
+  // Use LEFT JOINs so items without a master item (one-offs) are still included
+  // and simply have no assigned members. Filter deleted users in the JOIN.
   const memberRows = await db.all(
     `SELECT pli.id as packing_list_item_id, u.id as member_id, u.name, u.username
      FROM packing_list_items pli
-     JOIN items i ON i.id = pli.item_id AND i.deleted_at IS NULL
-     JOIN item_members im ON im.item_id = i.id
-     JOIN users u ON u.id = im.member_id
-     WHERE pli.packing_list_id = ? AND u.deleted_at IS NULL`,
+     LEFT JOIN item_members im ON im.item_id = pli.item_id
+     LEFT JOIN users u ON u.id = im.member_id AND u.deleted_at IS NULL
+     WHERE pli.packing_list_id = ?`,
     [packing_list_id]
   );
 
@@ -552,12 +617,27 @@ export class ItemRepository {
 
   const wholeSet = new Set(wholeRows.map((r: any) => r.packing_list_item_id));
 
+  // Get template provenance rows for packing-list items (which templates contributed each pli)
+  const provRows = await db.all(
+    `SELECT plt.packing_list_item_id, plt.template_id FROM packing_list_item_templates plt JOIN packing_list_items pli ON plt.packing_list_item_id = pli.id WHERE pli.packing_list_id = ?`,
+    [packing_list_id]
+  );
+  const templatesByPli: Record<string, string[]> = {};
+  for (const pr of provRows) {
+    templatesByPli[pr.packing_list_item_id] = templatesByPli[pr.packing_list_item_id] || [];
+    templatesByPli[pr.packing_list_item_id].push(pr.template_id);
+  }
+
   // For each packing-list row, derive name and assignments from the master item (no display_name fallback)
   return items.map((it: any) => ({
     ...it,
     name: it.master_name || '',
     members: membersByPli[it.id] || [],
-    whole_family: wholeSet.has(it.id)
+    whole_family: wholeSet.has(it.id),
+    // category (if any) from the master item
+  categories: it.master_id ? (categoriesByMaster[it.master_id] || []) : [],
+    // template provenance ids (may be empty)
+    template_ids: templatesByPli[it.id] || []
   }));
     }
 
@@ -579,15 +659,23 @@ export class ItemRepository {
           await db.run(`INSERT OR IGNORE INTO item_members (item_id, member_id) VALUES (?, ?)`, [newItemId, m]);
         }
       }
-      // Insert packing_list_items referencing the new master item, and also store display_name
+      // Insert packing_list_items referencing the new master item.
+      // Do NOT persist a per-row `display_name` here — the canonical name lives on
+      // the master `items` row (isOneOff = 1). Historically we cached display_name
+      // on the packing_list_items row for legacy flows; avoid that to keep the
+      // master item name as the single source of truth.
       const id = crypto.randomUUID();
       await db.run(
         `INSERT INTO packing_list_items (id, packing_list_id, item_id, display_name, checked, added_during_packing, created_at)
          VALUES (?, ?, ?, ?, 0, ?, ?)`,
-        [id, packing_list_id, newItemId, display_name, added_during_packing ? 1 : 0, now]
+        [id, packing_list_id, newItemId, display_name || null, added_during_packing ? 1 : 0, now]
       );
       const created = await this.findItemById(id);
       if (!created) throw new Error('Failed to add one-off item to packing list');
+      try {
+        // Broadcast one-off adds as well
+        broadcastEvent({ type: 'packing_list_changed', listId: packing_list_id, data: { item: created, change: 'add_item' } });
+      } catch (e) {}
       return created;
     }
 
@@ -617,15 +705,90 @@ export class ItemRepository {
     }
 
     // Template assignment helpers
-    async setTemplatesForPackingList(packing_list_id: string, templateIds: string[]): Promise<void> {
+    // Update assigned templates for a packing list. If removeItemsForRemovedTemplates is true,
+    // remove packing-list-items that were attributed only to templates that are being removed
+    // (with an extra safeguard to not remove items that appear to have been manually added prior to
+    // their provenance entries).
+    async setTemplatesForPackingList(packing_list_id: string, templateIds: string[], removeItemsForRemovedTemplates: boolean = false): Promise<void> {
       const db = await getDb();
       try {
         await db.run('BEGIN TRANSACTION');
+
+        // Determine currently assigned templates
+        const existingRows: any[] = await db.all(`SELECT template_id FROM packing_list_templates WHERE packing_list_id = ?`, [packing_list_id]);
+        const existingIds = existingRows.map(r => r.template_id);
+        const toRemove = existingIds.filter(id => !((templateIds || []).includes(id)));
+
+        // Optionally remove items that were produced by templates we're removing
+        if (removeItemsForRemovedTemplates && toRemove.length > 0) {
+          console.log('Template removal cleanup: templates to remove for list', { packing_list_id, toRemove });
+          const cleanupStart = Date.now();
+          for (const tid of toRemove) {
+            // Find packing-list-item provenance rows for this template within the packing list
+            const attributedRows: any[] = await db.all(
+              `SELECT plt.packing_list_item_id, plt.created_at as provenance_created_at, pli.created_at as pli_created_at
+               FROM packing_list_item_templates plt JOIN packing_list_items pli ON plt.packing_list_item_id = pli.id
+               WHERE plt.template_id = ? AND pli.packing_list_id = ?`,
+              [tid, packing_list_id]
+            );
+            console.log('  processing template', tid, 'found attributedRows count=', attributedRows.length);
+
+            for (const r of attributedRows) {
+              const pliId = r.packing_list_item_id;
+
+              console.log('    attributed pli:', pliId, 'prov_created_at:', r.provenance_created_at, 'pli_created_at:', r.pli_created_at);
+
+              // Fetch all provenance created_at values for this pli (before we delete any provenance rows)
+              const provRows: any[] = await db.all(`SELECT created_at FROM packing_list_item_templates WHERE packing_list_item_id = ?`, [pliId]);
+              const provCreatedAts = provRows.map(p => p.created_at).filter(Boolean);
+              const earliestProv = provCreatedAts.length > 0 ? provCreatedAts.reduce((a, b) => (a < b ? a : b)) : null;
+              console.log('      provenance timestamps for pli', pliId, provCreatedAts, 'earliest=', earliestProv);
+
+              // Delete the provenance entry for the template being removed
+              await db.run(`DELETE FROM packing_list_item_templates WHERE packing_list_item_id = ? AND template_id = ?`, [pliId, tid]);
+
+              // If there are any remaining provenance entries for this pli, leave it alone
+              const remaining = await db.get(`SELECT 1 FROM packing_list_item_templates WHERE packing_list_item_id = ? LIMIT 1`, [pliId]);
+              if (remaining) continue;
+
+              // No remaining provenance — decide whether it's safe to delete the packing-list-item
+              // If the packing-list-item appears to have been manually added before provenance (i.e., pli.created_at < earliest provenance),
+              // treat it as manually added and do not delete.
+              const pliRow: any = await db.get(`SELECT created_at FROM packing_list_items WHERE id = ?`, [pliId]);
+              const pliCreated = pliRow ? pliRow.created_at : null;
+              // Convert timestamps to ms for comparison, and allow a small threshold
+              let wasManuallyAdded = false;
+              if (earliestProv && pliCreated) {
+                const pliMs = new Date(pliCreated).getTime();
+                const provMs = new Date(earliestProv).getTime();
+                wasManuallyAdded = pliMs + MANUAL_ADDED_THRESHOLD_MS < provMs;
+              }
+              console.log('      pliCreated=', pliCreated, 'earliestProv=', earliestProv, 'wasManuallyAdded=', !!wasManuallyAdded);
+              if (!wasManuallyAdded) {
+                try {
+                  console.log('      deleting pli', pliId, 'because no remaining provenance and not manually added');
+                  const delStart = Date.now();
+                  await this.removeItemByPliId(pliId, true); // broadcast: true for template cleanup removals
+                  console.log('      deleted pli', pliId, 'in', Date.now() - delStart, 'ms (with broadcast)');
+                } catch (e) {
+                  // Log and continue: don't abort whole operation if a single delete fails
+                  console.error('Error removing packing list item during template removal cleanup', { packing_list_item_id: pliId, err: e });
+                }
+              } else {
+                console.log('      keeping pli', pliId, 'because it appears manually added');
+              }
+            }
+          }
+          console.log('Template removal cleanup for list', packing_list_id, 'completed in', Date.now() - cleanupStart, 'ms');
+        }
+
+        // Persist the new set of template assignments
         await db.run(`DELETE FROM packing_list_templates WHERE packing_list_id = ?`, [packing_list_id]);
         const now = new Date().toISOString();
         for (const tid of templateIds || []) {
           await db.run(`INSERT OR IGNORE INTO packing_list_templates (packing_list_id, template_id, created_at) VALUES (?, ?, ?)`, [packing_list_id, tid, now]);
         }
+
         await db.run('COMMIT');
       } catch (err) {
         try { await db.run('ROLLBACK'); } catch (e) {}
@@ -644,9 +807,46 @@ export class ItemRepository {
       return db.all(`SELECT pl.* FROM packing_lists pl JOIN packing_list_templates plt ON pl.id = plt.packing_list_id WHERE plt.template_id = ? AND pl.deleted_at IS NULL`, [template_id]);
     }
 
-    async setNotNeeded(packing_list_item_id: string, notNeeded: boolean): Promise<void> {
+    async setNotNeeded(packing_list_item_id: string, notNeeded: boolean): Promise<any> {
       const db = await getDb();
       await db.run(`UPDATE packing_list_items SET not_needed = ? WHERE id = ?`, [notNeeded ? 1 : 0, packing_list_item_id]);
+      // Read back the row and return for verification/logging
+      try {
+        const row = await db.get(`SELECT * FROM packing_list_items WHERE id = ?`, [packing_list_item_id]);
+        console.log('setNotNeeded updated row:', { id: packing_list_item_id, not_needed: row && row.not_needed });
+        return row;
+      } catch (e) {
+        console.warn('setNotNeeded: failed to read back updated row', { packing_list_item_id, err: e });
+        return null;
+      }
+    }
+
+    // Per-member not-needed tracking (mimics packing_list_item_checks)
+    async setUserItemNotNeeded(packing_list_item_id: string, member_id: string | null, notNeeded: boolean): Promise<void> {
+      const db = await getDb();
+      const now = new Date().toISOString();
+      // Use member_id nullable to support whole-family not-needed rows (member_id NULL)
+      console.log('setUserItemNotNeeded called with', { packing_list_item_id, member_id, notNeeded });
+      let existing: any | undefined;
+      if (member_id === null) {
+        existing = await db.get(`SELECT id FROM packing_list_item_not_needed WHERE packing_list_item_id = ? AND member_id IS NULL`, [packing_list_item_id]);
+      } else {
+        existing = await db.get(`SELECT id FROM packing_list_item_not_needed WHERE packing_list_item_id = ? AND member_id = ?`, [packing_list_item_id, member_id]);
+      }
+      if (existing) {
+        await db.run(`UPDATE packing_list_item_not_needed SET not_needed = ?, updated_at = ? WHERE id = ?`, [notNeeded ? 1 : 0, now, existing.id]);
+        console.log('Updated packing_list_item_not_needed id', existing.id, 'to', notNeeded ? 1 : 0);
+      } else {
+        const id = crypto.randomUUID();
+        await db.run(`INSERT INTO packing_list_item_not_needed (id, packing_list_item_id, member_id, not_needed, updated_at) VALUES (?, ?, ?, ?, ?)`, [id, packing_list_item_id, member_id, notNeeded ? 1 : 0, now]);
+        console.log('Inserted packing_list_item_not_needed id', id, 'member_id', member_id, 'not_needed', notNeeded ? 1 : 0);
+      }
+    }
+
+    async getNotNeededForList(packing_list_id: string): Promise<any[]> {
+      const db = await getDb();
+      // Only return rows that are currently marked not_needed (not_needed = 1)
+      return db.all(`SELECT n.* FROM packing_list_item_not_needed n JOIN packing_list_items pli ON n.packing_list_item_id = pli.id WHERE pli.packing_list_id = ? AND n.not_needed = 1`, [packing_list_id]);
     }
 
     // Promote a one-off list item (display_name) to a master item and convert the list row to reference it
@@ -842,7 +1042,7 @@ export class ItemRepository {
           if (!remaining) {
             // No other templates reference it; safe to remove the packing-list-item
             try {
-              await this.removeItemByPliId(r.packing_list_item_id);
+              await this.removeItemByPliId(r.packing_list_item_id, true); // broadcast: true for template reconciliation removals
             } catch (e) {
               console.error('Error removing packing list item by pli id during reconcile', { packing_list_item_id: r.packing_list_item_id, err: e });
               // Don't abort the whole reconciliation on a delete error; log and continue

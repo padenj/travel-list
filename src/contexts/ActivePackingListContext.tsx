@@ -27,11 +27,36 @@ export const ActivePackingListProvider: React.FC<React.PropsWithChildren<{}>> = 
       const res = await getFamilyPackingLists(fid);
       if (res.response.ok) {
         setAvailableLists(res.data.lists || []);
-        const active = (res.data.lists || []).find((l: any) => l.active) || (res.data.lists || [])[0];
-        if (active) setActiveListId(active.id);
+        // Prefer persisted selection from localStorage if present and still valid.
+        const persisted = typeof window !== 'undefined' ? localStorage.getItem('activePackingListId') : null;
+        const lists = res.data.lists || [];
+        const persistedValid = persisted && lists.some((l: any) => l.id === persisted);
+        if (persistedValid) {
+          setActiveListId(persisted as string);
+        } else {
+          // If current activeListId is still valid keep it, otherwise do not auto-select any list
+          if (activeListId && lists.some((l: any) => l.id === activeListId)) {
+            // keep existing selection
+          } else {
+            setActiveListId(null);
+          }
+        }
       }
     } catch (err) {
       // ignore
+    }
+  };
+
+  // Persisted setter wrapper
+  const setAndPersistActiveListId = (id: string | null) => {
+    setActiveListId(id);
+    try {
+      if (typeof window !== 'undefined') {
+        if (id) localStorage.setItem('activePackingListId', id);
+        else localStorage.removeItem('activePackingListId');
+      }
+    } catch (e) {
+      // ignore localStorage errors
     }
   };
 
@@ -43,7 +68,7 @@ export const ActivePackingListProvider: React.FC<React.PropsWithChildren<{}>> = 
   const clearPendingOpenEdit = () => setPendingOpenEditId(null);
 
   return (
-    <ActivePackingListContext.Provider value={{ activeListId, setActiveListId, availableLists, refreshLists, requestOpenEdit, pendingOpenEditId, clearPendingOpenEdit }}>
+    <ActivePackingListContext.Provider value={{ activeListId, setActiveListId: setAndPersistActiveListId, availableLists, refreshLists, requestOpenEdit, pendingOpenEditId, clearPendingOpenEdit }}>
       {children}
     </ActivePackingListContext.Provider>
   );

@@ -11,7 +11,7 @@ export default function ActivePackingListSelector({ onChange }: { onChange?: (li
   }, []);
 
   const handleSelect = (id: string | null) => {
-    if (!id) return;
+    // Allow clearing selection
     setActiveListId(id);
     onChange && onChange(id);
   };

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Drawer, Button, Group, Text, Checkbox, CheckboxGroup, Loader } from '@mantine/core';
+import { Drawer, Button, Group, Text, Checkbox, Loader } from '@mantine/core';
 import { IconPlus } from '@tabler/icons-react';
 import ItemEditDrawer from './ItemEditDrawer';
 import { getItems } from '../api';

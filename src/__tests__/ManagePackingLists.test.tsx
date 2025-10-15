@@ -56,8 +56,10 @@ if (!hasTestingLibs) {
       Select: (props: any) => React.createElement('select', { ...props }),
       Checkbox: (props: any) => React.createElement('input', { type: 'checkbox', ...props }),
       Card: passthrough('div'),
+      MultiSelect: (props: any) => React.createElement('select', { ...props }),
       Drawer: passthrough('div'),
       Badge: passthrough('div'),
+      ActionIcon: passthrough('button'),
       useMantineTheme: () => ({}),
     };
   });

@@ -197,9 +197,16 @@ export const setChecked = async (itemId: string, checked: boolean): Promise<ApiR
   };
 
   export const setPackingListItemNotNeeded = async (listId: string, itemId: string, notNeeded: boolean): Promise<ApiResponse> => {
-    return authenticatedApiCall(`/packing-lists/${listId}/items/${itemId}/not-needed`, {
+      return authenticatedApiCall(`/packing-lists/${listId}/items/${itemId}/not-needed`, {
       method: 'PATCH',
       body: JSON.stringify({ notNeeded })
+    });
+  };
+
+  export const setPackingListItemNotNeededForMember = async (listId: string, itemId: string, memberId: string, notNeeded: boolean): Promise<ApiResponse> => {
+    return authenticatedApiCall(`/packing-lists/${listId}/items/${itemId}/not-needed`, {
+      method: 'PATCH',
+      body: JSON.stringify({ notNeeded, memberId })
     });
   };
 

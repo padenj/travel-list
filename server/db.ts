@@ -140,6 +140,28 @@ const SCHEMAS = {
         FOREIGN KEY (packing_list_item_id) REFERENCES packing_list_items(id),
         FOREIGN KEY (member_id) REFERENCES users(id)
       );
+      CREATE TABLE IF NOT EXISTS packing_list_item_not_needed (
+        id TEXT PRIMARY KEY,
+        packing_list_item_id TEXT NOT NULL,
+        member_id TEXT,
+        not_needed INTEGER DEFAULT 1,
+        updated_at TEXT,
+        FOREIGN KEY (packing_list_item_id) REFERENCES packing_list_items(id),
+        FOREIGN KEY (member_id) REFERENCES users(id)
+      );
+      
+      -- Table to record applied client sync operations for idempotency and audit
+      CREATE TABLE IF NOT EXISTS sync_ops (
+        op_id TEXT PRIMARY KEY,
+        user_id TEXT,
+        op_type TEXT,
+        entity TEXT,
+        entity_id TEXT,
+        payload TEXT,
+        status TEXT,
+        server_ts TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (user_id) REFERENCES users(id)
+      );
   `,
   families: `
     CREATE TABLE IF NOT EXISTS families (

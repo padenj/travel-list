@@ -31,6 +31,7 @@ import { seedTemplatesForFamily } from './seed-templates';
 const templateRepo = new TemplateRepository();
 import { PackingListRepository } from './repositories';
 const packingListRepo = new PackingListRepository();
+import { addClient, removeClient, broadcastEvent, getClients } from './sse';
 
 // Async propagation helper: when a template changes, update all packing lists assigned to it
 function propagateTemplateToAssignedLists(templateId: string) {
@@ -432,6 +433,7 @@ router.get('/packing-lists/:id', authMiddleware, async (req: Request, res: Respo
   // return enriched items with member assignments to reduce client chatter
   const items = await packingListRepo.getItemsWithMembers(id);
   const checks = await packingListRepo.getUserItemChecks(id);
+  const notNeededRows = await packingListRepo.getNotNeededForList(id);
   // Remove any per-item `checked` column (it can be ambiguous) so the
   // canonical per-user checked state lives only in `checks`.
   const sanitizedItems = items.map(({ checked, ...rest }: any) => rest);
@@ -442,9 +444,9 @@ router.get('/packing-lists/:id', authMiddleware, async (req: Request, res: Respo
       checkCount: checks.length,
       checks: checks.map(c => ({ packing_list_item_id: c.packing_list_item_id, member_id: c.member_id, checked: c.checked }))
     });
-    // Also include any template assignments for this packing list so the UI can display them
-    const templateIds = await packingListRepo.getTemplatesForPackingList(id);
-    return res.json({ list, items: sanitizedItems, checks, template_ids: templateIds });
+  // Also include any template assignments for this packing list so the UI can display them
+  const templateIds = await packingListRepo.getTemplatesForPackingList(id);
+  return res.json({ list, items: sanitizedItems, checks, not_needed_rows: notNeededRows, template_ids: templateIds });
   } catch (error) {
     console.error('Error fetching packing list:', error);
     return res.status(500).json({ error: 'Failed to fetch packing list' });
@@ -478,13 +480,15 @@ router.put('/packing-lists/:id', authMiddleware, async (req: Request, res: Respo
     const existing = await packingListRepo.findById(id);
     if (!existing) return res.status(404).json({ error: 'Packing list not found' });
     if (req.user?.role !== 'SystemAdmin' && req.user?.familyId !== existing.family_id) return res.status(403).json({ error: 'Forbidden' });
-    // If templateIds provided, persist assignments
+    // If templateIds provided, persist assignments. Optionally remove associated items for removed templates.
     if (Array.isArray(updates.templateIds)) {
-      await packingListRepo.setTemplatesForPackingList(id, updates.templateIds);
+      const removeItemsFlag = !!updates.removeItemsForRemovedTemplates;
+      await packingListRepo.setTemplatesForPackingList(id, updates.templateIds, removeItemsFlag);
       // enqueue propagation for each assigned template
       for (const tid of updates.templateIds) propagateTemplateToAssignedLists(tid);
-      // remove templateIds from updates passed to generic update
+      // remove template-related flags from updates passed to generic update
       delete updates.templateIds;
+      delete updates.removeItemsForRemovedTemplates;
     }
     const updated = await packingListRepo.update(id, updates);
     return res.json({ list: updated });
@@ -509,6 +513,7 @@ router.delete('/packing-lists/:id', authMiddleware, async (req: Request, res: Re
   }
 });
 
+// Client sync push endpoint
 // Add items to a packing list (supports masterItemId or oneOff)
 router.post('/packing-lists/:id/items', authMiddleware, async (req: Request, res: Response) => {
   const { id } = req.params;
@@ -540,7 +545,8 @@ router.post('/packing-lists/:id/items', authMiddleware, async (req: Request, res
     } else {
       return res.status(400).json({ error: 'masterItemId or oneOff.name is required' });
     }
-    return res.json({ item: created });
+  try { broadcastEvent({ type: 'packing_list_changed', listId: id, data: { item: created, change: 'add_item' } }); } catch (e) {}
+  return res.json({ item: created });
   } catch (error) {
     console.error('Error adding item to packing list:', error);
     return res.status(500).json({ error: 'Failed to add item to packing list' });
@@ -572,8 +578,9 @@ router.patch('/packing-lists/:listId/items/:itemId/check', authMiddleware, async
     // userId defaults to authenticated user
     const memberId = userId || req.user!.id;
     console.log('About to call setUserItemChecked with', { listName: list.name, packing_list_item_id: pli.id, memberId, checked, checkedType: typeof checked });
-    await packingListRepo.setUserItemChecked(pli.id, memberId, !!checked);
-    console.log('setUserItemChecked completed for', { listName: list.name, packing_list_item_id: pli.id, memberId });
+  await packingListRepo.setUserItemChecked(pli.id, memberId, !!checked);
+  console.log('setUserItemChecked completed for', { listName: list.name, packing_list_item_id: pli.id, memberId });
+  try { broadcastEvent({ type: 'packing_list_changed', listId, data: { itemId: pli.id, change: 'check', memberId, checked: !!checked } }); } catch (e) {}
     return res.json({ message: 'Check updated' });
   } catch (error) {
     console.error('Error updating check:', error);
@@ -584,8 +591,9 @@ router.patch('/packing-lists/:listId/items/:itemId/check', authMiddleware, async
 // Set not_needed flag on a packing list item
 router.patch('/packing-lists/:listId/items/:itemId/not-needed', authMiddleware, async (req: Request, res: Response) => {
   const { listId, itemId } = req.params;
-  const { notNeeded } = req.body as any;
+  const { notNeeded, memberId } = req.body as any;
   try {
+    console.log('PATCH not-needed request received', { listId, itemId, notNeeded, user: req.user?.id });
     const list = await packingListRepo.findById(listId);
     if (!list) return res.status(404).json({ error: 'Packing list not found' });
     if (req.user?.role !== 'SystemAdmin' && req.user?.familyId !== list.family_id) return res.status(403).json({ error: 'Forbidden' });
@@ -595,8 +603,17 @@ router.patch('/packing-lists/:listId/items/:itemId/not-needed', authMiddleware, 
       if (maybe && maybe.packing_list_id === listId) pli = maybe;
     }
     if (!pli) return res.status(404).json({ error: 'List item not found' });
-    await packingListRepo.setNotNeeded(pli.id, !!notNeeded);
-    return res.json({ message: 'not_needed updated' });
+  // If memberId is present, set per-member not-needed; otherwise, update legacy column as well for compatibility
+  if (typeof memberId !== 'undefined' && memberId !== null) {
+    await packingListRepo.setUserItemNotNeeded(pli.id, memberId, !!notNeeded);
+    try { broadcastEvent({ type: 'packing_list_changed', listId, data: { itemId: pli.id, change: 'not_needed', notNeeded: !!notNeeded, memberId } }); } catch (e) {}
+    return res.json({ message: 'not_needed updated (per-member)' });
+  } else {
+    const updated = await packingListRepo.setNotNeeded(pli.id, !!notNeeded);
+    try { broadcastEvent({ type: 'packing_list_changed', listId, data: { itemId: pli.id, change: 'not_needed', notNeeded: !!notNeeded, updated } }); } catch (e) {}
+    console.log('PATCH not-needed completed, returning updated row', { updated });
+    return res.json({ message: 'not_needed updated', updated });
+  }
   } catch (error) {
     console.error('Error updating not_needed:', error);
     return res.status(500).json({ error: 'Failed to update not_needed' });
@@ -643,8 +660,8 @@ router.delete('/packing-lists/:listId/items/:itemId', authMiddleware, async (req
     if (!pli) return res.status(404).json({ error: 'List item not found' });
 
     // Remove associated checks and the packing list row
-    await packingListRepo.removeItemByPliId(pli.id);
-    return res.json({ message: 'Packing list item removed' });
+  await packingListRepo.removeItemByPliId(pli.id, true); // broadcast: true for manual deletions
+  return res.json({ message: 'Packing list item removed' });
   } catch (error) {
     console.error('Error deleting packing list item:', error);
     return res.status(500).json({ error: 'Failed to delete packing list item' });
@@ -687,6 +704,38 @@ router.put('/categories/:id', authMiddleware, async (req: Request, res: Response
     return res.status(500).json({ error: 'Failed to update category' });
   }
 });
+
+// SSE endpoint - client may connect to receive server-sent events for list updates
+router.get('/events', authMiddleware, (req: Request, res: Response) => {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+  });
+  res.write('\n');
+  const clientId = addClient(res, req);
+  req.on('close', () => {
+    try { console.log('[SSE] connection closed for client id=', clientId); } catch (e) {}
+    removeClient(res);
+  });
+});
+
+// Debug: return list of SSE clients and metadata (no auth required)
+router.get('/debug/sse-clients', async (req: Request, res: Response) => {
+  try {
+    console.log('[DEBUG] Debug endpoint called');
+    const clients = getClients();
+    console.log('[DEBUG] getClients returned:', clients.length, 'clients');
+    return res.json({ clients, count: clients.length });
+  } catch (e) {
+    console.error('[DEBUG] Error in debug endpoint:', e);
+    const error = e as Error;
+    console.error('[DEBUG] Error stack:', error.stack);
+    return res.status(500).json({ error: 'Failed to fetch debug data', details: error.message });
+  }
+});
+
+
 
 router.delete('/categories/:id', authMiddleware, async (req: Request, res: Response) => {
   const { id } = req.params;
@@ -828,6 +877,37 @@ router.post('/items/:itemId/members/:memberId', authMiddleware, async (req: Requ
   const { itemId, memberId } = req.params;
   try {
     await itemRepo.assignToMember(itemId, memberId);
+    // Broadcast to any packing lists that include this item via templates so clients update
+    try {
+      // Gather templates that reference this item directly
+      const directTemplateIds = await templateRepo.getTemplatesReferencingItem(itemId);
+      // Also include templates that reference any category the item belongs to
+      const categories = await itemRepo.getCategoriesForItem(itemId);
+      const categoryIds = (categories || []).map((c: any) => c.id);
+      const categoryTemplateIdsSet = new Set<string>();
+      for (const cid of categoryIds) {
+        const tids = await templateRepo.getTemplatesReferencingCategory(cid);
+        for (const t of tids) categoryTemplateIdsSet.add(t);
+      }
+      const allTemplateIdsSet = new Set<string>([...directTemplateIds, ...Array.from(categoryTemplateIdsSet)]);
+      const templateIds = Array.from(allTemplateIdsSet);
+      console.log('[SSE] member assignment changed for item', itemId, 'member', memberId, 'directTemplates=', directTemplateIds.length ? directTemplateIds : 'none', 'categoryTemplates=', Array.from(categoryTemplateIdsSet));
+      for (const tid of templateIds) {
+        const lists = await packingListRepo.getPackingListsForTemplate(tid);
+        console.log('[SSE] template', tid, 'affects lists:', lists.map((x: any) => x.id));
+        for (const l of lists) {
+          const payload = { type: 'packing_list_changed', listId: l.id, data: { itemId, memberId, change: 'member_assignment', action: 'assigned' } };
+          try {
+            console.log('[SSE] broadcasting member assignment payload to list', l.id, payload);
+            broadcastEvent(payload);
+          } catch (e) {
+            console.error('[SSE] failed to broadcast member assignment payload', { listId: l.id, itemId, memberId, err: e });
+          }
+        }
+      }
+    } catch (e) {
+      console.error('Error broadcasting member assignment updates for item', itemId, e);
+    }
     return res.json({ message: 'Item assigned to member' });
   } catch (error) {
     console.error('Error assigning item to member:', error);
@@ -839,6 +919,37 @@ router.delete('/items/:itemId/members/:memberId', authMiddleware, async (req: Re
   const { itemId, memberId } = req.params;
   try {
     await itemRepo.removeFromMember(itemId, memberId);
+    // Broadcast to any packing lists that include this item via templates so clients update
+    try {
+      // Gather templates that reference this item directly
+      const directTemplateIds = await templateRepo.getTemplatesReferencingItem(itemId);
+      // Also include templates that reference any category the item belongs to
+      const categories = await itemRepo.getCategoriesForItem(itemId);
+      const categoryIds = (categories || []).map((c: any) => c.id);
+      const categoryTemplateIdsSet = new Set<string>();
+      for (const cid of categoryIds) {
+        const tids = await templateRepo.getTemplatesReferencingCategory(cid);
+        for (const t of tids) categoryTemplateIdsSet.add(t);
+      }
+      const allTemplateIdsSet = new Set<string>([...directTemplateIds, ...Array.from(categoryTemplateIdsSet)]);
+      const templateIds = Array.from(allTemplateIdsSet);
+      console.log('[SSE] member removal for item', itemId, 'member', memberId, 'directTemplates=', directTemplateIds.length ? directTemplateIds : 'none', 'categoryTemplates=', Array.from(categoryTemplateIdsSet));
+      for (const tid of templateIds) {
+        const lists = await packingListRepo.getPackingListsForTemplate(tid);
+        console.log('[SSE] template', tid, 'affects lists:', lists.map((x: any) => x.id));
+        for (const l of lists) {
+          const payload = { type: 'packing_list_changed', listId: l.id, data: { itemId, memberId, change: 'member_assignment', action: 'removed' } };
+          try {
+            console.log('[SSE] broadcasting member removal payload to list', l.id, payload);
+            broadcastEvent(payload);
+          } catch (e) {
+            console.error('[SSE] failed to broadcast member removal payload', { listId: l.id, itemId, memberId, err: e });
+          }
+        }
+      }
+    } catch (e) {
+      console.error('Error broadcasting member removal updates for item', itemId, e);
+    }
     return res.json({ message: 'Item removed from member' });
   } catch (error) {
     console.error('Error removing item from member:', error);

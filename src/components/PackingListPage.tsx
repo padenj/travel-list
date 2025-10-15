@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Container, Title, Group, Button, Modal, TextInput } from '@mantine/core';
 import ManagePackingLists from './ManagePackingLists';
-import { createPackingList, getCurrentUserProfile } from '../api';
+import { getCurrentUserProfile, createPackingList } from '../api';
 import { showNotification } from '@mantine/notifications';
 import { useActivePackingList } from '../contexts/ActivePackingListContext';
 
@@ -18,16 +18,14 @@ export default function PackingListPage(): React.ReactElement {
       const fid = profile.response.ok && profile.data.family ? profile.data.family.id : null;
       if (!fid) throw new Error('No family');
       if (!newListName) return;
-      const res = await createPackingList(fid, newListName);
-      if (res.response.ok) {
+      const result = await createPackingList(fid, newListName);
+      if (result.response.ok && result.data.list) {
+        const createdList = result.data.list;
         showNotification({ title: 'Created', message: 'Packing list created', color: 'green' });
         setShowCreateModal(false);
         setNewListName('');
         try { await refreshLists(); } catch {}
-        const created = res.data?.list;
-        if (created && requestOpenEdit) requestOpenEdit(created.id);
-      } else {
-        showNotification({ title: 'Failed', message: res.data?.error || 'Failed to create', color: 'red' });
+        if (createdList && requestOpenEdit) requestOpenEdit(createdList.id);
       }
     } catch (err) {
       showNotification({ title: 'Error', message: String(err), color: 'red' });

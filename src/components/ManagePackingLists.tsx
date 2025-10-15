@@ -1,18 +1,16 @@
 import { useEffect, useState } from 'react';
-import { Card, Title, Group, Button, Stack, Text, Drawer, TextInput, Badge, Checkbox, MultiSelect } from '@mantine/core';
-import { IconEdit } from '@tabler/icons-react';
+import { Card, Title, Group, Button, Stack, Text, Drawer, TextInput, Badge, Checkbox, MultiSelect, ActionIcon, Tooltip } from '@mantine/core';
+import { IconEdit, IconCheck, IconX, IconLayersOff } from '@tabler/icons-react';
 import {
   getFamilyPackingLists,
-  updatePackingList,
-  deletePackingList,
   getCurrentUserProfile,
   getPackingList,
   getTemplates,
-  
-  getCategoriesForItem,
   getItems,
-  addItemToPackingList,
+  updatePackingList,
+  deletePackingList,
   deletePackingListItem,
+  addItemToPackingList,
 } from '../api';
 import { showNotification } from '@mantine/notifications';
 import { useActivePackingList } from '../contexts/ActivePackingListContext';
@@ -28,8 +26,11 @@ export default function ManagePackingLists() {
   const [editListId, setEditListId] = useState<string | null>(null);
   const [editListName, setEditListName] = useState<string>('');
   const [editItems, setEditItems] = useState<any[]>([]);
-  const [categoryByItem, setCategoryByItem] = useState<Record<string, string>>({});
+  const [editNameDraft, setEditNameDraft] = useState<string>('');
+  const [isEditingName, setIsEditingName] = useState<boolean>(false);
+  // categoryByItem removed - server now returns categories per item
   const [editLoading, setEditLoading] = useState(false);
+  const [showTemplateAssignDrawer, setShowTemplateAssignDrawer] = useState(false);
   const [templates, setTemplates] = useState<any[]>([]);
   
   const [editAssignedTemplates, setEditAssignedTemplates] = useState<string[]>([]);
@@ -88,14 +89,17 @@ export default function ManagePackingLists() {
   };
 
   const doRename = async () => {
-    // rename from edit modal: use editListId/editListName
-    if (!editListId || !editListName) return;
-    const res = await updatePackingList(editListId, { name: editListName });
+    // rename from edit modal: use editNameDraft
+    if (!editListId || !editNameDraft) return;
+    const res = await updatePackingList(editListId, { name: editNameDraft });
     if (res.response.ok) {
       showNotification({ title: 'Renamed', message: 'List renamed', color: 'green' });
+      // update local state and exit edit mode
+      setEditListName(editNameDraft);
+      setIsEditingName(false);
       await reload();
     } else {
-      showNotification({ title: 'Failed', message: res.data?.error || 'Failed to rename', color: 'red' });
+      showNotification({ title: 'Error', message: 'Failed to rename list', color: 'red' });
     }
   };
 
@@ -106,10 +110,9 @@ export default function ManagePackingLists() {
       showNotification({ title: 'Deleted', message: 'List deleted', color: 'green' });
       await reload();
     } else {
-      showNotification({ title: 'Failed', message: res.data?.error || 'Failed to delete', color: 'red' });
+      showNotification({ title: 'Error', message: 'Failed to delete list', color: 'red' });
     }
   };
-
 
   const openEditFor = async (list: any) => {
     setEditListId(list.id);
@@ -123,36 +126,14 @@ export default function ManagePackingLists() {
         setEditItems([]);
         return;
       }
-      // server now returns items enriched with assigned members and whole_family flag
+      // server returns items with members, categories (array) and template_ids
       const listItems = res.data.items || [];
-      const enriched = listItems.map((li: any) => {
-        const name = li.display_name || li.name || '';
-        const assigned = li.members || [];
-        const whole = !!li.whole_family;
-        return { id: li.id, itemId: li.item_id || null, name, assigned, whole, oneOff: !li.item_id };
-      });
-      setEditItems(enriched);
+      setEditItems(listItems);
   // load templates assigned to this packing list (if server provides them)
   const assigned = Array.isArray(res.data.template_ids) ? res.data.template_ids : (Array.isArray(res.data.templates) ? res.data.templates.map((t: any) => t.id) : []);
   setEditAssignedTemplates(assigned || []);
-      // Fetch categories for master items (first category will be used for grouping)
-        try {
-        const itemIds = Array.from(new Set(enriched.map((e: any) => String(e.itemId)).filter(Boolean))) as string[];
-        const map: Record<string, string> = {};
-        await Promise.all(itemIds.map(async (iid: string) => {
-          try {
-            const cre = await getCategoriesForItem(iid);
-            if (cre.response.ok && Array.isArray(cre.data) && cre.data.length > 0) {
-              map[iid] = cre.data[0].name || 'Uncategorized';
-            }
-          } catch (e) {
-            // ignore per-item failures
-          }
-        }));
-        setCategoryByItem(map);
-      } catch (err) {
-        // ignore
-      }
+      // we now rely on server-provided category arrays and per-item template_ids
+  // rely on server-provided item.categories and item.template_ids
     } catch (err) {
       console.error(err);
       setEditItems([]);
@@ -202,7 +183,7 @@ export default function ManagePackingLists() {
       setShowAddPane(false);
       return;
     }
-    setAddingLoading(true);
+      setAddingLoading(true);
     try {
       await Promise.all(selectedToAdd.map(id => addItemToPackingList(editListId, id)));
       showNotification({ title: 'Added', message: 'Items added to list', color: 'green' });
@@ -243,43 +224,91 @@ export default function ManagePackingLists() {
 
       {/* Promote modal removed */}
 
-      <Drawer opened={showEditModal} onClose={() => setShowEditModal(false)} title={`Edit: ${editListName}`} position="right" size={isMobile ? '100%' : 720} padding="md">
+  <Drawer opened={showEditModal} onClose={() => setShowEditModal(false)} title={`Edit Packing List`} position="right" size={isMobile ? '100%' : 720} padding="md">
         <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
           <Group style={{ marginBottom: 8, gap: 8 }}>
-            <TextInput value={editListName} onChange={(e) => setEditListName(e.currentTarget.value)} style={{ minWidth: 320 }} />
-            <Button onClick={doRename}>Save Name</Button>
+            {!isEditingName ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Text fw={700} style={{ minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{editListName}</Text>
+                <ActionIcon onClick={() => { setEditNameDraft(editListName); setIsEditingName(true); }} size="md">
+                  <IconEdit size={16} />
+                </ActionIcon>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <TextInput value={editNameDraft} onChange={(e) => setEditNameDraft(e.currentTarget.value)} style={{ minWidth: 240, maxWidth: '60%' }} />
+                <ActionIcon color="green" onClick={doRename}>
+                  <IconCheck size={16} />
+                </ActionIcon>
+                <ActionIcon color="gray" onClick={() => { setEditNameDraft(editListName); setIsEditingName(false); }}>
+                  <IconX size={16} />
+                </ActionIcon>
+              </div>
+            )}
           </Group>
           {editLoading ? (
             <div>Loading...</div>
           ) : (
-            <div style={{ maxHeight: 400, overflow: 'auto' }}>
-              {editItems.length === 0 ? (
+            <>
+              {/* controls panel placed between header and items list */}
+              <div style={{ width: '100%', background: '#f5f5f7', padding: 12, borderRadius: 6, display: 'grid', gridTemplateColumns: '1fr auto 1fr', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+                <div />
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, justifyContent: 'center' }}>
+                  <Button onClick={() => setShowTemplateAssignDrawer(true)} size="xs">Manage Template Assignments</Button>
+                  <Button onClick={openAddItemsPane} disabled={editLoading} size="xs">Add Items</Button>
+                </div>
+                <div />
+              </div>
+                  {/* show applied template badges just above the items list */}
+                  {editAssignedTemplates.length > 0 && (
+                    <Group style={{ gap: 8, marginBottom: 8 }}>
+                      {editAssignedTemplates.map(tid => {
+                        const t = templates.find(tt => tt.id === tid);
+                        return t ? <Badge key={tid}>{t.name}</Badge> : null;
+                      })}
+                    </Group>
+                  )}
+                  <div style={{ flex: 1, overflow: 'auto' }}>
+                  {editItems.length === 0 ? (
                 <Text c="dimmed">No items in this list</Text>
               ) : (
                 // group items by first category name (fall back to 'Uncategorized')
                 (() => {
                   const groups: Record<string, any[]> = {};
                   for (const it of editItems) {
-                    const cat = it.oneOff ? 'Uncategorized' : (it.itemId ? (categoryByItem[it.itemId] || 'Uncategorized') : 'Uncategorized');
+                    const catName = (it.categories && it.categories.length > 0) ? (it.categories[0].name || 'Uncategorized') : 'Uncategorized';
+                    const cat = it.item_id === null ? 'Uncategorized' : catName;
                     if (!groups[cat]) groups[cat] = [];
                     groups[cat].push(it);
                   }
-                  return Object.keys(groups).sort().map(cat => (
+                  // sort categories alphabetically using localeCompare
+                  return Object.keys(groups).slice().sort((a, b) => (a || '').localeCompare(b || '')).map(cat => (
                     <div key={cat} style={{ marginBottom: 8 }}>
                       <Text fw={700} size="sm" style={{ margin: '8px 0' }}>{cat}</Text>
                       <div>
-                        {groups[cat].map((it: any) => {
-                          const assignmentText = it.whole ? 'Whole Family' : (it.assigned && it.assigned.length > 0 ? it.assigned.map((m: any) => m.name || m.username).join(', ') : 'Unassigned');
-                          return (
+                                  {(
+                          // sort items within the category alphabetically by name
+                          (groups[cat] || []).slice().sort((x: any, y: any) => ((x.name || '')).localeCompare((y.name || '')))
+                        ).map((it: any) => {
+                          const assignmentText = it.whole_family ? 'Whole Family' : (it.members && it.members.length > 0 ? it.members.map((m: any) => m.name || m.username).join(', ') : 'Unassigned');
+                                  const isFromTemplate = Array.isArray(it.template_ids) && it.template_ids.length > 0;
+                                  return (
                             <div key={it.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid rgba(0,0,0,0.04)' }}>
                               <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
                                 <div style={{ flex: '1 1 auto', minWidth: 0 }}>
                                   <Text style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                    {it.name}
+                                            {it.name}
                                     <Text component="span" size="xs" c="dimmed">{` - ${assignmentText}`}</Text>
                                   </Text>
                                 </div>
-                                {it.oneOff ? <Badge color="gray" size="xs">One-off</Badge> : null}
+                                        {it.oneOff ? <Badge color="gray" size="xs">One-off</Badge> : null}
+                                        {isFromTemplate ? (
+                                          <Tooltip label="From template" withArrow>
+                                            <ActionIcon size="xs" variant="transparent">
+                                                <IconLayersOff size={14} />
+                                              </ActionIcon>
+                                          </Tooltip>
+                                        ) : null}
                               </div>
                               <div style={{ flex: '0 0 auto', marginLeft: 12 }}>
                                 <Group>
@@ -287,17 +316,21 @@ export default function ManagePackingLists() {
                                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><IconEdit size={14} />Edit</span>
                                   </Button>
                                   <Button size="xs" color="red" variant="subtle" onClick={async () => {
-                                    if (!editListId) return;
-                                    if (!confirm('Remove this item from the packing list? This will not delete the master item.')) return;
+                                    if (!confirm('Remove this item from the packing list?')) return;
                                     try {
-                                      await deletePackingListItem(editListId, it.id);
-                                      showNotification({ title: 'Removed', message: 'Item removed from list', color: 'green' });
-                                      // Refresh modal items and lists
-                                      if (editListId) await openEditFor({ id: editListId, name: editListName });
-                                      await reload();
+                                      if (!editListId) return;
+                                      const res = await deletePackingListItem(editListId, it.id);
+                                      if (res.response.ok) {
+                                        showNotification({ title: 'Removed', message: 'Item removed from list', color: 'green' });
+                                        // Refresh modal and list
+                                        if (editListId) await openEditFor({ id: editListId, name: editListName });
+                                        await reload();
+                                      } else {
+                                        showNotification({ title: 'Error', message: 'Failed to remove item', color: 'red' });
+                                      }
                                     } catch (err) {
-                                      console.error('Failed to remove packing list item', err);
-                                      showNotification({ title: 'Failed', message: 'Failed to remove item from list', color: 'red' });
+                                      console.error('Failed to remove item', err);
+                                      showNotification({ title: 'Error', message: 'Failed to remove item', color: 'red' });
                                     }
                                   }}>Remove</Button>
                                 </Group>
@@ -311,50 +344,59 @@ export default function ManagePackingLists() {
                 })()
               )}
             </div>
+          </>
           )}
 
-          <Group mt="md" style={{ justifyContent: 'space-between' }}>
-            <Group style={{ alignItems: 'center' }}>
-              {/* Allow assigning multiple templates to this packing list. These assignments are persisted on save. */}
-              <Text style={{ marginRight: 8 }}>Assigned templates:</Text>
-              <MultiSelect
-                data={templates.map(t => ({ value: t.id, label: t.name }))}
-                value={editAssignedTemplates}
-                onChange={(vals) => setEditAssignedTemplates(vals)}
-                placeholder="Select templates to assign..."
-                searchable
-                
-                style={{ minWidth: 260 }}
-              />
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <Button onClick={async () => {
-                  if (!editListId) return;
-                  setEditLoading(true);
-                  try {
-                    await updatePackingList(editListId, { templateIds: editAssignedTemplates });
-                    showNotification({ title: 'Saved', message: 'Template assignments saved', color: 'green' });
-                    await reload();
-                    if (editListId) await openEditFor({ id: editListId, name: editListName });
-                  } catch (err) {
-                    console.error('Failed to save template assignments', err);
-                    showNotification({ title: 'Failed', message: 'Could not save template assignments', color: 'red' });
-                  } finally {
-                    setEditLoading(false);
-                  }
-                }} disabled={editLoading}>Save Assignments</Button>
-                <Button onClick={openAddItemsPane} disabled={editLoading}>Add Items</Button>
-                <Group>
-                  <Button variant="default" onClick={() => setShowEditModal(false)}>Close</Button>
-                </Group>
-              </div>
-            </Group>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              {editAssignedTemplates.map(tid => {
-                const t = templates.find(tt => tt.id === tid);
-                return t ? <Badge key={tid}>{t.name}</Badge> : null;
-              })}
-            </div>
-          </Group>
+        </div>
+      </Drawer>
+
+      {/* Nested Drawer for managing template assignments */}
+      <Drawer opened={showTemplateAssignDrawer} onClose={() => setShowTemplateAssignDrawer(false)} title="Manage Template Assignments" position="right" size={isMobile ? '80%' : 420} padding="md" zIndex={2200}>
+        <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+          <div style={{ marginBottom: 8 }}>
+            <Text mb="xs">Assigned templates</Text>
+            <MultiSelect
+              data={templates.map(t => ({ value: t.id, label: t.name }))}
+              value={editAssignedTemplates}
+              onChange={(vals) => setEditAssignedTemplates(vals)}
+              placeholder="Select templates to assign..."
+              searchable
+              styles={{ dropdown: { zIndex: 2300 } }}
+              style={{ width: '100%' }}
+            />
+          </div>
+          <div style={{ marginTop: 'auto', display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+            <Button variant="default" onClick={() => setShowTemplateAssignDrawer(false)}>Cancel</Button>
+            <Button onClick={async () => {
+              if (!editListId) return;
+              setEditLoading(true);
+              try {
+                const serverRes = await getPackingList(editListId);
+                const serverTemplateIds: string[] = serverRes.response.ok ? (Array.isArray(serverRes.data.template_ids) ? serverRes.data.template_ids : []) : [];
+                const removed = serverTemplateIds.filter(tid => !editAssignedTemplates.includes(tid));
+                let removeItemsForRemovedTemplates = false;
+                if (removed.length > 0) {
+                  removeItemsForRemovedTemplates = confirm('You removed one or more templates. Remove items that were added solely because of those templates?');
+                }
+                const payload: any = { templateIds: editAssignedTemplates };
+                if (removeItemsForRemovedTemplates) payload.removeItemsForRemovedTemplates = true;
+                const res = await updatePackingList(editListId, payload);
+                if (res.response.ok) {
+                  showNotification({ title: 'Saved', message: 'Template assignments saved', color: 'green' });
+                  await reload();
+                  if (editListId) await openEditFor({ id: editListId, name: editListName });
+                  setShowTemplateAssignDrawer(false);
+                } else {
+                  showNotification({ title: 'Failed', message: 'Could not save template assignments', color: 'red' });
+                }
+              } catch (err) {
+                console.error('Failed to save template assignments', err);
+                showNotification({ title: 'Failed', message: 'Could not save template assignments', color: 'red' });
+              } finally {
+                setEditLoading(false);
+              }
+            }}>Save Assignments</Button>
+          </div>
         </div>
       </Drawer>
 
@@ -449,7 +491,7 @@ export default function ManagePackingLists() {
           try {
             // If an item was created and we're editing a packing list from the Add Items pane,
             // add the created item to that packing list so it appears in the modal immediately.
-            if (payload && (payload as any).id && showAddPane && editListId) {
+                if (payload && (payload as any).id && showAddPane && editListId) {
               try {
                 await addItemToPackingList(editListId, (payload as any).id);
                 showNotification({ title: 'Added', message: 'New item added to the packing list', color: 'green' });

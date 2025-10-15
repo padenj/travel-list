@@ -13,6 +13,8 @@ import {
   createItem,
   getCategories,
   getCurrentUserProfile,
+  deleteItem,
+  getPackingList,
 } from '../api';
 
 type OnSavedPayload = { id?: string; name?: string } | undefined;
@@ -33,9 +35,7 @@ export interface ItemEditDrawerProps {
   zIndex?: number;
 }
 
-export default function ItemEditDrawer({ opened, onClose, masterItemId, initialName, familyId, showNameField = false, defaultAssignedMemberId, onSaved, promoteContext, zIndex }: ItemEditDrawerProps) {
-  // default showIsOneOffCheckbox to false if not provided (ItemManagementPage will keep it hidden)
-  const showIsOneOffCheckbox = (arguments[0] as ItemEditDrawerProps)?.showIsOneOffCheckbox || false;
+export default function ItemEditDrawer({ opened, onClose, masterItemId, initialName, familyId, showNameField = false, defaultAssignedMemberId, onSaved, promoteContext, showIsOneOffCheckbox = false, zIndex }: ItemEditDrawerProps) {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [categories, setCategories] = useState<any[]>([]);
@@ -88,6 +88,83 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
           const wholeAssigned = !!payload.wholeAssigned;
           setInitialWhole(wholeAssigned);
           setSelectedWhole(wholeAssigned);
+        } else if (promoteContext && promoteContext.listId) {
+          const pctx = promoteContext as { listId: string; packingListItemId: string };
+          // Try consolidated endpoint first (tests expect this to be called)
+          try {
+            const editRes = await getItemEditData(pctx.packingListItemId, familyId || undefined);
+            if (editRes && editRes.response && editRes.response.ok) {
+              const payload = editRes.data || {};
+              setCategories(payload.categories || []);
+              const itemCats = Array.isArray(payload.itemCategories) ? payload.itemCategories : (payload.itemCategories || []);
+              const currentCats = itemCats.map((c: any) => c.id);
+              setInitialCategories(currentCats);
+              setSelectedCategories(currentCats.slice());
+              const allCatIds = (payload.categories || []).map((c: any) => c.id);
+              const isAll = allCatIds.length > 0 && allCatIds.every((id: string) => currentCats.includes(id)) && currentCats.length === allCatIds.length;
+              setInitialAll(isAll);
+              setSelectedAll(isAll);
+              setFamilyMembers(payload.members || []);
+              const itemMems = Array.isArray(payload.itemMembers) ? payload.itemMembers : (payload.itemMembers || []);
+              const assigned = itemMems.map((m: any) => m.id);
+              setInitialMembers(assigned);
+              setSelectedMembers(assigned.slice());
+              const wholeAssigned = !!payload.wholeAssigned;
+              setInitialWhole(wholeAssigned);
+              setSelectedWhole(wholeAssigned);
+            } else {
+              // Fallback to older behavior if consolidated endpoint not available
+              let familyMembersFromProfile: any[] = [];
+              if (familyId) {
+                try {
+                  const cats = await getCategories(familyId);
+                  if (cats.response.ok) setCategories(cats.data.categories || []);
+                } catch (e) {}
+              }
+              try {
+                const profile = await getCurrentUserProfile();
+                if (profile.response.ok && profile.data.family) {
+                  familyMembersFromProfile = profile.data.family.members || [];
+                  setFamilyMembers(familyMembersFromProfile);
+                }
+                // fetch packing list to find the packing-list-item row
+                const listRes = await getPackingList(pctx.listId);
+                if (listRes.response.ok) {
+                  const items = listRes.data.items || [];
+                  const pli = items.find((x: any) => x.id === pctx.packingListItemId || x.id === pctx.packingListItemId);
+                  if (pli) {
+                    // initialize name and assigned members
+                    setName(pli.display_name || pli.master_name || '');
+                    const assigned = (pli.members || []).map((m: any) => m.id).filter(Boolean);
+                    setInitialMembers(assigned);
+                    setSelectedMembers(assigned.slice());
+                    setInitialWhole(!!pli.whole_family);
+                    setSelectedWhole(!!pli.whole_family);
+                  }
+                }
+                // initial categories empty for one-off until promoted
+                setInitialCategories([]);
+                setSelectedCategories([]);
+                setInitialAll(false);
+                setSelectedAll(false);
+
+                // honor defaultAssignedMemberId if provided
+                if (!masterItemId) {
+                  if (defaultAssignedMemberId === null) {
+                    setSelectedWhole(true);
+                    setSelectedMembers([]);
+                  } else if (defaultAssignedMemberId && familyMembersFromProfile.some((m: any) => m.id === defaultAssignedMemberId)) {
+                    setSelectedMembers([defaultAssignedMemberId]);
+                    setSelectedWhole(false);
+                  }
+                }
+              } catch (err) {
+                // ignore
+              }
+            }
+          } catch (err) {
+            // ignore
+          }
         } else {
           // New item: load family-level categories and members
           if (familyId) {
@@ -140,7 +217,7 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
         setLoading(false);
       }
     })();
-  }, [opened, masterItemId, familyId, defaultAssignedMemberId]);
+  }, [opened, masterItemId, familyId, defaultAssignedMemberId, promoteContext]);
 
   const save = async () => {
     setSaving(true);
@@ -210,6 +287,29 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
     } catch (err) {
       console.error('ItemEditDrawer save failed', err);
       showNotification({ title: 'Error', message: 'Failed to save item', color: 'red' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!masterItemId) return;
+    const ok = window.confirm('Delete this master item and remove it from all templates and packing lists? This cannot be undone.');
+    if (!ok) return;
+    setSaving(true);
+    try {
+      const res = await deleteItem(masterItemId);
+      if (res.response && res.response.ok) {
+        showNotification({ title: 'Deleted', message: 'Item removed from master list and all packing lists/templates', color: 'green' });
+        // Let caller refresh
+        if (onSaved) await onSaved();
+        onClose();
+      } else {
+        throw new Error('Delete failed');
+      }
+    } catch (err) {
+      console.error('Failed to delete item', err);
+      showNotification({ title: 'Error', message: 'Failed to delete item', color: 'red' });
     } finally {
       setSaving(false);
     }
@@ -294,6 +394,10 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
           <Group mt="md" style={{ justifyContent: 'space-between' }}>
             <div />
             <Group>
+              {/* Delete button shown only when editing an existing master item */}
+              {masterItemId ? (
+                <Button color="red" variant="light" onClick={handleDelete} disabled={saving}>Delete</Button>
+              ) : null}
               <Button variant="default" onClick={onClose}>Cancel</Button>
               <Button onClick={save} loading={saving}>Save</Button>
             </Group>
