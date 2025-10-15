@@ -26,20 +26,38 @@ const path = require('path');
 
   const knex = Knex(knexConfig);
 
+  const { JSONStorage } = require('umzug');
+
   const umzug = new Umzug({
     migrations: {
       glob: './server/migrations/knex-migrations/*.js',
       resolve: ({ name, path: migrationPath }) => {
-        const migration = require(migrationPath);
+        // Support both CommonJS (exports.up/down) and ESM (export default or named exports)
+        let migration;
+        try {
+          migration = require(migrationPath);
+        } catch (e) {
+          // fallback to dynamic import for ESM modules
+          migration = null;
+        }
+
+        const load = async () => {
+          if (!migration) {
+            const mod = await import(migrationPath);
+            // ESM modules may export default or named up/down
+            migration = mod.default || mod;
+          }
+          return migration;
+        };
+
         return {
           name,
-          up: async () => migration.up(knex),
-          down: async () => migration.down(knex)
+          up: async () => (await load()).up(knex),
+          down: async () => (await load()).down(knex)
         };
       }
     },
-    storage: 'json',
-    storageOptions: { path: './server/migrations/knex-migrations.json' },
+    storage: new JSONStorage({ path: path.resolve(__dirname, 'knex-migrations.json') }),
     logging: console.log
   });
 

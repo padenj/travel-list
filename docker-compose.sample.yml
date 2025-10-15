@@ -1,0 +1,72 @@
+# Sample docker-compose for travel-list
+# Copy this to docker-compose.yml and edit values before using in your environment.
+# Two usage patterns are shown below: a production-style stack that pulls a built image from
+# GitHub Container Registry (GHCR) and a development stack that builds the web image locally
+# from `Dockerfile.pwa` and mounts the server code for iterative development.
+
+version: '3.8'
+
+services:
+  # --- Production example (pulls a pre-built image from GHCR) ---
+  web-prod:
+    image: ghcr.io/padenj/travel-list:latest
+    restart: unless-stopped
+    ports:
+      - "8080:80" # expose nginx default
+    environment:
+      - NODE_ENV=production
+    depends_on:
+      - backend
+
+  # --- Backend service example ---
+  backend:
+    # In production you would replace this with your backend image (from a registry)
+    image: node:22-alpine
+    working_dir: /app
+    volumes:
+      - ./:/app:ro
+    command: sh -c "cd server && npm ci --silent && NODE_ENV=production node index.js"
+    environment:
+      - PORT=5000
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/travel_list
+    ports:
+      - "5000:5000"
+    depends_on:
+      - db
+
+  # --- Postgres DB for local testing ---
+  db:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: travel_list
+    volumes:
+      - db-data:/var/lib/postgresql/data
+
+  # --- Development example (build the PWA image locally) ---
+  web-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.pwa
+    image: travel-list-web:dev
+    ports:
+      - "8081:80"
+    environment:
+      - NODE_ENV=development
+    volumes:
+      - ./:/app:ro
+    depends_on:
+      - backend
+
+volumes:
+  db-data:
+
+# Quick usage notes:
+# - To run the production example (using GHCR image):
+#     docker-compose -f docker-compose.sample.yml up web-prod backend db
+# - To run the local dev build (builds image from Dockerfile.pwa):
+#     docker-compose -f docker-compose.sample.yml up --build web-dev backend db
+# - Adjust the `backend` service to use your production backend image and startup command.
+# - This file is intentionally verbose and explanatory — copy and tweak for your deployment.
