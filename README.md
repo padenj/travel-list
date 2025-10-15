@@ -1,3 +1,51 @@
+# Travel List — Deployment Guide
+
+This README covers deploying the Travel List application using Docker / Portainer with SQLite and a bind-mounted host path for persistence. It also shows how to integrate a Cloudflared tunnel for external exposure.
+
+## Overview
+- Frontend: served by `Dockerfile.pwa` (nginx) on port 80 inside container
+- Backend: Node server (build via `docker/backend.Dockerfile`) listening on port 5000
+- Database: SQLite file located at `/data/travel-list.sqlite` inside the backend container. Mount a host path to `/data` to persist.
+
+## Important notes
+- Do NOT mount the entire repository into the containers in production. Mount only the data directory for sqlite.
+- Use Portainer secrets for `CLOUDFLARED_TOKEN` or any other secrets.
+
+## Portainer deployment (recommended)
+
+1. Copy `docker/docker-compose.portainer.yml` to your Portainer stack or import it.
+
+2. Edit the `backend` service volume line to point to your host path, for example:
+
+   volumes:
+     - /srv/travel-list/db:/data
+
+   The backend will use `/data/travel-list.sqlite` as the SQLite DB file.
+
+3. Add the `CLOUDFLARED_TOKEN` secret in Portainer or set an environment variable for the cloudflared service if you plan to run it there.
+
+4. Start the stack. The backend container's entrypoint will:
+   - Ensure `/data` exists
+   - Run migrations (using `server/migrations/run-migrations-knex.cjs up`)
+   - Start the backend server
+
+5. Use Cloudflared to expose the web service externally. For example, create a tunnel that forwards traffic to your host on port 80 and/or 5000. Alternatively manage Cloudflared outside Portainer.
+
+## Local development (optional)
+- Use `docker-compose.sample.yml` with the `web-dev` service to build locally and run against a local Postgres or SQLite.
+
+## Health checks
+- Both `web` and `backend` services include `HEALTHCHECK` definitions in `docker-compose.portainer.yml`. Portainer will show container health accordingly.
+
+## Troubleshooting
+- If migrations fail on first start, check container logs for permission errors on `/data`. Ensure the host path is writable by the container user.
+- To reset the database, stop the stack and move or remove the host sqlite file at the mounted path.
+
+## Security
+- Rotate any secrets used by Cloudflared or the app if they were previously committed.
+- Use TLS and an authenticated proxy where possible.
+
+If you'd like, I can add a small systemd unit or sample script to automatically pull the `ghcr.io/padenj/travel-list:latest` image and restart the stack for deployments.
 # Travel List - Vite Application
 
 A modern travel list application built with Vite, React, TypeScript, and Express.

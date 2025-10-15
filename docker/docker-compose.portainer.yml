@@ -8,6 +8,11 @@ services:
     image: travel-list-web:latest
     ports:
       - "80:80"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     environment:
       - NODE_ENV=production
     depends_on:
@@ -26,6 +31,11 @@ services:
       - <localvolumepath>:/data
     ports:
       - "5000:5000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5000/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
 
   # cloudflared is mentioned as the external proxy; this is a placeholder service
   # In Portainer you'd configure cloudflared separately or as a service like below.
