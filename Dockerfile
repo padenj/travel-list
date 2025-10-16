@@ -34,7 +34,10 @@ RUN npm ci --omit=dev --no-audit --no-fund \
 	&& TSC_VER=$(node -p "require('./package.json').devDependencies.typescript") \
 	&& NODE_TYPES_VER=$(node -p "require('./package.json').devDependencies['@types/node']") \
 	&& npm install --no-audit --no-fund --no-save "typescript@${TSC_VER}" "@types/node@${NODE_TYPES_VER}" \
-	&& npm run build:server
+	&& npm run build:server \
+	# Ensure non-code assets used at runtime (seeds, templates) are copied into dist
+	&& mkdir -p dist/seeds \
+	&& cp -R server/seeds/* dist/seeds/ || true
 
 # Stage: production runtime (only production deps + built code)
 FROM node:22-slim AS runtime
