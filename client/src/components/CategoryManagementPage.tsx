@@ -25,32 +25,48 @@ import {
   Text,
   Tabs,
   List,
+  Modal,
 } from '@mantine/core';
 import AddItemsDrawer from './AddItemsDrawer';
 import ItemEditDrawer from './ItemEditDrawer';
-import { IconTrash, IconEdit, IconPlus } from '@tabler/icons-react';
+import { IconTrash, IconEdit, IconPlus, IconX } from '@tabler/icons-react';
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { arrayMove, SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { updateCategoryOrder } from '../api';
 
 function SortableCategoryRow({ id, name }: { id: string; name: string }) {
-  const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id });
+  // useSortable provides attributes/listeners for the whole item; we'll attach the listeners to a handle element
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
   const style = {
     transform: CSS.Transform.toString(transform),
-    transition,
+    transition: transition || 'transform 120ms',
     padding: 8,
     border: '1px solid rgba(0,0,0,0.06)',
     borderRadius: 6,
-    background: '#fff',
+    background: isDragging ? '#f7fbff' : '#fff',
     display: 'flex',
     alignItems: 'center',
-    justifyContent: 'space-between'
+    justifyContent: 'space-between',
+    boxShadow: isDragging ? '0 6px 18px rgba(79, 84, 162, 0.12)' : undefined,
   } as React.CSSProperties;
+
+  // Drag handle styled to match FamilyAdminPage drag handle
+  const handleStyle: React.CSSProperties = {
+    cursor: 'grab',
+    padding: '4px 8px',
+    borderRadius: 4,
+    userSelect: 'none',
+    display: 'inline-flex',
+    alignItems: 'center',
+    transition: 'transform 120ms',
+    color: 'rgba(0,0,0,0.45)'
+  };
+
   return (
     <div ref={setNodeRef} style={style} {...attributes}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }} {...listeners}>
-        <div style={{ width: 20, height: 20, background: 'rgba(0,0,0,0.06)', borderRadius: 4 }} />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div {...listeners} aria-label={`Drag handle for ${name}`} style={handleStyle} title="Drag to reorder">≡</div>
         <div>{name}</div>
       </div>
       <div style={{ color: 'rgba(0,0,0,0.45)' }}>drag</div>
@@ -286,12 +302,11 @@ export default function CategoryManagementPage(): React.ReactElement {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div />
               <div style={{ display: 'flex', gap: 8 }}>
-                <Button variant={sortMode ? 'filled' : 'outline'} onClick={() => setSortMode(s => !s)}>{sortMode ? 'Cancel' : 'Sort categories'}</Button>
-                {sortMode ? <Button onClick={saveCategoryOrder}>Save Order</Button> : null}
+                <Button onClick={() => setSortMode(true)}>Sort categories</Button>
               </div>
             </div>
-            {sortMode ? (
-              <div style={{ marginTop: 12 }}>
+            <Modal opened={sortMode} onClose={() => setSortMode(false)} title="Sort Categories" size="lg">
+              <div style={{ marginTop: 6 }}>
                 <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
                   <SortableContext items={categories.map(c => c.id)} strategy={verticalListSortingStrategy}>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -301,8 +316,12 @@ export default function CategoryManagementPage(): React.ReactElement {
                     </div>
                   </SortableContext>
                 </DndContext>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
+                  <Button variant="default" onClick={() => setSortMode(false)}>Cancel</Button>
+                  <Button onClick={saveCategoryOrder}>Save Order</Button>
+                </div>
               </div>
-            ) : null}
+            </Modal>
             <Tabs value={selectedTab} onChange={setSelectedTab} keepMounted={false}>
               <Tabs.List>
                 {categories.map(cat => (
@@ -325,7 +344,7 @@ export default function CategoryManagementPage(): React.ReactElement {
                             <IconEdit size={16} />
                           </ActionIcon>
                           <ActionIcon color="gray" onClick={() => { setEditId(null); setEditName(''); }} title="Cancel">
-                            <IconTrash size={16} />
+                            <IconX size={16} />
                           </ActionIcon>
                         </div>
                       ) : (
@@ -400,6 +419,7 @@ export default function CategoryManagementPage(): React.ReactElement {
               opened={showEditDrawer}
               onClose={() => { setShowEditDrawer(false); setEditMasterItemId(null); }}
               masterItemId={editMasterItemId || undefined}
+              initialName={editMasterItemId ? (items.find(i => i.id === editMasterItemId)?.name) : undefined}
               familyId={familyId}
               showNameField={true}
               onSaved={async () => {

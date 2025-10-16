@@ -13,16 +13,18 @@
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
-    <script>
-      // Register service worker if available
-      if ('serviceWorker' in navigator) {
-        window.addEventListener('load', function() {
-          navigator.serviceWorker.register('/sw.js').then(function(reg) {
-            console.log('Service worker registered.', reg);
-          }).catch(function(err) {
-            console.warn('Service worker registration failed:', err);
+    <script type="module">
+      // Register service worker only in production to avoid caching interfering with dev HMR
+      if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.PROD) {
+        if ('serviceWorker' in navigator) {
+          window.addEventListener('load', function() {
+            navigator.serviceWorker.register('/sw.js').then(function(reg) {
+              console.log('Service worker registered.', reg);
+            }).catch(function(err) {
+              console.warn('Service worker registration failed:', err);
+            });
           });
-        });
+        }
       }
 
       // Capture beforeinstallprompt for custom Add to Home Screen UI

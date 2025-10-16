@@ -344,7 +344,8 @@ export const updateCategoryOrder = async (familyId: string, categoryIds: string[
   });
 };
 // API utility functions with improved error handling and type safety
-const API_BASE_URL: string = import.meta.env.VITE_API_BASE_URL || '/api';
+// import.meta.env typing may not be available in all TS contexts; use any cast for safety
+const API_BASE_URL: string = ((import.meta as any)?.env?.VITE_API_BASE_URL) || '/api';
 
 interface ApiCallOptions extends RequestInit {
   headers?: Record<string, string>;

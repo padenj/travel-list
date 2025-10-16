@@ -238,7 +238,7 @@ export default function ManagePackingLists() {
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <TextInput value={editNameDraft} onChange={(e) => setEditNameDraft(e.currentTarget.value)} style={{ minWidth: 240, maxWidth: '60%' }} />
                 <ActionIcon color="green" onClick={doRename}>
-                  <IconCheck size={16} />
+                  <IconEdit size={16} />
                 </ActionIcon>
                 <ActionIcon color="gray" onClick={() => { setEditNameDraft(editListName); setIsEditingName(false); }}>
                   <IconX size={16} />

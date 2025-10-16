@@ -194,8 +194,6 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
             }
             // initialWhole reflects persisted state; new items start false
             setInitialWhole(false);
-            setInitialAll(false);
-            setSelectedAll(false);
           }
         }
       } catch (err) {
