@@ -1,5 +1,8 @@
 
-import './env-loader';
+// Load environment variables early. Importing `dotenv/config` directly keeps the
+// runtime import flat (no separate helper file) which avoids ESM resolution
+// issues with extensionless imports after TypeScript transpilation.
+import 'dotenv/config';
 import express, { Application, Request, Response } from 'express';
 import { fileURLToPath } from 'url';
 import path from 'path';
