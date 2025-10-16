@@ -29,6 +29,34 @@ import {
 import AddItemsDrawer from './AddItemsDrawer';
 import ItemEditDrawer from './ItemEditDrawer';
 import { IconTrash, IconEdit, IconPlus } from '@tabler/icons-react';
+import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
+import { arrayMove, SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+import { updateCategoryOrder } from '../api';
+
+function SortableCategoryRow({ id, name }: { id: string; name: string }) {
+  const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id });
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    padding: 8,
+    border: '1px solid rgba(0,0,0,0.06)',
+    borderRadius: 6,
+    background: '#fff',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between'
+  } as React.CSSProperties;
+  return (
+    <div ref={setNodeRef} style={style} {...attributes}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }} {...listeners}>
+        <div style={{ width: 20, height: 20, background: 'rgba(0,0,0,0.06)', borderRadius: 4 }} />
+        <div>{name}</div>
+      </div>
+      <div style={{ color: 'rgba(0,0,0,0.45)' }}>drag</div>
+    </div>
+  );
+}
 
 
 export default function CategoryManagementPage(): React.ReactElement {
@@ -52,6 +80,10 @@ export default function CategoryManagementPage(): React.ReactElement {
 
     const [showEditDrawer, setShowEditDrawer] = useState(false);
     const [editMasterItemId, setEditMasterItemId] = useState<string | null>(null);
+    const [sortMode, setSortMode] = useState(false);
+    const sensors = useSensors(
+      useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
+    );
   useEffect(() => {
     async function fetchData() {
       setLoading(true);
@@ -143,6 +175,27 @@ export default function CategoryManagementPage(): React.ReactElement {
     }
   };
 
+  const handleDragEnd = async (event: any) => {
+    const { active, over } = event;
+    if (!active || !over) return;
+    if (active.id !== over.id) {
+      const oldIndex = categories.findIndex(c => c.id === active.id);
+      const newIndex = categories.findIndex(c => c.id === over.id);
+      const newCats = arrayMove(categories, oldIndex, newIndex);
+      setCategories(newCats);
+    }
+  };
+
+  const saveCategoryOrder = async () => {
+    if (!familyId) return;
+    const ids = categories.map(c => c.id);
+    const res = await updateCategoryOrder(familyId, ids);
+    if (res.response.ok) {
+      setSortMode(false);
+      bumpRefresh();
+    }
+  };
+
   const handleEdit = (id: string, name: string) => {
     setEditId(id);
     setEditName(name);
@@ -230,6 +283,26 @@ export default function CategoryManagementPage(): React.ReactElement {
           <Text c="dimmed">No categories yet.</Text>
         ) : (
           <>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div />
+              <div style={{ display: 'flex', gap: 8 }}>
+                <Button variant={sortMode ? 'filled' : 'outline'} onClick={() => setSortMode(s => !s)}>{sortMode ? 'Cancel' : 'Sort categories'}</Button>
+                {sortMode ? <Button onClick={saveCategoryOrder}>Save Order</Button> : null}
+              </div>
+            </div>
+            {sortMode ? (
+              <div style={{ marginTop: 12 }}>
+                <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+                  <SortableContext items={categories.map(c => c.id)} strategy={verticalListSortingStrategy}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      {categories.map(cat => (
+                        <SortableCategoryRow key={cat.id} id={cat.id} name={cat.name} />
+                      ))}
+                    </div>
+                  </SortableContext>
+                </DndContext>
+              </div>
+            ) : null}
             <Tabs value={selectedTab} onChange={setSelectedTab} keepMounted={false}>
               <Tabs.List>
                 {categories.map(cat => (

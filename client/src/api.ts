@@ -335,6 +335,14 @@ export const updateFamilyMemberOrder = async (familyId: string, memberIds: strin
     body: JSON.stringify({ memberIds }),
   });
 };
+
+// Update category order for a family
+export const updateCategoryOrder = async (familyId: string, categoryIds: string[]): Promise<ApiResponse> => {
+  return authenticatedApiCall(`/categories/${familyId}/order`, {
+    method: 'PUT',
+    body: JSON.stringify({ categoryIds }),
+  });
+};
 // API utility functions with improved error handling and type safety
 const API_BASE_URL: string = import.meta.env.VITE_API_BASE_URL || '/api';
 

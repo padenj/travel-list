@@ -148,12 +148,29 @@ export class CategoryRepository {
 
   async findAll(familyId: string): Promise<Category[]> {
     const db = await getDb();
-    return db.all(`SELECT * FROM categories WHERE familyId = ? AND deleted_at IS NULL ORDER BY created_at DESC`, [familyId]);
+    // Order by explicit position if present, otherwise fall back to created_at
+    return db.all(`SELECT * FROM categories WHERE familyId = ? AND deleted_at IS NULL ORDER BY COALESCE(position, 2147483647) ASC, created_at ASC`, [familyId]);
   }
 
   async softDelete(id: string): Promise<void> {
     const db = await getDb();
     await db.run(`UPDATE categories SET deleted_at = ? WHERE id = ?`, [new Date().toISOString(), id]);
+  }
+}
+
+// Add helper to update category positions in a batch
+export async function updateCategoryPositions(familyId: string, orderedCategoryIds: string[]): Promise<void> {
+  const db = await getDb();
+  try {
+    await db.run('BEGIN TRANSACTION');
+    for (let idx = 0; idx < orderedCategoryIds.length; idx++) {
+      const id = orderedCategoryIds[idx];
+      await db.run(`UPDATE categories SET position = ?, updated_at = ? WHERE id = ? AND familyId = ?`, [idx, new Date().toISOString(), id, familyId]);
+    }
+    await db.run('COMMIT');
+  } catch (err) {
+    try { await db.run('ROLLBACK'); } catch (e) {}
+    throw err;
   }
 }
 
@@ -224,12 +241,22 @@ export class ItemRepository {
   // Assignment methods
   async assignToCategory(item_id: string, category_id: string): Promise<void> {
     const db = await getDb();
-    await db.run(`INSERT OR IGNORE INTO item_categories (item_id, category_id) VALUES (?, ?)`, [item_id, category_id]);
+    // Use single-category column on items. Also keep legacy join row for older code, but primary source of truth is items.categoryId
+    await db.run(`UPDATE items SET categoryId = ?, updated_at = ? WHERE id = ?`, [category_id, new Date().toISOString(), item_id]);
+    try {
+      await db.run(`INSERT OR IGNORE INTO item_categories (item_id, category_id) VALUES (?, ?)`, [item_id, category_id]);
+    } catch (e) {
+      // ignore legacy insert errors
+    }
   }
 
   async removeFromCategory(item_id: string, category_id: string): Promise<void> {
     const db = await getDb();
-    await db.run(`DELETE FROM item_categories WHERE item_id = ? AND category_id = ?`, [item_id, category_id]);
+    // If the item's categoryId matches the category being removed, clear it.
+    await db.run(`UPDATE items SET categoryId = NULL, updated_at = ? WHERE id = ? AND categoryId = ?`, [new Date().toISOString(), item_id, category_id]);
+    try {
+      await db.run(`DELETE FROM item_categories WHERE item_id = ? AND category_id = ?`, [item_id, category_id]);
+    } catch (e) {}
   }
 
   async assignToMember(item_id: string, member_id: string): Promise<void> {
@@ -254,12 +281,17 @@ export class ItemRepository {
 
   async getCategoriesForItem(item_id: string): Promise<Category[]> {
     const db = await getDb();
-    return db.all(`SELECT c.* FROM categories c JOIN item_categories ic ON c.id = ic.category_id WHERE ic.item_id = ? AND c.deleted_at IS NULL`, [item_id]);
+    // Prefer single column on items
+    const row: any = await db.get(`SELECT categoryId FROM items WHERE id = ?`, [item_id]);
+    if (!row || !row.categoryId) return [];
+    const cat = await db.get(`SELECT * FROM categories WHERE id = ? AND deleted_at IS NULL`, [row.categoryId]);
+    return cat ? [cat] : [];
   }
 
   async getItemsForCategory(category_id: string): Promise<Item[]> {
     const db = await getDb();
-    return db.all(`SELECT i.* FROM items i JOIN item_categories ic ON i.id = ic.item_id WHERE ic.category_id = ? AND i.deleted_at IS NULL`, [category_id]);
+    // Select items whose categoryId matches
+    return db.all(`SELECT * FROM items WHERE categoryId = ? AND deleted_at IS NULL`, [category_id]);
   }
 
   async getMembersForItem(item_id: string): Promise<User[]> {
