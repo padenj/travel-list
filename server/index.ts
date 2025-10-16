@@ -11,7 +11,7 @@ import cors from 'cors';
 import { authMiddleware } from './middleware';
 import routes from './routes';
 import { errorHandler, notFoundHandler } from './error-handler';
-import { closeDb } from './db';
+import { closeDb, getDb } from './db';
 
 const app: Application = express();
 const PORT: number = parseInt(process.env.PORT || '3001');
@@ -93,29 +93,110 @@ let server: any;
 const __filename = fileURLToPath(import.meta.url);
 const isMain = process.argv && process.argv[1] && __filename === process.argv[1];
 if (isMain) {
-  server = app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 Backend running on http://0.0.0.0:${PORT}`);
-  });
+  const runMigrationsIfAny = async () => {
+    try {
+      const migrationsDir = path.resolve(process.cwd(), 'server', 'migrations', 'migrations');
+      // Prefer placing migrations.json next to the DB file so it can live on the same
+      // mount as the database (e.g., /data) and persist across image updates.
+      // Fall back to the repo path for in-memory/test DBs.
+      const dbFileEnv = process.env.DB_FILE || path.join('data', 'travel-list.sqlite');
+      const resolvedDbFile = dbFileEnv === ':memory:' ? dbFileEnv : path.resolve(process.cwd(), dbFileEnv);
+      let storagePath: string;
 
-  // Handle server errors
-  server.on('error', (error: NodeJS.ErrnoException) => {
-    if (error.syscall !== 'listen') {
-      throw error;
+      if (resolvedDbFile === ':memory:') {
+        storagePath = path.resolve(process.cwd(), 'server', 'migrations', 'migrations.json');
+      } else {
+        const dbDir = path.dirname(resolvedDbFile);
+        // Ensure directory exists
+        try {
+          if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir, { recursive: true });
+        } catch (e) {
+          console.warn('Could not ensure database directory exists:', e);
+        }
+        storagePath = path.join(dbDir, 'migrations.json');
+      }
+
+      console.log('Using migration storage at', storagePath);
+
+      const files: string[] = fs.existsSync(migrationsDir) ? fs.readdirSync(migrationsDir).filter(f => f.endsWith('.js')).sort() : [];
+      const migrations = files.map(f => ({ name: f, path: path.join(migrationsDir, f) }));
+
+      if (!fs.existsSync(storagePath)) {
+        fs.writeFileSync(storagePath, JSON.stringify([]), 'utf8');
+      }
+
+      let executed: string[] = [];
+      try {
+        const raw = fs.readFileSync(storagePath, 'utf8');
+        executed = JSON.parse(raw || '[]');
+      } catch (e) {
+        console.warn('Could not read executed migrations storage; starting fresh', e);
+        executed = [];
+      }
+
+      const pending = migrations.filter(m => !executed.includes(m.name));
+      if (!pending || pending.length === 0) {
+        console.log('✅ Database is up to date; no migrations to run');
+        return;
+      }
+
+      console.log(`⚡ Found ${pending.length} pending migration(s). Applying now...`);
+
+      const db: any = await getDb();
+
+      for (const m of pending) {
+        console.log('Applying migration', m.name);
+        const moduleUrl = `file://${m.path}`;
+        const required = await import(moduleUrl);
+        const mod = required.default || required;
+        if (!mod || typeof mod.up !== 'function') {
+          throw new Error(`Migration ${m.name} has no up function`);
+        }
+        await mod.up({ db });
+        executed.push(m.name);
+        fs.writeFileSync(storagePath, JSON.stringify(executed, null, 2), 'utf8');
+        console.log('Applied', m.name);
+      }
+
+      console.log('✅ Migrations applied');
+    } catch (err: any) {
+      console.error('⚠️ Error running migrations:', err && err.message ? err.message : err);
+      throw err;
+    }
+  };
+
+  (async () => {
+    try {
+      await runMigrationsIfAny();
+    } catch (err) {
+      console.error('Migrations failed during startup; aborting server start.');
+      process.exit(1);
     }
 
-    switch (error.code) {
-      case 'EACCES':
-        console.error(`💥 Port ${PORT} requires elevated privileges`);
-        process.exit(1);
-        break;
-      case 'EADDRINUSE':
-        console.error(`💥 Port ${PORT} is already in use`);
-        process.exit(1);
-        break;
-      default:
+    server = app.listen(PORT, '0.0.0.0', () => {
+      console.log(`🚀 Backend running on http://0.0.0.0:${PORT}`);
+    });
+
+    // Handle server errors
+    server.on('error', (error: NodeJS.ErrnoException) => {
+      if (error.syscall !== 'listen') {
         throw error;
-    }
-  });
+      }
+
+      switch (error.code) {
+        case 'EACCES':
+          console.error(`💥 Port ${PORT} requires elevated privileges`);
+          process.exit(1);
+          break;
+        case 'EADDRINUSE':
+          console.error(`💥 Port ${PORT} is already in use`);
+          process.exit(1);
+          break;
+        default:
+          throw error;
+      }
+    });
+  })();
 }
 
 export default app;
