@@ -39,10 +39,8 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [categories, setCategories] = useState<any[]>([]);
-  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
-  const [initialCategories, setInitialCategories] = useState<string[]>([]);
-  const [selectedAll, setSelectedAll] = useState<boolean>(false);
-  const [initialAll, setInitialAll] = useState<boolean>(false);
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [initialCategory, setInitialCategory] = useState<string | null>(null);
   const [familyMembers, setFamilyMembers] = useState<any[]>([]);
   const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
   const [initialMembers, setInitialMembers] = useState<string[]>([]);
@@ -73,13 +71,9 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
           const payload = res.data || {};
           setCategories(payload.categories || []);
           const itemCats = Array.isArray(payload.itemCategories) ? payload.itemCategories : (payload.itemCategories || []);
-          const currentCats = itemCats.map((c: any) => c.id);
-          setInitialCategories(currentCats);
-          setSelectedCategories(currentCats.slice());
-          const allCatIds = (payload.categories || []).map((c: any) => c.id);
-          const isAll = allCatIds.length > 0 && allCatIds.every((id: string) => currentCats.includes(id)) && currentCats.length === allCatIds.length;
-          setInitialAll(isAll);
-          setSelectedAll(isAll);
+          const currentCat = itemCats && itemCats.length > 0 ? itemCats[0].id : null;
+          setInitialCategory(currentCat);
+          setSelectedCategory(currentCat);
           setFamilyMembers(payload.members || []);
           const itemMems = Array.isArray(payload.itemMembers) ? payload.itemMembers : (payload.itemMembers || []);
           const assigned = itemMems.map((m: any) => m.id);
@@ -97,13 +91,9 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
               const payload = editRes.data || {};
               setCategories(payload.categories || []);
               const itemCats = Array.isArray(payload.itemCategories) ? payload.itemCategories : (payload.itemCategories || []);
-              const currentCats = itemCats.map((c: any) => c.id);
-              setInitialCategories(currentCats);
-              setSelectedCategories(currentCats.slice());
-              const allCatIds = (payload.categories || []).map((c: any) => c.id);
-              const isAll = allCatIds.length > 0 && allCatIds.every((id: string) => currentCats.includes(id)) && currentCats.length === allCatIds.length;
-              setInitialAll(isAll);
-              setSelectedAll(isAll);
+              const currentCat = itemCats && itemCats.length > 0 ? itemCats[0].id : null;
+              setInitialCategory(currentCat);
+              setSelectedCategory(currentCat);
               setFamilyMembers(payload.members || []);
               const itemMems = Array.isArray(payload.itemMembers) ? payload.itemMembers : (payload.itemMembers || []);
               const assigned = itemMems.map((m: any) => m.id);
@@ -143,10 +133,8 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
                   }
                 }
                 // initial categories empty for one-off until promoted
-                setInitialCategories([]);
-                setSelectedCategories([]);
-                setInitialAll(false);
-                setSelectedAll(false);
+                setInitialCategory(null);
+                setSelectedCategory(null);
 
                 // honor defaultAssignedMemberId if provided
                 if (!masterItemId) {
@@ -185,9 +173,9 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
               // ignore
             }
 
-            // New item initial selections are empty, except possibly a caller-provided default
-            setInitialCategories([]);
-            setSelectedCategories([]);
+            // New item initial selection is empty (single category), except possibly a caller-provided default
+            setInitialCategory(null);
+            setSelectedCategory(null);
             setInitialMembers([]);
             // If caller explicitly passed `null` as the defaultAssignedMemberId,
             // that indicates "open for Whole Family" (PackingListsSideBySide uses
@@ -224,8 +212,7 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
     try {
       let createdId: string | undefined;
       let updatedName: string | undefined;
-      const allCatIds = (categories || []).map((c: any) => c.id);
-      const effectiveSelected = selectedAll ? allCatIds : selectedCategories;
+  const effectiveSelected = selectedCategory ? [selectedCategory] : [];
 
       if (!masterItemId) {
         // Create a new master item
@@ -239,9 +226,9 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
         updatedName = createRes.data?.item?.name || name;
         if (!createdId) throw new Error('Create response missing id');
 
-        // Assign categories and members like update flow
-        const ops: Promise<any>[] = [];
-        for (const cid of effectiveSelected) ops.push(assignItemToCategory(createdId, cid));
+  // Assign a single category (if present) and members
+  const ops: Promise<any>[] = [];
+  if (effectiveSelected.length > 0) ops.push(assignItemToCategory(createdId, effectiveSelected[0]));
         if (selectedWhole && familyId) ops.push(assignToWholeFamily(createdId, familyId));
         if (!selectedWhole) {
           for (const mid of selectedMembers) ops.push(assignToMember(createdId, mid));
@@ -260,12 +247,13 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
         if (uRes.response.ok) updatedName = uRes.data?.item?.name || name;
       }
 
-      const effectiveInitial = initialAll ? allCatIds : initialCategories;
-      const toAddCats = effectiveSelected.filter((c: string) => !effectiveInitial.includes(c));
-      const toRemoveCats = effectiveInitial.filter((c: string) => !effectiveSelected.includes(c));
-      const ops: Promise<any>[] = [];
-      for (const cid of toAddCats) ops.push(assignItemToCategory(masterItemId, cid));
-      for (const cid of toRemoveCats) ops.push(removeItemFromCategory(masterItemId, cid));
+  const effectiveInitial = initialCategory ? [initialCategory] : [];
+  const toAddCats = effectiveSelected.filter((c: string) => !effectiveInitial.includes(c));
+  const toRemoveCats = effectiveInitial.filter((c: string) => !effectiveSelected.includes(c));
+  const ops: Promise<any>[] = [];
+  // Since single-category, we'll add the new category (if any) and remove the old one
+  for (const cid of toAddCats) ops.push(assignItemToCategory(masterItemId, cid));
+  for (const cid of toRemoveCats) ops.push(removeItemFromCategory(masterItemId, cid));
 
       if (selectedWhole && !initialWhole) {
         if (familyId) ops.push(assignToWholeFamily(masterItemId, familyId));
@@ -331,26 +319,27 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
         {/* Two column section: Categories (left) | Members/Assignments (right) */}
         <div style={{ display: 'flex', gap: 12, marginTop: 12, alignItems: 'stretch', flex: '1 1 auto' }}>
           <div style={{ flex: '1 1 50%', overflow: 'auto', borderRight: '1px solid rgba(0,0,0,0.04)', paddingRight: 12 }}>
-            <Text fw={700} mb="xs">Categories</Text>
-            <div style={{ padding: '6px 0' }}>
-              <Checkbox checked={selectedAll} onChange={(e) => {
-                const checked = e.currentTarget.checked;
-                setSelectedAll(checked);
-                if (checked) setSelectedCategories([]);
-              }} label="All categories (virtual)" />
-            </div>
+            <Text fw={700} mb="xs">Category</Text>
             {categories.length === 0 ? (
               <Text c="dimmed">No categories</Text>
             ) : (
-              categories.map((c: any) => (
-                <div key={c.id} style={{ padding: '6px 0' }}>
-                  <Checkbox disabled={selectedAll} checked={selectedCategories.includes(c.id)} onChange={(e) => {
-                    const checked = e.currentTarget.checked;
-                    setSelectedCategories(prev => checked ? [...prev, c.id] : prev.filter(x => x !== c.id));
-                    if (!checked && selectedAll) setSelectedAll(false);
-                  }} label={c.name} />
+              <div>
+                {/* Single-select using radio buttons */}
+                {categories.map((c: any) => (
+                  <div key={c.id} style={{ padding: '6px 0' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <input type="radio" name="category" value={c.id} checked={selectedCategory === c.id} onChange={() => setSelectedCategory(c.id)} />
+                      <span>{c.name}</span>
+                    </label>
+                  </div>
+                ))}
+                <div style={{ padding: '6px 0' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <input type="radio" name="category" value="" checked={selectedCategory === null} onChange={() => setSelectedCategory(null)} />
+                    <span>None</span>
+                  </label>
                 </div>
-              ))
+              </div>
             )}
           </div>
 
