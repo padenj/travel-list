@@ -1,16 +1,22 @@
 ## Multi-stage Dockerfile (slim, production-friendly)
 
 # Stage: client build
-FROM node:20-slim AS client-build
+FROM node:22-slim AS client-build
 WORKDIR /app
-COPY client/package.json client/package-lock.json* ./client/
+
+# Copy root package metadata and install dependencies (including devDeps) so tools
+# like `vite` (declared at the repository root) are available for the client build.
+COPY package.json package-lock.json* ./
+RUN npm ci --no-audit --no-fund
+
+# Copy client source and build using the root-installed tooling. Using
+# `npm --prefix client run build` keeps the intent explicit and lets Node
+# resolve modules from the parent `node_modules`.
 COPY client/ ./client/
-RUN cd client \
-	&& if [ -f package-lock.json ]; then npm ci --include=dev --no-audit --no-fund; else npm install --include=dev --no-audit --no-fund; fi \
-	&& npm run build
+RUN npm --prefix client run build
 
 # Stage: build server (install dev deps, compile)
-FROM node:20-slim AS server-build
+FROM node:22-slim AS server-build
 WORKDIR /app
 COPY package.json package-lock.json* ./
 COPY tsconfig.build.json ./
@@ -19,7 +25,7 @@ RUN npm ci --production=false --no-audit --no-fund \
 	&& npm run build:server
 
 # Stage: production runtime (only production deps + built code)
-FROM node:20-slim AS runtime
+FROM node:22-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 ARG VERSION=dev
@@ -28,7 +34,8 @@ ARG BUILD_DATE=unknown
 
 # Copy only production dependencies from a fresh npm ci
 COPY package.json package-lock.json* ./
-RUN npm ci --production --no-audit --no-fund
+# Use modern npm flag to omit devDependencies (avoids deprecated warnings)
+RUN npm ci --omit=dev --no-audit --no-fund
 
 # Copy built server and client
 COPY --from=server-build /app/dist ./dist
