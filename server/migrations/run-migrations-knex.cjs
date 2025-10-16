@@ -18,7 +18,7 @@ const path = require('path');
   } else {
     knexConfig = {
       client: 'sqlite3',
-      connection: { filename: process.env.DB_FILE || path.resolve(process.cwd(), 'travel-list.sqlite') },
+      connection: { filename: process.env.DB_FILE || path.resolve(process.cwd(), 'data', 'travel-list.sqlite') },
       useNullAsDefault: true,
       migrations: { directory: path.resolve(__dirname, 'knex-migrations') }
     };

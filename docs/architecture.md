@@ -77,7 +77,7 @@ This application is a Progressive Web App (PWA) for managing travel packing chec
 ### Authentication
 - **Method**: JWT tokens with HTTP-only cookies (future) or localStorage
 - **Session Duration**: 60 days with automatic refresh
-- **Password Policy**: 16+ characters, mixed case, numbers, symbols
+- **Password Policy (implemented)**: Minimum 8 characters and at least 2 of the following character types: uppercase, lowercase, numbers, symbols. (Server-side enforcement: `server/auth.ts` -> `validatePassword`.)
 - **Default Admin**: `administrator` / `adminChangeMe1!` (must change on first login)
 
 ### Endpoints Structure

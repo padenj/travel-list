@@ -1,25 +1,14 @@
 version: '3.8'
 
 services:
-  web:
-    image: ghcr.io/padenj/travel-list-web:latest
-    user: "0"
-    ports:
-      - "3000:80"    # host 3000 -> container nginx (80)
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:80/ >/dev/null 2>&1 || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    depends_on:
-      - backend
-    restart: unless-stopped
-
   backend:
     image: ghcr.io/padenj/travel-list-backend:latest
     environment:
       - NODE_ENV=production
+      # IMPORTANT: set a secure JWT secret in production. Replace the placeholder
+      # below or inject via Portainer secrets/environment variables.
       - PORT=3001
+      - JWT_SECRET=<REPLACE_WITH_SECURE_RANDOM_VALUE>
       - DB_FILE=/data/travel-list.sqlite
     volumes:
       - <localvolumepath>:/data
@@ -27,7 +16,7 @@ services:
     expose:
       - "3001"
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:3001/ || exit 1"]
+      test: ["CMD-SHELL", "curl -f http://localhost:3001/api/health || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -61,7 +50,6 @@ volumes:
 # - Replace <localvolumepath> with the host path you want mounted, for example:
 #     /srv/travel-list/db:/data
 # - The backend is configured to read/write the SQLite DB at /data/travel-list.sqlite
-# - The web image (frontend) will proxy /api to the backend service name (backend:3001)
-#   via the nginx config in `docker/nginx-site.conf` which is set to proxy to 127.0.0.1
-#   when used inside the web container. If you prefer nginx to proxy to the docker
-#   network name, update `docker/nginx-site.conf` proxy_pass to http://backend:3001
+# - The backend is served directly on its internal port (3001). For production
+#   deployments put the app behind your preferred reverse proxy/load balancer
+#   (Traefik, cloud provider load balancer, etc.) and configure TLS there.

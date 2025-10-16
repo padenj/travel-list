@@ -3,6 +3,8 @@
 
 
 import express, { Request, Response, Router } from 'express';
+import path from 'path';
+import fs from 'fs';
 import { logAudit } from './audit';
 import { validatePassword, hashPassword, comparePassword, hashPasswordSync, comparePasswordSync, generateToken } from './auth';
 import { authMiddleware, familyAccessMiddleware } from './middleware';
@@ -735,6 +737,25 @@ router.get('/debug/sse-clients', async (req: Request, res: Response) => {
   }
 });
 
+// Build info endpoint. Returns the contents of /app/build-info.json if present.
+// This file is baked into the container image at build time by the Dockerfile and
+// contains version, vcs_ref, and build_date. No auth required; used by the frontend
+// to show the running version.
+router.get('/build-info', async (req: Request, res: Response) => {
+  try {
+    const buildInfoPath = path.resolve(process.cwd(), 'build-info.json');
+    if (fs.existsSync(buildInfoPath)) {
+      const raw = fs.readFileSync(buildInfoPath, 'utf-8');
+      const json = JSON.parse(raw);
+      return res.json({ build: json });
+    }
+    return res.json({ build: { version: process.env.npm_package_version || 'dev', note: 'build-info not found' } });
+  } catch (err) {
+    console.error('Error reading build-info:', err);
+    return res.status(500).json({ error: 'Failed to read build info' });
+  }
+});
+
 
 
 router.delete('/categories/:id', authMiddleware, async (req: Request, res: Response) => {
@@ -1135,12 +1156,15 @@ router.post('/change-password', async (req: Request, res: Response): Promise<Res
   return res.json({ message: 'Password changed successfully' });
 });
 
-// Create family member (SystemAdmin only)
+// Create family member (SystemAdmin or FamilyAdmin for same family)
 router.post('/families/:familyId/members', authMiddleware, async (req: Request, res: Response): Promise<Response> => {
-  if (req.user?.role !== 'SystemAdmin') {
-    return res.status(403).json({ error: 'Forbidden' });
-  }
+  // Allow SystemAdmin or a FamilyAdmin who belongs to the target family
   const { familyId } = req.params;
+  if (req.user?.role !== 'SystemAdmin') {
+    if (!(req.user?.role === 'FamilyAdmin' && req.user?.familyId === familyId)) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+  }
   const { name, canLogin, username, password, role } = req.body;
   
   if (!name || name.trim() === '') {

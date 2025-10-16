@@ -1,49 +1,72 @@
-# Multi-stage Dockerfile that builds the frontend (Vite) and packages the backend server
-# into one image so a single published image can run both services.
+## Multi-stage Dockerfile (slim, production-friendly)
 
-FROM node:22-alpine AS builder
+# Stage: client build
+FROM node:22-slim AS client-build
 WORKDIR /app
 
-# Install dependencies for build (full install ensures tsx is available)
+# Copy root package metadata and install dependencies (including devDeps) so tools
+# like `vite` (declared at the repository root) are available for the client build.
 COPY package.json package-lock.json* ./
 RUN npm ci --no-audit --no-fund
 
-# Copy repo and build the PWA frontend
-COPY . .
-RUN npm run build:pwa
-  
-# Compile server TypeScript to runnable JS for production
-RUN npx tsc -p tsconfig.node.json --outDir server-dist
+# Copy client source and build using the root-installed tooling. Using
+# `npm --prefix client run build` keeps the intent explicit and lets Node
+# resolve modules from the parent `node_modules`.
+COPY client/ ./client/
+RUN npm --prefix client run build
 
-# Final image: include the built frontend and the server code
-FROM node:22-alpine AS final
+# Stage: build server (install dev deps, compile)
+FROM node:22-slim AS server-build
 WORKDIR /app
-
-# Copy built frontend into a path the server will serve from
-
-# Copy built frontend
-COPY --from=builder /app/dist ./frontend/dist
-
-# Copy compiled server JS and package files
-COPY --from=builder /app/server-dist ./server-dist
 COPY package.json package-lock.json* ./
+COPY tsconfig.build.json ./
+# Copy base tsconfig so the build config's `extends` resolves during tsc execution
+COPY tsconfig.json ./
+COPY server/ ./server/
+COPY tools/ ./tools/
+# Install only production dependencies then install the TypeScript compiler and node types
+# locally (no-save) so we don't pull in client devDependencies that bring incompatible
+# @types/react-router-dom typings. This keeps the server-build minimal and deterministic.
+RUN npm ci --omit=dev --no-audit --no-fund \
+	# Install TypeScript and @types/node pinned to the exact versions declared in
+	# the repository devDependencies. This avoids pulling all devDependencies
+	# into the server build while still providing a reproducible compiler.
+	&& TSC_VER=$(node -p "require('./package.json').devDependencies.typescript") \
+	&& NODE_TYPES_VER=$(node -p "require('./package.json').devDependencies['@types/node']") \
+	&& npm install --no-audit --no-fund --no-save "typescript@${TSC_VER}" "@types/node@${NODE_TYPES_VER}" \
+	&& npm run build:server \
+	# Ensure non-code assets used at runtime (seeds, templates) are copied into dist
+	&& mkdir -p dist/seeds \
+	&& cp -R server/seeds/* dist/seeds/ || true
 
-# Install runtime dependencies only (no dev deps)
-RUN npm ci --production --no-audit --no-fund
+# Stage: production runtime (only production deps + built code)
+FROM node:22-slim AS runtime
+WORKDIR /app
+ENV NODE_ENV=production
+ARG VERSION=dev
+ARG VCS_REF=unknown
+ARG BUILD_DATE=unknown
 
-# Copy entrypoint that runs migrations on startup
-COPY docker/backend-entrypoint.sh /usr/local/bin/backend-entrypoint.sh
-RUN chmod +x /usr/local/bin/backend-entrypoint.sh
+# Copy only production dependencies from a fresh npm ci
+COPY package.json package-lock.json* ./
+# Use modern npm flag to omit devDependencies (avoids deprecated warnings)
+RUN npm ci --omit=dev --no-audit --no-fund
 
-EXPOSE 3000
+# Copy built server and client
+COPY --from=server-build /app/dist ./dist
+COPY --from=client-build /app/client/dist ./client/dist
 
-# Start migrations via entrypoint, then start the backend which will serve both API
-# and static frontend on the same port (3000). This avoids running a separate
-# nginx process and eliminates nginx config errors.
-ENTRYPOINT ["/usr/local/bin/backend-entrypoint.sh"]
-# Run compiled server JS with node on PORT 3000
-CMD ["/bin/sh", "-c", "PORT=3000 node server-dist/index.js"]
+# Runtime port should be configurable via PORT env var; default to 3000 per release requirements
+ENV PORT=3000
+EXPOSE ${PORT}
 
-# Note:
-# - Backend listens on port 3000 (server/index.ts default override via PORT env)
-# - Frontend is served from ./frontend/dist by the server when present
+# Write build-info into the image so the running container can report its version.
+LABEL org.opencontainers.image.title="travel-list"
+LABEL org.opencontainers.image.version="${VERSION}"
+LABEL org.opencontainers.image.revision="${VCS_REF}"
+LABEL org.opencontainers.image.created="${BUILD_DATE}"
+
+RUN printf '{"version":"%s","vcs_ref":"%s","build_date":"%s"}\n' "${VERSION}" "${VCS_REF}" "${BUILD_DATE}" > /app/build-info.json
+
+# Start the server. The server reads process.env.PORT (server/index.ts)
+CMD ["node", "dist/index.js"]

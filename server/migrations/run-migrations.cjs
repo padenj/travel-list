@@ -7,7 +7,8 @@ const sqlite3 = require('sqlite3');
   const steps = process.argv[3] ? parseInt(process.argv[3], 10) : undefined;
 
   try {
-    const db = await sqlite.open({ filename: './travel-list.sqlite', driver: sqlite3.Database });
+  const dbFile = process.env.DB_FILE || './data/travel-list.sqlite';
+  const db = await sqlite.open({ filename: dbFile, driver: sqlite3.Database });
 
     const SimpleJSONStorage = require('./simple-json-storage.cjs');
 

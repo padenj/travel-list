@@ -3,8 +3,8 @@
 This README covers deploying the Travel List application using Docker / Portainer with SQLite and a bind-mounted host path for persistence. It also shows how to integrate a Cloudflared tunnel for external exposure.
 
 ## Overview
-- Frontend: served by `Dockerfile.pwa` (nginx) on port 80 inside container
-- Backend: Node server (build via `docker/backend.Dockerfile`) listening on port 5000
+- Frontend: built with Vite and served as static assets by the backend server (or a reverse proxy) in production
+- Backend: Node server (built with TypeScript) listening on port 3001 by default
 - Database: SQLite file located at `/data/travel-list.sqlite` inside the backend container. Mount a host path to `/data` to persist.
 
 ## Important notes
@@ -25,11 +25,11 @@ This README covers deploying the Travel List application using Docker / Portaine
 3. Add the `CLOUDFLARED_TOKEN` secret in Portainer or set an environment variable for the cloudflared service if you plan to run it there.
 
 4. Start the stack. The backend container's entrypoint will:
-   - Ensure `/data` exists
-   - Run migrations (using `server/migrations/run-migrations-knex.cjs up`)
-   - Start the backend server
+  - Ensure `/data` exists
+  - Run migrations (using `server/migrations/run-migrations-knex.cjs up`)
+  - Start the backend server
 
-5. Use Cloudflared to expose the web service externally. For example, create a tunnel that forwards traffic to your host on port 80 and/or 5000. Alternatively manage Cloudflared outside Portainer.
+5. Use Cloudflared or your preferred external proxy to expose the backend. If you want a separate web-facing container to serve static assets, configure it to proxy `/api` to the backend service. For most deployments serving the built `client/dist` from the backend is simpler (we copy `client/dist` into the server image in the provided `Dockerfile`).
 
 ## Local development (optional)
 - Use `docker-compose.sample.yml` with the `web-dev` service to build locally and run against a local Postgres or SQLite.
@@ -217,6 +217,39 @@ See `TEST_REPORT.md` for detailed test documentation.
 - `NODE_ENV` - Environment mode (development/production)
 - `VITE_API_BASE_URL` - Frontend API base URL (default: '/api')
 
+### Generating a production JWT secret
+
+For production deployments you must set a strong `JWT_SECRET` environment variable. Do not use the development default. Here are some recommended ways to generate and store a secret:
+
+- Generate a 32+ byte random secret on a Unix-like system:
+
+```bash
+# 32 bytes, base64 encoded (recommended)
+openssl rand -base64 48
+
+# Or hex form
+openssl rand -hex 32
+```
+
+- Configure the secret in Portainer
+
+  - In the Portainer stack environment variables for the `backend` service, replace the placeholder `JWT_SECRET=<REPLACE_WITH_SECURE_RANDOM_VALUE>` with the secret value OR use a Portainer secret and reference it in the stack.
+
+- Configure the secret in docker-compose (example):
+
+```yaml
+environment:
+  - NODE_ENV=production
+  - PORT=3001
+  - JWT_SECRET=your_generated_secret_here
+```
+
+- Best practices:
+  - Use a secret manager (Vault, AWS Secrets Manager, GitHub Secrets, Portainer secrets) and avoid embedding secrets in source code or checked-in compose files.
+  - Rotate the secret periodically and have a migration plan to invalidate tokens gracefully.
+  - Ensure your deployment uses HTTPS/TLS so tokens are always sent over encrypted channels.
+
+
 ### Database
 - SQLite database file: `travel-list.sqlite`
 - Automatic schema initialization on startup
@@ -225,8 +258,7 @@ See `TEST_REPORT.md` for detailed test documentation.
 ## Security Features
 
 ### Password Policy
-- Minimum 8 characters
-- Must contain at least 2 of the following character types:
+- Minimum 8 characters and at least 2 of the following character types:
   - Uppercase letters (A-Z)
   - Lowercase letters (a-z)
   - Numbers (0-9)

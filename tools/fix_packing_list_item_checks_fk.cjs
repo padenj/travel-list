@@ -2,7 +2,8 @@ const sqlite = require('sqlite');
 const sqlite3 = require('sqlite3');
 (async () => {
   try {
-    const db = await sqlite.open({ filename: './travel-list.sqlite', driver: sqlite3.Database });
+  const dbFile = process.env.DB_FILE || './data/travel-list.sqlite';
+  const db = await sqlite.open({ filename: dbFile, driver: sqlite3.Database });
     console.log('Opened DB');
 
     const tx = await db.get('PRAGMA foreign_keys');

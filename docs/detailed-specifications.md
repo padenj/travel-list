@@ -26,12 +26,12 @@
   - Use and modify templates
   - Cannot manage other users
 
-## Authentication Behavior
+### Authentication Behavior
 
 ### Initial Setup
 - Default administrator account created on first install
 - Administrator MUST change password on first login
-- Strong password policy enforced (16+ chars, mixed case, numbers, symbols)
+- Strong password policy enforced (implemented as: minimum 8 characters and at least 2 of the following character types: uppercase, lowercase, numbers, symbols). See `server/auth.ts` for the authoritative implementation.
 - Session expires after 60 days of inactivity
 
 ### Login Flow  

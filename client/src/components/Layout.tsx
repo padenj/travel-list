@@ -1,5 +1,5 @@
 // Clean Layout component
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { AppShell, Text, Group, Container, Avatar, Menu, UnstyledButton, Divider, Button } from '@mantine/core';
 import { IconSettings } from '@tabler/icons-react';
@@ -15,6 +15,25 @@ interface LayoutProps {
   children: React.ReactNode;
   user: User;
   onLogout: () => void;
+}
+
+function VersionText(): React.ReactElement {
+  const [version, setVersion] = useState<string | null>(null);
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const res = await fetch('/api/build-info');
+        if (!res.ok) return;
+        const body = await res.json();
+        if (mounted && body && body.build && body.build.version) setVersion(body.build.version);
+      } catch (e) {
+        // ignore
+      }
+    })();
+    return () => { mounted = false; };
+  }, []);
+  return <span>{version || 'dev'}</span>;
 }
 
 export default function Layout({ children, user, onLogout }: LayoutProps): React.ReactElement {
@@ -78,6 +97,10 @@ export default function Layout({ children, user, onLogout }: LayoutProps): React
                   <Menu.Item onClick={() => navigate('/admin/system')}>System Admin</Menu.Item>
                 )}
                 <Menu.Item color="red" onClick={onLogout}>Logout</Menu.Item>
+                {/* Version info fetched from the running backend (baked into image at build time) */}
+                <Menu.Label>
+                  <Text size="xs" color="dimmed">Version: <VersionText /></Text>
+                </Menu.Label>
               </Menu.Dropdown>
             </Menu>
           </Group>

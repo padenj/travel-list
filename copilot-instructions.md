@@ -10,6 +10,16 @@ This file provides guidance for using GitHub Copilot and AI agents to assist wit
 - Self-hosted Docker deployment
 - Offline support and background sync
 
+## Best-practices note (configuration first)
+
+- Follow clean configuration over quick fixes. Prefer adjusting the repo layout (monorepo/workspaces or separate package.json per server/client) and Docker multi-stage builds that clearly separate build tooling from runtime dependencies. Avoid installing large sets of devDependencies in production build stages or using unpinned, ad-hoc `--no-save` installs during CI; these increase drift and cause subtle type or version mismatches.
+- For Vite + React projects:
+	- Keep build tooling (vite, @vitejs/plugin-react, vitest) in a top-level devDependencies when using a single-repo approach, or use workspaces where client and server have their own package.json to isolate deps.
+	- Use a dedicated `deps` or `builder` stage in Docker to install all dev tooling once and reuse it for client and server builds (reduces duplicated installs and keeps builds reproducible).
+	- Ensure `tsconfig.build.json` and any referenced `tsconfig.json` files are available in the build stage so `tsc` can resolve `extends` without copying the entire repo into the container.
+	- Pin compiler/tool versions in package.json devDependencies and reference those pinned versions when installing tooling inside CI/build stages.
+- Document these choices in the repo (this file is a good place) so future contributors follow the same patterns instead of applying ad-hoc shortcuts.
+
 ## Development Environment
 - **Architecture**: Single Vite application with integrated frontend and backend
 - **Frontend**: Vite + React dev server on localhost:3000, accessible via https://code3000.padenco.com (remote VS Code proxy domain)

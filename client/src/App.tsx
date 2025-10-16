@@ -1,14 +1,11 @@
 
 import React, { useEffect, useState } from 'react';
-import { showNotification } from '@mantine/notifications';
 import { BrowserRouter as Router } from 'react-router-dom';
 import { MantineProvider } from '@mantine/core';
 import { ModalsProvider } from '@mantine/modals';
 import { Notifications } from '@mantine/notifications';
 import AppRoutes from './AppRoutes';
 import UpdateBanner from './components/UpdateBanner';
-import { flushPendingChecks, getPendingChecks } from './lib/simpleOffline';
-import { togglePackingListItemCheck } from './api';
 import { getAuthToken } from './api';
 import { ImpersonationProvider } from './contexts/ImpersonationContext';
 import { RefreshProvider } from './contexts/RefreshContext';
@@ -28,38 +25,9 @@ if (process.env.NODE_ENV === 'development') {
 function App(): React.ReactElement {
   const [updateAvailable, setUpdateAvailable] = useState(false);
   const [waitingRegistration, setWaitingRegistration] = useState<ServiceWorkerRegistration | null>(null);
-  useEffect(() => {
-    const tryFlush = async (reason?: string) => {
-      try {
-        const pending = getPendingChecks();
-        console.log('[App] flush attempt', { reason: reason || 'startup', pendingCount: pending.length, pending });
-        await flushPendingChecks(async (listId, itemId, userId, checked) => {
-          return await togglePackingListItemCheck(listId, itemId, userId, checked);
-        });
-        const pendingAfter = getPendingChecks();
-        console.log('[App] flush completed', { pendingAfterCount: pendingAfter.length });
-      } catch (e) {
-        console.warn('[App] flush attempt failed', e);
-      }
-    };
-
-    // expose manual trigger for debugging
-    (window as any).flushPendingChecks = () => tryFlush('manual');
-
-    // flush once on app start
-    tryFlush('startup');
-
-    // flush on reconnect / focus
-    const onOnline = () => { tryFlush('online'); };
-    const onFocus = () => { tryFlush('focus'); };
-    window.addEventListener('online', onOnline);
-    window.addEventListener('focus', onFocus);
-    return () => {
-      window.removeEventListener('online', onOnline);
-      window.removeEventListener('focus', onFocus);
-      delete (window as any).flushPendingChecks;
-    };
-  }, []);
+  // Removed legacy simpleOffline localStorage flush logic. The app relies on
+  // direct server API calls and SSE for updates. Service worker and page-based
+  // SSE connection logic below remain unchanged.
 
   // Register service worker to receive server events
   useEffect(() => {
