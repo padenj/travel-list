@@ -26,6 +26,7 @@ const SCHEMAS = {
       id TEXT PRIMARY KEY,
       familyId TEXT NOT NULL,
       name TEXT NOT NULL,
+      position INTEGER,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
       deleted_at TEXT,
@@ -34,6 +35,7 @@ const SCHEMAS = {
     CREATE TABLE IF NOT EXISTS items (
       id TEXT PRIMARY KEY,
       familyId TEXT NOT NULL,
+      categoryId TEXT,
       name TEXT NOT NULL,
       checked INTEGER DEFAULT 0,
       isOneOff INTEGER DEFAULT 0,
@@ -248,6 +250,10 @@ async function initializeDatabase(db: Database): Promise<void> {
         await ensureColumn('packing_list_items', 'not_needed', "INTEGER DEFAULT 0");
   // Ensure items.isOneOff exists
   await ensureColumn('items', 'isOneOff', 'INTEGER DEFAULT 0');
+    // Ensure items.categoryId exists (single-category model)
+    await ensureColumn('items', 'categoryId', 'TEXT');
+    // Ensure categories.position exists for explicit ordering
+    await ensureColumn('categories', 'position', 'INTEGER');
     // Ensure users.position exists for ordering family members
     await ensureColumn('users', 'position', 'INTEGER');
       

@@ -8,7 +8,7 @@ import fs from 'fs';
 import { logAudit } from './audit';
 import { validatePassword, hashPassword, comparePassword, hashPasswordSync, comparePasswordSync, generateToken } from './auth';
 import { authMiddleware, familyAccessMiddleware } from './middleware';
-import { UserRepository, FamilyRepository, CategoryRepository, ItemRepository } from './repositories';
+import { UserRepository, FamilyRepository, CategoryRepository, ItemRepository, updateCategoryPositions } from './repositories';
 import { ERROR_CODES, USER_ROLES, HTTP_STATUS } from './constants';
 import { User, LoginRequest, ChangePasswordRequest } from './server-types';
 import { v4 as uuidv4 } from 'uuid';
@@ -387,6 +387,32 @@ router.get('/categories/:categoryId/items', authMiddleware, async (req: Request,
   } catch (error) {
     console.error('Error fetching category items:', error);
     return res.status(500).json({ error: 'Failed to fetch category items' });
+  }
+});
+
+// Update category order for a family
+router.put('/categories/:familyId/order', authMiddleware, async (req: Request, res: Response) => {
+  const { familyId } = req.params;
+  const { categoryIds } = req.body;
+  if (!Array.isArray(categoryIds)) return res.status(400).json({ error: 'categoryIds must be an array' });
+  try {
+    // Permission: only SystemAdmin or FamilyAdmin of the family may reorder
+    if (req.user?.role !== 'SystemAdmin') {
+      if (!(req.user?.familyId === familyId && req.user?.role === 'FamilyAdmin')) {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+    }
+    // Validate that supplied ids belong to the family
+    const cats = await categoryRepo.findAll(familyId);
+    const validIds = new Set(cats.map(c => c.id));
+    for (const id of categoryIds) {
+      if (!validIds.has(id)) return res.status(400).json({ error: `Invalid category id: ${id}` });
+    }
+    await updateCategoryPositions(familyId, categoryIds);
+    return res.json({ message: 'Category order updated' });
+  } catch (err) {
+    console.error('Error updating category order:', err);
+    return res.status(500).json({ error: 'Failed to update category order' });
   }
 });
 

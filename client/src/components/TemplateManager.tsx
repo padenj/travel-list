@@ -20,7 +20,7 @@ import { getMembersForItem } from '../api';
 import { getCurrentUserProfile } from '../api';
 import { useImpersonation } from '../contexts/ImpersonationContext';
 import { useRefresh } from '../contexts/RefreshContext';
-import { IconEdit, IconTrash, IconPlus } from '@tabler/icons-react';
+import { IconEdit, IconTrash, IconPlus, IconX } from '@tabler/icons-react';
 import AddItemsDrawer from './AddItemsDrawer';
 import ItemEditDrawer from './ItemEditDrawer';
 
@@ -258,7 +258,7 @@ export default function TemplateManager() {
                           <IconEdit size={16} />
                         </ActionIcon>
                         <ActionIcon color="gray" variant="light" onClick={() => { setEditingTemplateId(null); setEditingTemplateNameDraft(''); }}>
-                          <IconTrash size={16} />
+                          <IconX size={16} />
                         </ActionIcon>
                       </Group>
                     ) : (
