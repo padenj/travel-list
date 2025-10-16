@@ -1,19 +1,21 @@
 version: '3.8'
 
 services:
-  backend:
-    image: ghcr.io/padenj/travel-list-backend:latest
+  travel-list:
+    image: ghcr.io/padenj/travel-list:latest
     environment:
+      # Configurable runtime port, default 3000
       - NODE_ENV=production
-      - PORT=3001
+      - PORT=${PORT:-3000}
       - DB_FILE=/data/travel-list.sqlite
+    # Bind-mount a host directory to persist the SQLite DB. Replace the host path
+    # below when you copy this into Portainer, for example: /srv/travel-list/db:/data
     volumes:
-      - <localvolumepath>:/data
-    # Internal-only service: not published to host
-    expose:
-      - "3001"
+      - ./data:/data
+    ports:
+      - "${PORT:-3000}:${PORT:-3000}"
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:3001/ || exit 1"]
+      test: ["CMD-SHELL", "curl -f http://localhost:${PORT:-3000}/ || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -21,18 +23,17 @@ services:
 
   # One-shot migration helper. Use this with `docker compose run --rm migrate`
   migrate:
-    image: ghcr.io/padenj/travel-list-backend:latest
+    image: ghcr.io/padenj/travel-list:latest
     environment:
       - NODE_ENV=production
       - DB_FILE=/data/travel-list.sqlite
-      - PORT=3001
+      - PORT=${PORT:-3000}
     volumes:
-      - <localvolumepath>:/data
+      - ./data:/data
     entrypoint: ["/bin/sh", "-c", "node server/migrations/run-migrations-knex.cjs up || true"]
     restart: 'no'
 
-  # cloudflared is mentioned as the external proxy; this is a placeholder service
-  # In Portainer you'd configure cloudflared separately or as a service like below.
+  # Placeholder for an external tunnel / proxy if you want to attach one
   cloudflared:
     image: cloudflare/cloudflared:2024.3.0
     command: tunnel --no-autoupdate run --token ${CLOUDFLARED_TOKEN}
@@ -44,9 +45,8 @@ volumes:
   data:
 
 # Usage notes:
-# - Replace <localvolumepath> with the host path you want mounted, for example:
-#     /srv/travel-list/db:/data
-# - The backend is configured to read/write the SQLite DB at /data/travel-list.sqlite
-# - The backend is served directly on its internal port (3001). For production
-#   deployments put the app behind your preferred reverse proxy/load balancer
-#   (Traefik, cloud provider load balancer, etc.) and configure TLS there.
+# - The stack pulls the image from GitHub Container Registry: ghcr.io/padenj/travel-list:latest
+# - The SQLite DB inside the container is at /data/travel-list.sqlite. Bind-mount a host
+#   directory to ./data (or change the left-hand side to an absolute host path) to persist data.
+# - Configure the exposed port by setting the PORT variable when creating the stack in Portainer.
+#   Port mapping uses the same port on host and container by default (e.g. 3000:3000).

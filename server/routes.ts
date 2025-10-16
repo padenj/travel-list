@@ -3,6 +3,8 @@
 
 
 import express, { Request, Response, Router } from 'express';
+import path from 'path';
+import fs from 'fs';
 import { logAudit } from './audit';
 import { validatePassword, hashPassword, comparePassword, hashPasswordSync, comparePasswordSync, generateToken } from './auth';
 import { authMiddleware, familyAccessMiddleware } from './middleware';
@@ -732,6 +734,25 @@ router.get('/debug/sse-clients', async (req: Request, res: Response) => {
     const error = e as Error;
     console.error('[DEBUG] Error stack:', error.stack);
     return res.status(500).json({ error: 'Failed to fetch debug data', details: error.message });
+  }
+});
+
+// Build info endpoint. Returns the contents of /app/build-info.json if present.
+// This file is baked into the container image at build time by the Dockerfile and
+// contains version, vcs_ref, and build_date. No auth required; used by the frontend
+// to show the running version.
+router.get('/build-info', async (req: Request, res: Response) => {
+  try {
+    const buildInfoPath = path.resolve(process.cwd(), 'build-info.json');
+    if (fs.existsSync(buildInfoPath)) {
+      const raw = fs.readFileSync(buildInfoPath, 'utf-8');
+      const json = JSON.parse(raw);
+      return res.json({ build: json });
+    }
+    return res.json({ build: { version: process.env.npm_package_version || 'dev', note: 'build-info not found' } });
+  } catch (err) {
+    console.error('Error reading build-info:', err);
+    return res.status(500).json({ error: 'Failed to read build info' });
   }
 });
 

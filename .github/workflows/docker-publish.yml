@@ -1,20 +1,22 @@
-name: Build & Publish Docker image
+name: Build, Test, and Publish Docker image
 
 on:
   push:
     branches: [ main ]
+    tags: [ 'v*.*.*' ]
   pull_request:
-    types: [opened, reopened, synchronize]
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: read
   packages: write
 
 jobs:
-  build-and-push:
+  build-and-test:
+    if: ${{ !(github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && github.actor == 'github-actions[bot]') }}
     runs-on: ubuntu-latest
-    env:
-      IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/travel-list
+    outputs:
+      image: ghcr.io/padenj/travel-list
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -22,19 +24,32 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '20'
 
-      - name: Install dependencies
+      - name: Install dependencies (root)
         run: npm ci
 
-      - name: Build frontend artifacts
-        run: npm run build:pwa
+      - name: Build client
+        run: npm --prefix client ci && npm --prefix client run build
 
-      - name: Verify PWA artifacts
-        run: node tools/ci-verify-pwa.cjs
+      - name: Build server (TS compile)
+        run: npm run build:server
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v2
+      - name: Run full test suite
+        run: npm test
+
+      - name: Set output image name
+        run: echo "image=ghcr.io/padenj/travel-list" >> $GITHUB_OUTPUT
+
+  docker-build-publish:
+    needs: build-and-test
+    if: ${{ !(github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && github.actor == 'github-actions[bot]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
@@ -46,30 +61,159 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Determine image tags
-        id: tag
+      - name: Determine tags and metadata
+        id: meta
         run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            TAG="pr-${{ github.event.number }}"
-          else
-            TAG="latest"
+          set -euo pipefail
+          IMAGE=ghcr.io/padenj/travel-list
+          echo "IMAGE=$IMAGE" >> $GITHUB_OUTPUT
+
+          # Helper: find latest semver tag (vX.Y.Z)
+          LATEST_TAG=$(git tag --list "v*.*.*" --sort=-v:refname | head -n1 || true)
+          LATEST_VER=""
+          if [ -n "$LATEST_TAG" ]; then
+            LATEST_VER=${LATEST_TAG#v}
           fi
-          echo "tag=$TAG" >> $GITHUB_OUTPUT
 
-      - name: Build and push frontend image (PWA)
+          # Compute outputs depending on event
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            PRNUM=${{ github.event.pull_request.number }}
+            SHORTSHA=${{ github.sha }}
+            SHORT=${SHORTSHA:0:7}
+            # Base version: prefer latest semver or package.json
+            if [ -n "$LATEST_VER" ]; then
+              BASE_VERSION=$LATEST_VER
+            else
+              BASE_VERSION=$(node -p "require('./package.json').version")
+            fi
+            PR_TAG="${BASE_VERSION}-pr${PRNUM}${SHORT}"
+            TAGS="$IMAGE:$PR_TAG"
+            echo "PR_TAG=$PR_TAG" >> $GITHUB_OUTPUT
+            echo "TAGS=$TAGS" >> $GITHUB_OUTPUT
+            echo "VERSION=$PR_TAG" >> $GITHUB_OUTPUT
+          elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            # Auto-bump patch version from latest semver tag
+            if [ -n "$LATEST_VER" ]; then
+              IFS='.' read -r MAJOR MINOR PATCH <<< "$LATEST_VER"
+              NEWPATCH=$((PATCH + 1))
+              NEW_VER="$MAJOR.$MINOR.$NEWPATCH"
+            else
+              # No prior tag: use package.json or default 0.1.0
+              PKG_VER=$(node -p "require('./package.json').version")
+              if [ -n "$PKG_VER" ]; then
+                IFS='.' read -r MAJOR MINOR PATCH <<< "$PKG_VER"
+                NEWPATCH=$((PATCH + 1))
+                NEW_VER="$MAJOR.$MINOR.$NEWPATCH"
+              else
+                NEW_VER="0.1.0"
+              fi
+            fi
+            NEW_TAG="v${NEW_VER}"
+            echo "NEW_TAG=$NEW_TAG" >> $GITHUB_OUTPUT
+            echo "RELEASE_TAG=$NEW_VER" >> $GITHUB_OUTPUT
+            # Create annotated tag and push it
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a "$NEW_TAG" -m "Auto-release $NEW_TAG"
+            git push origin "$NEW_TAG"
+
+            # Set tags to push for image: both version and latest
+            TAGS="$IMAGE:$NEW_VER\n$IMAGE:latest"
+            echo -e "$TAGS" | sed '/^$/d' > tags.txt
+            echo "TAGS<<EOF" >> $GITHUB_OUTPUT
+            cat tags.txt >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+
+            echo "VERSION=$NEW_VER" >> $GITHUB_OUTPUT
+            echo "VCS_REF=${{ github.sha }}" >> $GITHUB_OUTPUT
+            echo "BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_OUTPUT
+          else
+            # Fallback: use commit sha tag
+            SHORTSHA=${{ github.sha }}
+            SHORT=${SHORTSHA:0:7}
+            TAGS="$IMAGE:sha-${SHORT}"
+            echo "TAGS=$TAGS" >> $GITHUB_OUTPUT
+            echo "VERSION=sha-${SHORT}" >> $GITHUB_OUTPUT
+            echo "VCS_REF=${{ github.sha }}" >> $GITHUB_OUTPUT
+            echo "BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Prepare build-info.json (for release assets)
+        if: always()
+        run: |
+          mkdir -p out
+          cat > out/build-info.json <<EOF
+          {
+            "version": "${{ steps.meta.outputs.VERSION }}",
+            "vcs_ref": "${{ steps.meta.outputs.VCS_REF }}",
+            "build_date": "${{ steps.meta.outputs.BUILD_DATE }}"
+          }
+          EOF
+
+      - name: Build and push image
         uses: docker/build-push-action@v4
         with:
           context: .
-          file: Dockerfile.pwa
+          file: ./Dockerfile
           push: true
-          tags: |
-            ${{ env.IMAGE_NAME }}-web:${{ steps.tag.outputs.tag }}
+          tags: ${{ steps.meta.outputs.TAGS }}
+          build-args: |
+            VERSION=${{ steps.meta.outputs.VERSION }}
+            VCS_REF=${{ steps.meta.outputs.VCS_REF }}
+            BUILD_DATE=${{ steps.meta.outputs.BUILD_DATE }}
+          labels: |
+            org.opencontainers.image.version=${{ steps.meta.outputs.VERSION }}
+            org.opencontainers.image.revision=${{ steps.meta.outputs.VCS_REF }}
+            org.opencontainers.image.created=${{ steps.meta.outputs.BUILD_DATE }}
+          platforms: linux/amd64
 
-      - name: Build and push backend image
-        uses: docker/build-push-action@v4
+      - name: Create release notes
+        if: ${{ steps.meta.outputs.NEW_TAG != '' && github.event_name != 'pull_request' }}
+        id: release_notes
+        run: |
+          set -euo pipefail
+          git fetch --tags
+          LATEST_TAG=$(git tag --list "v*.*.*" --sort=-v:refname | head -n1 || true)
+          if [ -n "$LATEST_TAG" ]; then
+            RANGE="$LATEST_TAG..HEAD"
+          else
+            RANGE="HEAD"
+          fi
+          echo "Generating release notes for range: $RANGE"
+          NOTES=$(git log --pretty=format:"- %s (%h)" $RANGE || true)
+          if [ -z "$NOTES" ]; then
+            NOTES="Automated release created by CI. No commit messages found."
+          fi
+          BODY=$(cat <<EOF
+Release ${{ steps.meta.outputs.NEW_TAG }}
+
+Changes since ${LATEST_TAG:-initial}:
+
+$NOTES
+
+EOF
+)
+          echo "body<<EOF" >> $GITHUB_OUTPUT
+          echo "$BODY" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub release (for main auto-tag)
+        if: ${{ steps.meta.outputs.NEW_TAG != '' && github.event_name != 'pull_request' }}
+        uses: actions/create-release@v1
+        id: create_release
         with:
-          context: .
-          file: docker/backend.Dockerfile
-          push: true
-          tags: |
-            ${{ env.IMAGE_NAME }}-backend:${{ steps.tag.outputs.tag }}
+          tag_name: ${{ steps.meta.outputs.NEW_TAG }}
+          release_name: Release ${{ steps.meta.outputs.NEW_TAG }}
+          body: ${{ steps.release_notes.outputs.body }}
+          draft: false
+          prerelease: false
+
+      - name: Upload build-info.json to release
+        if: ${{ steps.meta.outputs.NEW_TAG != '' && github.event_name != 'pull_request' }}
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: out/build-info.json
+          asset_name: build-info.json
+          asset_content_type: application/json
+

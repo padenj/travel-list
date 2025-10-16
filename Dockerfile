@@ -22,6 +22,9 @@ RUN npm ci --production=false --no-audit --no-fund \
 FROM node:20-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
+ARG VERSION=dev
+ARG VCS_REF=unknown
+ARG BUILD_DATE=unknown
 
 # Copy only production dependencies from a fresh npm ci
 COPY package.json package-lock.json* ./
@@ -31,5 +34,17 @@ RUN npm ci --production --no-audit --no-fund
 COPY --from=server-build /app/dist ./dist
 COPY --from=client-build /app/client/dist ./client/dist
 
-EXPOSE 3001
+# Runtime port should be configurable via PORT env var; default to 3000 per release requirements
+ENV PORT=3000
+EXPOSE ${PORT}
+
+# Write build-info into the image so the running container can report its version.
+LABEL org.opencontainers.image.title="travel-list"
+LABEL org.opencontainers.image.version="${VERSION}"
+LABEL org.opencontainers.image.revision="${VCS_REF}"
+LABEL org.opencontainers.image.created="${BUILD_DATE}"
+
+RUN printf '{"version":"%s","vcs_ref":"%s","build_date":"%s"}\n' "${VERSION}" "${VCS_REF}" "${BUILD_DATE}" > /app/build-info.json
+
+# Start the server. The server reads process.env.PORT (server/index.ts)
 CMD ["node", "dist/index.js"]
