@@ -23,6 +23,7 @@ COPY tsconfig.build.json ./
 # Copy base tsconfig so the build config's `extends` resolves during tsc execution
 COPY tsconfig.json ./
 COPY server/ ./server/
+COPY tools/ ./tools/
 # Install only production dependencies then install the TypeScript compiler and node types
 # locally (no-save) so we don't pull in client devDependencies that bring incompatible
 # @types/react-router-dom typings. This keeps the server-build minimal and deterministic.
