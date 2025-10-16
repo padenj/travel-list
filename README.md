@@ -217,6 +217,39 @@ See `TEST_REPORT.md` for detailed test documentation.
 - `NODE_ENV` - Environment mode (development/production)
 - `VITE_API_BASE_URL` - Frontend API base URL (default: '/api')
 
+### Generating a production JWT secret
+
+For production deployments you must set a strong `JWT_SECRET` environment variable. Do not use the development default. Here are some recommended ways to generate and store a secret:
+
+- Generate a 32+ byte random secret on a Unix-like system:
+
+```bash
+# 32 bytes, base64 encoded (recommended)
+openssl rand -base64 48
+
+# Or hex form
+openssl rand -hex 32
+```
+
+- Configure the secret in Portainer
+
+  - In the Portainer stack environment variables for the `backend` service, replace the placeholder `JWT_SECRET=<REPLACE_WITH_SECURE_RANDOM_VALUE>` with the secret value OR use a Portainer secret and reference it in the stack.
+
+- Configure the secret in docker-compose (example):
+
+```yaml
+environment:
+  - NODE_ENV=production
+  - PORT=3001
+  - JWT_SECRET=your_generated_secret_here
+```
+
+- Best practices:
+  - Use a secret manager (Vault, AWS Secrets Manager, GitHub Secrets, Portainer secrets) and avoid embedding secrets in source code or checked-in compose files.
+  - Rotate the secret periodically and have a migration plan to invalidate tokens gracefully.
+  - Ensure your deployment uses HTTPS/TLS so tokens are always sent over encrypted channels.
+
+
 ### Database
 - SQLite database file: `travel-list.sqlite`
 - Automatic schema initialization on startup
