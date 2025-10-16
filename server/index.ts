@@ -1,5 +1,5 @@
 
-import '../server/env-loader';
+import './env-loader';
 import express, { Application, Request, Response } from 'express';
 import { fileURLToPath } from 'url';
 import path from 'path';
