@@ -30,7 +30,14 @@ jobs:
         run: npm ci
 
       - name: Build client
-        run: npm --prefix client ci && npm --prefix client run build
+        run: |
+          # Use `npm ci` when a lockfile exists for reproducible installs, otherwise fall back to `npm install`
+          if [ -f client/package-lock.json ]; then
+            npm --prefix client ci --no-audit --no-fund
+          else
+            npm --prefix client install --no-audit --no-fund
+          fi
+          npm --prefix client run build
 
       - name: Build server (TS compile)
         run: npm run build:server
