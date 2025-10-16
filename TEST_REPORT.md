@@ -22,11 +22,7 @@ This organization provides:
 
 #### 1. Authentication Tests (`server/__tests__/auth.test.ts`) - 10 tests
 - **Password Validation**: Tests all password policy requirements
-  - Minimum 16 characters
-  - Uppercase letters required
-  - Lowercase letters required
-  - Numbers required
-  - Symbols required
+   - Minimum 8 characters and at least 2 of the following character types required: uppercase, lowercase, numbers, symbols
 - **Password Hashing**: Tests bcrypt password operations
   - Secure password hashing
   - Password verification

@@ -258,8 +258,7 @@ environment:
 ## Security Features
 
 ### Password Policy
-- Minimum 8 characters
-- Must contain at least 2 of the following character types:
+- Minimum 8 characters and at least 2 of the following character types:
   - Uppercase letters (A-Z)
   - Lowercase letters (a-z)
   - Numbers (0-9)

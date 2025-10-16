@@ -1156,12 +1156,15 @@ router.post('/change-password', async (req: Request, res: Response): Promise<Res
   return res.json({ message: 'Password changed successfully' });
 });
 
-// Create family member (SystemAdmin only)
+// Create family member (SystemAdmin or FamilyAdmin for same family)
 router.post('/families/:familyId/members', authMiddleware, async (req: Request, res: Response): Promise<Response> => {
-  if (req.user?.role !== 'SystemAdmin') {
-    return res.status(403).json({ error: 'Forbidden' });
-  }
+  // Allow SystemAdmin or a FamilyAdmin who belongs to the target family
   const { familyId } = req.params;
+  if (req.user?.role !== 'SystemAdmin') {
+    if (!(req.user?.role === 'FamilyAdmin' && req.user?.familyId === familyId)) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+  }
   const { name, canLogin, username, password, role } = req.body;
   
   if (!name || name.trim() === '') {

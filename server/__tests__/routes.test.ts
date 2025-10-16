@@ -15,8 +15,10 @@ describe('Routes Integration Tests', () => {
   let testFamilyId: string;
   let adminToken: string;
   let userToken: string;
+  let familyAdminToken: string;
   let testUsername: string;
   let adminUsername: string;
+  let familyAdminUsername: string;
 
   beforeEach(async () => {
     // Setup Express app
@@ -70,13 +72,30 @@ describe('Routes Integration Tests', () => {
       updated_at: new Date().toISOString()
     });
 
+    // Create a FamilyAdmin user for the same family
+    const famAdminUserId = uuidv4();
+    familyAdminUsername = `famadmin_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    await userRepo.create({
+      id: famAdminUserId,
+      username: familyAdminUsername,
+      password: hashPasswordSync('FamAdmin1!'),
+      role: USER_ROLES.FAMILY_ADMIN,
+      must_change_password: false,
+      email: `famadmin_${Date.now()}_${Math.random().toString(36).substr(2, 9)}@example.com`,
+      familyId: testFamilyId,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    });
+
     // Generate tokens
     const createdUser = await userRepo.findByUsername(testUsername);
     const createdAdmin = await userRepo.findByUsername(adminUsername);
+    const createdFamilyAdmin = await userRepo.findByUsername(familyAdminUsername);
     if (!createdUser || !createdAdmin) throw new Error('Test users not created');
     
     userToken = generateToken(createdUser);
     adminToken = generateToken(createdAdmin);
+    familyAdminToken = generateToken(createdFamilyAdmin!);
   });
 
   afterEach(async () => {
@@ -187,6 +206,33 @@ describe('Routes Integration Tests', () => {
 
       expect(response.status).toBe(400);
       expect(response.body).toHaveProperty('error', 'Family name is required');
+    });
+  });
+
+  describe('POST /api/families/:familyId/members', () => {
+    it('should allow FamilyAdmin to create a member for their own family', async () => {
+      const response = await request(app)
+        .post(`/api/families/${testFamilyId}/members`)
+        .set('Authorization', `Bearer ${familyAdminToken}`)
+        .send({ name: 'Alex', canLogin: false });
+
+      expect(response.status).toBe(200);
+      expect(response.body).toHaveProperty('member');
+      expect(response.body.member).toHaveProperty('name', 'Alex');
+      expect(response.body.member).toHaveProperty('familyId', testFamilyId);
+    });
+
+    it('should forbid FamilyAdmin from creating a member for a different family', async () => {
+      // Create another family
+      const otherFamilyId = uuidv4();
+      await familyRepo.create({ id: otherFamilyId, name: 'Other Family', created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
+
+      const response = await request(app)
+        .post(`/api/families/${otherFamilyId}/members`)
+        .set('Authorization', `Bearer ${familyAdminToken}`)
+        .send({ name: 'Sam', canLogin: false });
+
+      expect(response.status).toBe(403);
     });
   });
 });
