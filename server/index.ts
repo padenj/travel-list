@@ -34,9 +34,10 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 // later in this file so that API/SSE routes take precedence. The production
 // build lives at ./client/dist (created by `npm --prefix client run build`).
 
-// Health check endpoint
-app.get('/', (req: Request, res: Response) => {
-  res.json({ 
+// Health check endpoint (API)
+// Serve this under /api/health so the site root can host the frontend SPA.
+app.get('/api/health', (req: Request, res: Response) => {
+  res.json({
     status: 'healthy',
     message: 'Travel List API is running',
     timestamp: new Date().toISOString(),
