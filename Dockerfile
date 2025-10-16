@@ -20,8 +20,14 @@ FROM node:22-slim AS server-build
 WORKDIR /app
 COPY package.json package-lock.json* ./
 COPY tsconfig.build.json ./
+# Copy base tsconfig so the build config's `extends` resolves during tsc execution
+COPY tsconfig.json ./
 COPY server/ ./server/
-RUN npm ci --production=false --no-audit --no-fund \
+# Install only production dependencies then install the TypeScript compiler and node types
+# locally (no-save) so we don't pull in client devDependencies that bring incompatible
+# @types/react-router-dom typings. This keeps the server-build minimal and deterministic.
+RUN npm ci --omit=dev --no-audit --no-fund \
+	&& npm install --no-audit --no-fund --no-save typescript @types/node \
 	&& npm run build:server
 
 # Stage: production runtime (only production deps + built code)
