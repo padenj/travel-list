@@ -12,6 +12,8 @@ import { authMiddleware } from './middleware';
 import routes from './routes';
 import { errorHandler, notFoundHandler } from './error-handler';
 import { closeDb } from './db';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 
 const app: Application = express();
 const PORT: number = parseInt(process.env.PORT || '3001');
@@ -93,29 +95,69 @@ let server: any;
 const __filename = fileURLToPath(import.meta.url);
 const isMain = process.argv && process.argv[1] && __filename === process.argv[1];
 if (isMain) {
-  server = app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 Backend running on http://0.0.0.0:${PORT}`);
-  });
+  const execFileP = promisify(execFile);
 
-  // Handle server errors
-  server.on('error', (error: NodeJS.ErrnoException) => {
-    if (error.syscall !== 'listen') {
-      throw error;
+  const runMigrationsIfAny = async () => {
+    try {
+      const { stdout: statusOut } = await execFileP('node', ['server/migrations/run-migrations.cjs', 'status'], { cwd: process.cwd(), maxBuffer: 10 * 1024 * 1024 });
+      const pendingJsonMatch = statusOut.match(/Pending migrations:[\s\S]*?(\[[\s\S]*?\])/);
+      let pending: any[] = [];
+      if (pendingJsonMatch && pendingJsonMatch[1]) {
+        try {
+          pending = JSON.parse(pendingJsonMatch[1]);
+        } catch (e) {
+          console.warn('Could not parse pending migrations list:', e);
+        }
+      }
+
+      if (!pending || pending.length === 0) {
+        console.log('✅ Database is up to date; no migrations to run');
+        return;
+      }
+
+      console.log(`⚡ Found ${pending.length} pending migration(s). Applying now...`);
+      const { stdout: upOut, stderr: upErr } = await execFileP('node', ['server/migrations/run-migrations.cjs', 'up'], { cwd: process.cwd(), maxBuffer: 20 * 1024 * 1024 });
+      if (upOut) console.log(upOut);
+      if (upErr) console.error(upErr);
+      console.log('✅ Migrations applied');
+    } catch (err: any) {
+      console.error('⚠️ Error running migrations:', err && err.message ? err.message : err);
+      throw err;
+    }
+  };
+
+  (async () => {
+    try {
+      await runMigrationsIfAny();
+    } catch (err) {
+      console.error('Migrations failed during startup; aborting server start.');
+      process.exit(1);
     }
 
-    switch (error.code) {
-      case 'EACCES':
-        console.error(`💥 Port ${PORT} requires elevated privileges`);
-        process.exit(1);
-        break;
-      case 'EADDRINUSE':
-        console.error(`💥 Port ${PORT} is already in use`);
-        process.exit(1);
-        break;
-      default:
+    server = app.listen(PORT, '0.0.0.0', () => {
+      console.log(`🚀 Backend running on http://0.0.0.0:${PORT}`);
+    });
+
+    // Handle server errors
+    server.on('error', (error: NodeJS.ErrnoException) => {
+      if (error.syscall !== 'listen') {
         throw error;
-    }
-  });
+      }
+
+      switch (error.code) {
+        case 'EACCES':
+          console.error(`💥 Port ${PORT} requires elevated privileges`);
+          process.exit(1);
+          break;
+        case 'EADDRINUSE':
+          console.error(`💥 Port ${PORT} is already in use`);
+          process.exit(1);
+          break;
+        default:
+          throw error;
+      }
+    });
+  })();
 }
 
 export default app;
