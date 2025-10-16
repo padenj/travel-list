@@ -86,14 +86,15 @@ jobs:
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             PRNUM=${{ github.event.pull_request.number }}
             SHORTSHA=${{ github.sha }}
-            SHORT=${SHORTSHA:0:7}
+            # Use the last 6 characters of the commit SHA for a shorter, unique tag
+            SHORT=${SHORTSHA: -6}
             # Base version: prefer latest semver or package.json
             if [ -n "$LATEST_VER" ]; then
               BASE_VERSION=$LATEST_VER
             else
               BASE_VERSION=$(node -p "require('./package.json').version")
             fi
-            PR_TAG="${BASE_VERSION}-pr${PRNUM}${SHORT}"
+            PR_TAG="${BASE_VERSION}-pr${PRNUM}_${SHORT}"
             TAGS="$IMAGE:$PR_TAG"
             echo "PR_TAG=$PR_TAG" >> $GITHUB_OUTPUT
             echo "TAGS=$TAGS" >> $GITHUB_OUTPUT
