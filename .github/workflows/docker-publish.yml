@@ -170,6 +170,8 @@ jobs:
       - name: Create release notes
         if: ${{ steps.meta.outputs.NEW_TAG != '' && github.event_name != 'pull_request' }}
         id: release_notes
+        env:
+          NEW_TAG: ${{ steps.meta.outputs.NEW_TAG }}
         run: |
           set -euo pipefail
           git fetch --tags
@@ -184,15 +186,8 @@ jobs:
           if [ -z "$NOTES" ]; then
             NOTES="Automated release created by CI. No commit messages found."
           fi
-          BODY=$(cat <<EOF
-Release ${{ steps.meta.outputs.NEW_TAG }}
-
-Changes since ${LATEST_TAG:-initial}:
-
-$NOTES
-
-EOF
-)
+          # Build the release body using shell variables (avoid embedding GitHub expressions)
+          BODY="Release ${NEW_TAG}\n\nChanges since ${LATEST_TAG:-initial}:\n\n${NOTES}\n"
           echo "body<<EOF" >> $GITHUB_OUTPUT
           echo "$BODY" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
