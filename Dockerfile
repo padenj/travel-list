@@ -6,7 +6,7 @@ WORKDIR /app
 COPY client/package.json client/package-lock.json* ./client/
 COPY client/ ./client/
 RUN cd client \
-	&& npm ci --production=false --no-audit --no-fund \
+	&& if [ -f package-lock.json ]; then npm ci --production=false --no-audit --no-fund; else npm install --no-audit --no-fund; fi \
 	&& npm run build
 
 # Stage: build server (install dev deps, compile)
