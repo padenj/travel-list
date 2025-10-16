@@ -27,7 +27,12 @@ COPY server/ ./server/
 # locally (no-save) so we don't pull in client devDependencies that bring incompatible
 # @types/react-router-dom typings. This keeps the server-build minimal and deterministic.
 RUN npm ci --omit=dev --no-audit --no-fund \
-	&& npm install --no-audit --no-fund --no-save typescript @types/node \
+	# Install TypeScript and @types/node pinned to the exact versions declared in
+	# the repository devDependencies. This avoids pulling all devDependencies
+	# into the server build while still providing a reproducible compiler.
+	&& TSC_VER=$(node -p "require('./package.json').devDependencies.typescript") \
+	&& NODE_TYPES_VER=$(node -p "require('./package.json').devDependencies['@types/node']") \
+	&& npm install --no-audit --no-fund --no-save "typescript@${TSC_VER}" "@types/node@${NODE_TYPES_VER}" \
 	&& npm run build:server
 
 # Stage: production runtime (only production deps + built code)
