@@ -96,7 +96,27 @@ if (isMain) {
   const runMigrationsIfAny = async () => {
     try {
       const migrationsDir = path.resolve(process.cwd(), 'server', 'migrations', 'migrations');
-      const storagePath = path.resolve(process.cwd(), 'server', 'migrations', 'migrations.json');
+      // Prefer placing migrations.json next to the DB file so it can live on the same
+      // mount as the database (e.g., /data) and persist across image updates.
+      // Fall back to the repo path for in-memory/test DBs.
+      const dbFileEnv = process.env.DB_FILE || path.join('data', 'travel-list.sqlite');
+      const resolvedDbFile = dbFileEnv === ':memory:' ? dbFileEnv : path.resolve(process.cwd(), dbFileEnv);
+      let storagePath: string;
+
+      if (resolvedDbFile === ':memory:') {
+        storagePath = path.resolve(process.cwd(), 'server', 'migrations', 'migrations.json');
+      } else {
+        const dbDir = path.dirname(resolvedDbFile);
+        // Ensure directory exists
+        try {
+          if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir, { recursive: true });
+        } catch (e) {
+          console.warn('Could not ensure database directory exists:', e);
+        }
+        storagePath = path.join(dbDir, 'migrations.json');
+      }
+
+      console.log('Using migration storage at', storagePath);
 
       const files: string[] = fs.existsSync(migrationsDir) ? fs.readdirSync(migrationsDir).filter(f => f.endsWith('.js')).sort() : [];
       const migrations = files.map(f => ({ name: f, path: path.join(migrationsDir, f) }));
