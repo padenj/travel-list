@@ -241,22 +241,14 @@ export class ItemRepository {
   // Assignment methods
   async assignToCategory(item_id: string, category_id: string): Promise<void> {
     const db = await getDb();
-    // Use single-category column on items. Also keep legacy join row for older code, but primary source of truth is items.categoryId
+    // Use single-category column on items as the canonical assignment
     await db.run(`UPDATE items SET categoryId = ?, updated_at = ? WHERE id = ?`, [category_id, new Date().toISOString(), item_id]);
-    try {
-      await db.run(`INSERT OR IGNORE INTO item_categories (item_id, category_id) VALUES (?, ?)`, [item_id, category_id]);
-    } catch (e) {
-      // ignore legacy insert errors
-    }
   }
 
   async removeFromCategory(item_id: string, category_id: string): Promise<void> {
     const db = await getDb();
     // If the item's categoryId matches the category being removed, clear it.
     await db.run(`UPDATE items SET categoryId = NULL, updated_at = ? WHERE id = ? AND categoryId = ?`, [new Date().toISOString(), item_id, category_id]);
-    try {
-      await db.run(`DELETE FROM item_categories WHERE item_id = ? AND category_id = ?`, [item_id, category_id]);
-    } catch (e) {}
   }
 
   async assignToMember(item_id: string, member_id: string): Promise<void> {
@@ -409,7 +401,12 @@ export class ItemRepository {
       const categoryIds = categoryRows.map((row: any) => row.category_id);
       let items: Item[] = [];
       if (categoryIds.length > 0) {
-        const categoryItems = await db.all(`SELECT i.* FROM items i JOIN item_categories ic ON i.id = ic.item_id WHERE ic.category_id IN (${categoryIds.map(() => '?').join(',')}) AND i.deleted_at IS NULL`, categoryIds);
+        // Include items that are assigned via the single-column items.categoryId
+        const placeholders = categoryIds.map(() => '?').join(',');
+        const categoryItems = await db.all(
+          `SELECT DISTINCT i.* FROM items i WHERE i.categoryId IN (${placeholders}) AND i.deleted_at IS NULL`,
+          categoryIds
+        );
         items = items.concat(categoryItems);
       }
       // Get individually referenced items
@@ -612,14 +609,14 @@ export class ItemRepository {
   const masterIds = Array.from(new Set(items.map((it: any) => it.master_id).filter(Boolean)));
   let categoriesByMaster: Record<string, { id: string; name: string }[]> = {};
   if (masterIds.length > 0) {
+    // Fetch category for each master item via items.categoryId
     const catRows = await db.all(
-      `SELECT ic.item_id, c.id as category_id, c.name as category_name FROM item_categories ic JOIN categories c ON c.id = ic.category_id WHERE ic.item_id IN (${masterIds.map(() => '?').join(',')}) AND c.deleted_at IS NULL`,
+      `SELECT i.id as item_id, c.id as category_id, c.name as category_name FROM items i LEFT JOIN categories c ON c.id = i.categoryId WHERE i.id IN (${masterIds.map(() => '?').join(',')}) AND i.deleted_at IS NULL`,
       masterIds
     );
-    // collect all categories per master item
     for (const r of catRows) {
-      categoriesByMaster[r.item_id] = categoriesByMaster[r.item_id] || [];
-      categoriesByMaster[r.item_id].push({ id: r.category_id, name: r.category_name });
+      if (r.category_id) categoriesByMaster[r.item_id] = [{ id: r.category_id, name: r.category_name }];
+      else categoriesByMaster[r.item_id] = [];
     }
   }
 

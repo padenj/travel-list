@@ -27,26 +27,8 @@ beforeEach(async () => {
     deleted_at TEXT,
     FOREIGN KEY (familyId) REFERENCES families(id)
   );`);
-  await db.exec(`CREATE TABLE IF NOT EXISTS item_categories (
-    item_id TEXT NOT NULL,
-    category_id TEXT NOT NULL,
-    PRIMARY KEY (item_id, category_id),
-    FOREIGN KEY (item_id) REFERENCES items(id),
-    FOREIGN KEY (category_id) REFERENCES categories(id)
-  );`);
-  // Print schema and foreign key info for debugging before any test logic
-  const icTableInfo = await db.all('PRAGMA table_info(item_categories)');
-  const icFKInfo = await db.all('PRAGMA foreign_key_list(item_categories)');
-  const itemsTableInfo = await db.all('PRAGMA table_info(items)');
-  const itemsFKInfo = await db.all('PRAGMA foreign_key_list(items)');
-  const catTableInfo = await db.all('PRAGMA table_info(categories)');
-  const catFKInfo = await db.all('PRAGMA foreign_key_list(categories)');
-  console.log('item_categories table info:', icTableInfo);
-  console.log('item_categories foreign keys:', icFKInfo);
-  console.log('items table info:', itemsTableInfo);
-  console.log('items foreign keys:', itemsFKInfo);
-  console.log('categories table info:', catTableInfo);
-  console.log('categories foreign keys:', catFKInfo);
+  // Ensure tables exist. Legacy many-to-many storage removed; tests should
+  // use the single-column assignment on items (categoryId) instead.
   await db.exec('DELETE FROM templates');
   await db.exec('DELETE FROM template_categories');
   await db.exec('DELETE FROM template_items');
@@ -103,7 +85,8 @@ describe('TemplateRepository', () => {
   await db.run(`INSERT INTO categories (id, familyId, name, created_at, updated_at, deleted_at) VALUES (?, ?, ?, ?, ?, NULL)`, [catId, family_id, 'Cat', new Date().toISOString(), new Date().toISOString()]);
   await db.run(`INSERT INTO items (id, familyId, name, created_at, updated_at, deleted_at) VALUES (?, ?, ?, ?, ?, NULL)`, [itemId1, family_id, 'Item1', new Date().toISOString(), new Date().toISOString()]);
   await db.run(`INSERT INTO items (id, familyId, name, created_at, updated_at, deleted_at) VALUES (?, ?, ?, ?, ?, NULL)`, [itemId2, family_id, 'Item2', new Date().toISOString(), new Date().toISOString()]);
-  await db.run(`INSERT INTO item_categories (item_id, category_id) VALUES (?, ?)`, [itemId1, catId]);
+  // Assign via the single-category column on items
+  await db.run(`UPDATE items SET categoryId = ? WHERE id = ?`, [catId, itemId1]);
   await repo.assignCategory(template_id, catId);
   await repo.assignItem(template_id, itemId2);
   const expanded = await repo.getExpandedItems(template_id);

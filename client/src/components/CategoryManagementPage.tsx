@@ -411,6 +411,8 @@ export default function CategoryManagementPage(): React.ReactElement {
               onClose={() => setShowAddPaneForCategory({ open: false })}
               familyId={familyId}
               excludedItemIds={(showAddPaneForCategory.categoryId && categoryItems[showAddPaneForCategory.categoryId] ? categoryItems[showAddPaneForCategory.categoryId].map(i => i.id) : [])}
+              showAssignedItemsToggle={true}
+              targetCategoryId={showAddPaneForCategory.categoryId}
               onApply={handleAddItemsToCategory}
               showIsOneOffCheckbox={false}
               title="Add items to category"
