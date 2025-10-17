@@ -300,10 +300,9 @@ export default function CategoryManagementPage(): React.ReactElement {
           <Text c="dimmed">No categories yet.</Text>
         ) : (
           <>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div />
-              <div style={{ display: 'flex', gap: 8 }}>
-                <Button onClick={() => setSortMode(true)}>Sort categories</Button>
+            <div style={{ position: 'relative' }}>
+              <div style={{ position: 'absolute', top: 8, right: 8 }}>
+                <Button size="xs" onClick={() => setSortMode(true)}>Sort categories</Button>
               </div>
             </div>
             <Modal opened={sortMode} onClose={() => setSortMode(false)} title="Sort Categories" size="lg">
