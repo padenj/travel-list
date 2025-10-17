@@ -331,12 +331,7 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
                     </label>
                   </div>
                 ))}
-                <div style={{ padding: '6px 0' }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <input type="radio" name="category" value="" checked={selectedCategory === null} onChange={() => setSelectedCategory(null)} />
-                    <span>None</span>
-                  </label>
-                </div>
+                {/* Removed 'None' option - items must be assigned to a category after migration */}
               </div>
             )}
           </div>
