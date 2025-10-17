@@ -528,7 +528,7 @@ export default function TemplateManager() {
         onClose={() => { setShowEditDrawer(false); setEditMasterItemId(null); }}
         masterItemId={editMasterItemId || undefined}
         familyId={familyId}
-        showNameField={true}
+        
         onSaved={async () => {
           try {
             await loadTemplateDetails(templates);

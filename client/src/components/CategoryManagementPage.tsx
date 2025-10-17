@@ -436,7 +436,6 @@ export default function CategoryManagementPage(): React.ReactElement {
               masterItemId={editMasterItemId || undefined}
               initialName={editMasterItemId ? (items.find(i => i.id === editMasterItemId)?.name) : undefined}
               familyId={familyId}
-              showNameField={true}
               initialCategoryId={showAddPaneForCategory.open ? showAddPaneForCategory.categoryId : undefined}
               onSaved={async () => {
                 await fetchCategoryItems();

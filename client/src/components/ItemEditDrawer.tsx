@@ -25,7 +25,7 @@ export interface ItemEditDrawerProps {
   masterItemId: string | null | undefined; // master item id (the canonical item)
   initialName?: string;
   familyId: string | null | undefined;
-  showNameField?: boolean; // whether to expose a name input (used by ItemManagementPage)
+  // name input is always shown now; previous showNameField prop removed
   defaultAssignedMemberId?: string | null; // pre-select this member when creating a new item
   onSaved?: (payload?: OnSavedPayload) => Promise<void> | void;
   // Whether to show the "Also add this item for future trips" checkbox when creating a new item
@@ -34,9 +34,11 @@ export interface ItemEditDrawerProps {
   promoteContext?: { listId: string; packingListItemId: string } | null;
   zIndex?: number;
   initialCategoryId?: string | null; // pre-select a category when creating a new item
+  initialMembers?: string[]; // pre-select members when opening from a packing-list item
+  initialWhole?: boolean; // pre-select whole-family assignment when opening from a packing-list item
 }
 
-export default function ItemEditDrawer({ opened, onClose, masterItemId, initialName, familyId, showNameField = false, defaultAssignedMemberId, onSaved, promoteContext, showIsOneOffCheckbox = false, zIndex, initialCategoryId }: ItemEditDrawerProps) {
+export default function ItemEditDrawer({ opened, onClose, masterItemId, initialName, familyId, defaultAssignedMemberId, onSaved, promoteContext, showIsOneOffCheckbox = false, zIndex, initialCategoryId, initialMembers: initialMembersProp, initialWhole: initialWholeProp }: ItemEditDrawerProps) {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [categories, setCategories] = useState<any[]>([]);
@@ -70,17 +72,45 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
           const res = await getItemEditData(masterItemId, familyId || undefined);
           if (!res.response.ok) throw new Error('Failed to load item edit data');
           const payload = res.data || {};
+          // Seed the editable name from the payload if available; fall back to prop initialName
+          setName(payload.item?.name || payload.name || initialName || '');
           setCategories(payload.categories || []);
+          // If the consolidated payload didn't include categories, try a family-level fetch so
+          // the category radios can render and the selectedCategory (which may have been
+          // provided by the caller) will be visible.
+          if ((!payload.categories || (Array.isArray(payload.categories) && payload.categories.length === 0)) && familyId) {
+            try {
+              const cats = await getCategories(familyId);
+              if (cats.response && cats.response.ok) setCategories(cats.data.categories || []);
+            } catch (e) {
+              // ignore
+            }
+          }
           const itemCats = Array.isArray(payload.itemCategories) ? payload.itemCategories : (payload.itemCategories || []);
-          const currentCat = itemCats && itemCats.length > 0 ? itemCats[0].id : null;
+          // Prefer caller-provided initialCategoryId when defined (e.g., editing from packing list)
+          const currentCat = typeof initialCategoryId !== 'undefined' && initialCategoryId !== null
+            ? initialCategoryId
+            : (itemCats && itemCats.length > 0 ? itemCats[0].id : null);
+          console.debug('[ItemEditDrawer] existing item computed currentCat', { currentCat, initialCategoryId, itemCats });
           setInitialCategory(currentCat);
           setSelectedCategory(currentCat);
+          // If the selected category id isn't present in the categories list,
+          // try to populate it from itemCats (payload) so the radio can show it.
+          if (currentCat && (!payload.categories || !payload.categories.find((c: any) => c.id === currentCat))) {
+            const missingName = (itemCats && itemCats.find((c: any) => c.id === currentCat)?.name) || 'Uncategorized';
+            setCategories(prev => {
+              if (prev.find(p => p.id === currentCat)) return prev;
+              return [...prev, { id: currentCat, name: missingName }];
+            });
+          }
           setFamilyMembers(payload.members || []);
           const itemMems = Array.isArray(payload.itemMembers) ? payload.itemMembers : (payload.itemMembers || []);
-          const assigned = itemMems.map((m: any) => m.id);
+          const assignedFromPayload = itemMems.map((m: any) => m.id);
+          // Prefer caller-provided initialMembers when present
+          const assigned = Array.isArray(initialMembersProp) && initialMembersProp.length > 0 ? initialMembersProp : assignedFromPayload;
           setInitialMembers(assigned);
           setSelectedMembers(assigned.slice());
-          const wholeAssigned = !!payload.wholeAssigned;
+          const wholeAssigned = typeof initialWholeProp !== 'undefined' ? !!initialWholeProp : !!payload.wholeAssigned;
           setInitialWhole(wholeAssigned);
           setSelectedWhole(wholeAssigned);
         } else if (promoteContext && promoteContext.listId) {
@@ -90,17 +120,39 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
             const editRes = await getItemEditData(pctx.packingListItemId, familyId || undefined);
             if (editRes && editRes.response && editRes.response.ok) {
               const payload = editRes.data || {};
+              // Seed name from payload when available (promote/edit path)
+              setName(payload.item?.name || payload.name || initialName || '');
               setCategories(payload.categories || []);
+              // Ensure categories exist even when consolidated payload lacks them
+              if ((!payload.categories || (Array.isArray(payload.categories) && payload.categories.length === 0)) && familyId) {
+                try {
+                  const cats = await getCategories(familyId);
+                  if (cats.response && cats.response.ok) setCategories(cats.data.categories || []);
+                } catch (e) {
+                  // ignore
+                }
+              }
               const itemCats = Array.isArray(payload.itemCategories) ? payload.itemCategories : (payload.itemCategories || []);
-              const currentCat = itemCats && itemCats.length > 0 ? itemCats[0].id : null;
+              const currentCat = (typeof initialCategoryId !== 'undefined' && initialCategoryId !== null)
+                ? initialCategoryId
+                : (itemCats && itemCats.length > 0 ? itemCats[0].id : null);
+              console.debug('[ItemEditDrawer] promote consolidated computed currentCat', { currentCat, initialCategoryId, itemCats });
               setInitialCategory(currentCat);
               setSelectedCategory(currentCat);
+              if (currentCat && (!payload.categories || !payload.categories.find((c: any) => c.id === currentCat))) {
+                const missingName = (itemCats && itemCats.find((c: any) => c.id === currentCat)?.name) || 'Uncategorized';
+                setCategories(prev => {
+                  if (prev.find(p => p.id === currentCat)) return prev;
+                  return [...prev, { id: currentCat, name: missingName }];
+                });
+              }
               setFamilyMembers(payload.members || []);
               const itemMems = Array.isArray(payload.itemMembers) ? payload.itemMembers : (payload.itemMembers || []);
-              const assigned = itemMems.map((m: any) => m.id);
+              const payloadAssigned = itemMems.map((m: any) => m.id);
+              const assigned = Array.isArray(initialMembersProp) && initialMembersProp.length > 0 ? initialMembersProp : payloadAssigned;
               setInitialMembers(assigned);
               setSelectedMembers(assigned.slice());
-              const wholeAssigned = !!payload.wholeAssigned;
+              const wholeAssigned = typeof initialWholeProp !== 'undefined' ? !!initialWholeProp : !!payload.wholeAssigned;
               setInitialWhole(wholeAssigned);
               setSelectedWhole(wholeAssigned);
             } else {
@@ -126,16 +178,37 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
                   if (pli) {
                     // initialize name and assigned members
                     setName(pli.display_name || pli.master_name || '');
-                    const assigned = (pli.members || []).map((m: any) => m.id).filter(Boolean);
-                    setInitialMembers(assigned);
-                    setSelectedMembers(assigned.slice());
-                    setInitialWhole(!!pli.whole_family);
-                    setSelectedWhole(!!pli.whole_family);
+            const assignedFromPli = (pli.members || []).map((m: any) => m.id).filter(Boolean);
+              const assigned = Array.isArray(initialMembersProp) && initialMembersProp.length > 0 ? initialMembersProp : assignedFromPli;
+              setInitialMembers(assigned);
+              setSelectedMembers(assigned.slice());
+              const wholeAssigned = typeof initialWholeProp !== 'undefined' ? !!initialWholeProp : !!pli.whole_family;
+              setInitialWhole(wholeAssigned);
+              setSelectedWhole(wholeAssigned);
                   }
                 }
-                // initial categories empty for one-off until promoted
-                setInitialCategory(null);
-                setSelectedCategory(null);
+                // If the packing-list item includes a category, prefer that (caller-provided initialCategoryId wins)
+                if (listRes.response.ok) {
+                  const items = listRes.data.items || [];
+                  const pli = items.find((x: any) => x.id === pctx.packingListItemId || x.id === pctx.packingListItemId);
+                  const pliCatId = pli && pli.category ? pli.category.id : null;
+                  const currentCat = typeof initialCategoryId !== 'undefined' && initialCategoryId !== null
+                    ? initialCategoryId
+                    : pliCatId;
+                  console.debug('[ItemEditDrawer] promote fallback computed currentCat from pli', { currentCat, initialCategoryId, pliCatId, pli });
+                  setInitialCategory(currentCat);
+                  setSelectedCategory(currentCat);
+                  if (currentCat) {
+                    setCategories(prev => {
+                      if (prev.find(p => p.id === currentCat)) return prev;
+                      const missingName = (pli && pli.category && pli.category.name) ? pli.category.name : 'Uncategorized';
+                      return [...prev, { id: currentCat, name: missingName }];
+                    });
+                  }
+                } else {
+                  setInitialCategory(null);
+                  setSelectedCategory(null);
+                }
 
                 // honor defaultAssignedMemberId if provided
                 if (!masterItemId) {
@@ -174,11 +247,24 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
               // ignore
             }
 
-            // New item initial selection: prefer caller-provided initialCategoryId, otherwise empty
+            // New item initial selection: prefer caller-provided initialCategoryId and initialMembers/initialWhole, otherwise empty
             const preselect = typeof initialCategoryId !== 'undefined' ? initialCategoryId : null;
+            console.debug('[ItemEditDrawer] new item preselect category', { preselect, initialCategoryId });
             setInitialCategory(preselect);
             setSelectedCategory(preselect);
-            setInitialMembers([]);
+            if (preselect) {
+              setCategories(prev => {
+                if (prev.find(p => p.id === preselect)) return prev;
+                // We don't have a name here; show a placeholder so the radio can show a selected state.
+                return [...prev, { id: preselect, name: 'Category' }];
+              });
+            }
+            const assigned = Array.isArray(initialMembersProp) && initialMembersProp.length > 0 ? initialMembersProp : [];
+            setInitialMembers(assigned);
+            setSelectedMembers(assigned.slice());
+            const wholeAssigned = typeof initialWholeProp !== 'undefined' ? !!initialWholeProp : false;
+            setInitialWhole(wholeAssigned);
+            setSelectedWhole(wholeAssigned);
             // If caller explicitly passed `null` as the defaultAssignedMemberId,
             // that indicates "open for Whole Family" (PackingListsSideBySide uses
             // onOpenAddDrawer(null) for the Whole Family add button). In that
@@ -205,11 +291,24 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
         setLoading(false);
       }
     })();
-  }, [opened, masterItemId, familyId, defaultAssignedMemberId, promoteContext]);
+  }, [opened, masterItemId, familyId, defaultAssignedMemberId, promoteContext, initialMembersProp, initialWholeProp, initialCategoryId]);
 
   const save = async () => {
     setSaving(true);
     try {
+      const trimmedName = (name || '').trim();
+      // Validation: name must be non-empty after trimming
+      if (!trimmedName) {
+        showNotification({ title: 'Validation', message: 'Item name cannot be empty.', color: 'red' });
+        setSaving(false);
+        return;
+      }
+      // Validation: category must be selected
+      if (!selectedCategory) {
+        showNotification({ title: 'Validation', message: 'Select a category before saving.', color: 'red' });
+        setSaving(false);
+        return;
+      }
       let createdId: string | undefined;
       let updatedName: string | undefined;
   const effectiveSelected = selectedCategory ? [selectedCategory] : [];
@@ -225,10 +324,10 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
         // Determine isOneOff: when checkbox shown, unchecked => isOneOff=1, checked => isOneOff=0
         // When checkbox is hidden (management page), isOneOff should always be 0
         const isOneOffValue = showIsOneOffCheckbox ? (alsoAddForFutureTrips ? 0 : 1) : 0;
-        const createRes = await createItem(familyId, name || 'New Item', isOneOffValue);
+  const createRes = await createItem(familyId, trimmedName || 'New Item', isOneOffValue);
         if (!createRes.response.ok) throw new Error('Failed to create item');
         createdId = createRes.data?.item?.id;
-        updatedName = createRes.data?.item?.name || name;
+  updatedName = createRes.data?.item?.name || trimmedName;
         if (!createdId) throw new Error('Create response missing id');
 
   // Assign a single category (if present) and members
@@ -247,9 +346,9 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
 
       // Existing item update
       if (!masterItemId) throw new Error('masterItemId missing');
-      if (showNameField && name && initialName !== name) {
-        const uRes = await updateItem(masterItemId, name);
-        if (uRes.response.ok) updatedName = uRes.data?.item?.name || name;
+      if (trimmedName && initialName?.trim() !== trimmedName) {
+        const uRes = await updateItem(masterItemId, trimmedName);
+        if (uRes.response.ok) updatedName = uRes.data?.item?.name || trimmedName;
       }
 
   const effectiveInitial = initialCategory ? [initialCategory] : [];
@@ -315,11 +414,9 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
         {loading ? (<div style={{ padding: 16 }}>Loading item details...</div>) : null}
 
         {/* Name - full width row */}
-        {showNameField ? (
-          <div style={{ marginTop: 12 }}>
-            <TextInput label="Name" value={name} onChange={(e) => setName(e.currentTarget.value)} />
-          </div>
-        ) : null}
+        <div style={{ marginTop: 12 }}>
+          <TextInput label="Name" value={name} onChange={(e) => setName(e.currentTarget.value)} />
+        </div>
 
         {/* Two column section: Categories (left) | Members/Assignments (right) */}
         <div style={{ display: 'flex', gap: 12, marginTop: 12, alignItems: 'stretch', flex: '1 1 auto' }}>
@@ -388,7 +485,16 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
                 <Button color="red" variant="light" onClick={handleDelete} disabled={saving}>Delete</Button>
               ) : null}
               <Button variant="default" onClick={onClose}>Cancel</Button>
-                      <Button onClick={save} loading={saving} disabled={!masterItemId && !selectedWhole && selectedMembers.length === 0}>Save</Button>
+                      <Button onClick={save} loading={saving}
+                        disabled={
+                          // name must be non-empty after trimming
+                          !( (name || '').trim() ) ||
+                          // category must be selected
+                          !selectedCategory ||
+                          // when creating require assignments (whole or members)
+                          (!masterItemId && !selectedWhole && selectedMembers.length === 0)
+                        }
+                      >Save</Button>
             </Group>
           </Group>
         </div>

@@ -126,9 +126,16 @@ export default function ManagePackingLists() {
         setEditItems([]);
         return;
       }
-      // server returns items with members, categories (array) and template_ids
+  // server returns items with members, category (single object) and template_ids
       const listItems = res.data.items || [];
-      setEditItems(listItems);
+      // Normalize server-provided packing-list rows to include camelCase aliases
+      // so existing UI code can rely on itemId and oneOff properties.
+      const normalized = (listItems || []).map((it: any) => ({
+        ...it,
+        itemId: it.item_id,
+        oneOff: !!it.master_is_one_off,
+      }));
+      setEditItems(normalized);
   // load templates assigned to this packing list (if server provides them)
   const assigned = Array.isArray(res.data.template_ids) ? res.data.template_ids : (Array.isArray(res.data.templates) ? res.data.templates.map((t: any) => t.id) : []);
   setEditAssignedTemplates(assigned || []);
@@ -254,7 +261,7 @@ export default function ManagePackingLists() {
               <div style={{ width: '100%', background: '#f5f5f7', padding: 12, borderRadius: 6, display: 'grid', gridTemplateColumns: '1fr auto 1fr', alignItems: 'center', gap: 12, marginBottom: 12 }}>
                 <div />
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12, justifyContent: 'center' }}>
-                  <Button onClick={() => setShowTemplateAssignDrawer(true)} size="xs">Manage Template Assignments</Button>
+                  <Button onClick={() => setShowTemplateAssignDrawer(true)} size="xs">Manage Item Group Assignments</Button>
                   <Button onClick={openAddItemsPane} disabled={editLoading} size="xs">Add Items</Button>
                 </div>
                 <div />
@@ -272,11 +279,10 @@ export default function ManagePackingLists() {
                   {editItems.length === 0 ? (
                 <Text c="dimmed">No items in this list</Text>
               ) : (
-                // group items by first category name (fall back to 'Uncategorized')
                 (() => {
                   const groups: Record<string, any[]> = {};
                   for (const it of editItems) {
-                    const catName = (it.categories && it.categories.length > 0) ? (it.categories[0].name || 'Uncategorized') : 'Uncategorized';
+                    const catName = it.category && it.category.name ? it.category.name : 'Uncategorized';
                     const cat = it.item_id === null ? 'Uncategorized' : catName;
                     if (!groups[cat]) groups[cat] = [];
                     groups[cat].push(it);
@@ -303,7 +309,7 @@ export default function ManagePackingLists() {
                                 </div>
                                         {it.oneOff ? <Badge color="gray" size="xs">One-off</Badge> : null}
                                         {isFromTemplate ? (
-                                          <Tooltip label="From template" withArrow>
+                                          <Tooltip label="From item group" withArrow>
                                             <ActionIcon size="xs" variant="transparent">
                                                 <IconLayersOff size={14} />
                                               </ActionIcon>
@@ -351,15 +357,15 @@ export default function ManagePackingLists() {
       </Drawer>
 
       {/* Nested Drawer for managing template assignments */}
-      <Drawer opened={showTemplateAssignDrawer} onClose={() => setShowTemplateAssignDrawer(false)} title="Manage Template Assignments" position="right" size={isMobile ? '80%' : 420} padding="md" zIndex={2200}>
+      <Drawer opened={showTemplateAssignDrawer} onClose={() => setShowTemplateAssignDrawer(false)} title="Manage Item Group Assignments" position="right" size={isMobile ? '80%' : 420} padding="md" zIndex={2200}>
         <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
           <div style={{ marginBottom: 8 }}>
-            <Text mb="xs">Assigned templates</Text>
+            <Text mb="xs">Assigned item groups</Text>
             <MultiSelect
               data={templates.map(t => ({ value: t.id, label: t.name }))}
               value={editAssignedTemplates}
               onChange={(vals) => setEditAssignedTemplates(vals)}
-              placeholder="Select templates to assign..."
+              placeholder="Select item groups to assign..."
               searchable
               styles={{ dropdown: { zIndex: 2300 } }}
               style={{ width: '100%' }}
@@ -376,18 +382,18 @@ export default function ManagePackingLists() {
                 const removed = serverTemplateIds.filter(tid => !editAssignedTemplates.includes(tid));
                 let removeItemsForRemovedTemplates = false;
                 if (removed.length > 0) {
-                  removeItemsForRemovedTemplates = confirm('You removed one or more templates. Remove items that were added solely because of those templates?');
+                  removeItemsForRemovedTemplates = confirm('You removed one or more item groups. Remove items that were added solely because of those item groups?');
                 }
                 const payload: any = { templateIds: editAssignedTemplates };
                 if (removeItemsForRemovedTemplates) payload.removeItemsForRemovedTemplates = true;
                 const res = await updatePackingList(editListId, payload);
                 if (res.response.ok) {
-                  showNotification({ title: 'Saved', message: 'Template assignments saved', color: 'green' });
+                  showNotification({ title: 'Saved', message: 'Item group assignments saved', color: 'green' });
                   await reload();
                   if (editListId) await openEditFor({ id: editListId, name: editListName });
                   setShowTemplateAssignDrawer(false);
                 } else {
-                  showNotification({ title: 'Failed', message: 'Could not save template assignments', color: 'red' });
+                  showNotification({ title: 'Failed', message: 'Could not save item group assignments', color: 'red' });
                 }
               } catch (err) {
                 console.error('Failed to save template assignments', err);
@@ -483,9 +489,14 @@ export default function ManagePackingLists() {
         initialName={editTargetItem?.name}
         familyId={familyId}
   // Show the name input when creating a new item (editTargetItem exists and has no itemId)
-  showNameField={!!(editTargetItem && !editTargetItem.itemId)}
+  // The name field is now always shown by the ItemEditDrawer.
   defaultAssignedMemberId={itemDrawerDefaultMember}
   zIndex={3000}
+  // Preselect category when editing a packing-list item (use category if present)
+  initialCategoryId={editTargetItem && editTargetItem.category ? editTargetItem.category.id : undefined}
+  // Preselect member assignments and whole-family flag from the packing-list item
+  initialMembers={editTargetItem && Array.isArray(editTargetItem.members) ? editTargetItem.members.map((m: any) => m.id) : undefined}
+  initialWhole={!!(editTargetItem && editTargetItem.whole_family)}
         onSaved={async (payload) => {
           // When a new master item is created from the add-items pane, refresh the available items list so it can be added
           try {
