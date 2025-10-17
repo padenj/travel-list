@@ -1,4 +1,5 @@
 [
   "20251008_fix_packing_list_item_checks_fk.js",
-  "20251016_migrate_item_categories_to_items_categoryId.js"
+  "20251016_01_migrate_item_categories_to_items_categoryId.js",
+  "20251016_02_drop_item_categories_table.js"
 ]

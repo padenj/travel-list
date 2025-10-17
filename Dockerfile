@@ -55,6 +55,8 @@ RUN npm ci --omit=dev --no-audit --no-fund
 # Copy built server and client
 COPY --from=server-build /app/dist ./dist
 COPY --from=client-build /app/client/dist ./client/dist
+# Ensure migrations are available at runtime so the server can run them on startup
+COPY --from=server-build /app/server/migrations ./server/migrations
 
 # Runtime port should be configurable via PORT env var; default to 3000 per release requirements
 ENV PORT=3000

@@ -122,7 +122,32 @@ if (isMain) {
       const migrations = files.map(f => ({ name: f, path: path.join(migrationsDir, f) }));
 
       if (!fs.existsSync(storagePath)) {
-        fs.writeFileSync(storagePath, JSON.stringify([]), 'utf8');
+        // If migrations storage doesn't exist (fresh install), mark migrations
+        // up to the latest migration date as already applied. This avoids
+        // re-applying older migrations on a fresh schema that already includes
+        // those changes.
+        let initialExecuted: string[] = [];
+        try {
+          if (migrations && migrations.length > 0) {
+            // Extract date prefix (YYYYMMDD) from filenames and determine the
+            // maximum date present among migration files.
+            const dates = migrations.map(m => {
+              const match = m.name.match(/^(\d{8})/);
+              return match ? match[1] : null;
+            }).filter(Boolean) as string[];
+            const maxDate = dates.reduce((a, b) => (a > b ? a : b), dates[0]);
+            // Mark any migration whose date prefix is <= maxDate as executed.
+            initialExecuted = migrations.filter(m => {
+              const match = m.name.match(/^(\d{8})/);
+              if (!match) return false;
+              return match[1] <= maxDate;
+            }).map(m => m.name);
+          }
+        } catch (e) {
+          console.warn('Could not pre-populate migrations storage; defaulting to empty list', e);
+          initialExecuted = [];
+        }
+        fs.writeFileSync(storagePath, JSON.stringify(initialExecuted, null, 2), 'utf8');
       }
 
       let executed: string[] = [];

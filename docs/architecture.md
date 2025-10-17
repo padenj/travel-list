@@ -59,11 +59,7 @@ This application is a Progressive Web App (PWA) for managing travel packing chec
 - There is one `active_packing_list_id` stored on the `families` table. Changing the active list updates the dashboard for all family members.
 
 ### Relationship Tables
-- **item_categories**: Many-to-many items ↔ categories
-- **item_members**: Many-to-many items ↔ family members (assignments to specific members or whole family)
-- **template_categories**: Template composition via categories
-- **template_items**: Template composition via individual items
-- **packing_list_items**: Packing list contents with check status (per-item checked state, added_during_packing flag)
+**item_members**: Many-to-many items ↔ family members (assignments to specific members or whole family)
 
 ### Technical Features
 - **Primary Keys**: UUID strings for all entities
