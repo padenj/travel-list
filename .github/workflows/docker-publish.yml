@@ -201,6 +201,8 @@ jobs:
         if: ${{ steps.meta.outputs.NEW_TAG != '' && github.event_name != 'pull_request' }}
         uses: actions/create-release@v1
         id: create_release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: ${{ steps.meta.outputs.NEW_TAG }}
           release_name: Release ${{ steps.meta.outputs.NEW_TAG }}
