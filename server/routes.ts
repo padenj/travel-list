@@ -452,10 +452,8 @@ router.post('/families/:familyId/packing-lists', authMiddleware, familyAccessMid
 router.get('/packing-lists/:id', authMiddleware, async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
-    console.log('GET packing-lists request for listId:', id);
     const list = await packingListRepo.findById(id);
     if (!list) return res.status(404).json({ error: 'Packing list not found' });
-    console.log('Found packing list:', { id: list.id, name: list.name });
     // family access check
     if (req.user?.role !== 'SystemAdmin' && req.user?.familyId !== list.family_id) return res.status(403).json({ error: 'Forbidden' });
   // return enriched items with member assignments to reduce client chatter
@@ -465,13 +463,7 @@ router.get('/packing-lists/:id', authMiddleware, async (req: Request, res: Respo
   // Remove any per-item `checked` column (it can be ambiguous) so the
   // canonical per-user checked state lives only in `checks`.
   const sanitizedItems = items.map(({ checked, ...rest }: any) => rest);
-    console.log('GET packing-lists returning:', { 
-      listId: id, 
-      listName: list.name, 
-      itemCount: items.length, 
-      checkCount: checks.length,
-      checks: checks.map(c => ({ packing_list_item_id: c.packing_list_item_id, member_id: c.member_id, checked: c.checked }))
-    });
+    // Intentionally not logging list contents to avoid noisy server logs in production
   // Also include any template assignments for this packing list so the UI can display them
   const templateIds = await packingListRepo.getTemplatesForPackingList(id);
   return res.json({ list, items: sanitizedItems, checks, not_needed_rows: notNeededRows, template_ids: templateIds });
