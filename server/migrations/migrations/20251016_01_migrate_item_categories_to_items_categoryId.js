@@ -1,11 +1,12 @@
 export default {
-  name: '20251016_migrate_item_categories_to_items_categoryId.js',
+  name: '20251016_01_migrate_item_categories_to_items_categoryId.js',
   up: async ({ db }) => {
+    // If the legacy table does not exist, this migration is a no-op.
+    const tbl = await db.get(`SELECT name FROM sqlite_master WHERE type='table' AND name='item_categories'`);
+    if (!tbl) return;
     // Migrate existing item_categories join rows into items.categoryId (pick the first category per item)
     await db.exec('PRAGMA foreign_keys = OFF');
     try {
-      // For each item that has at least one entry in item_categories and no categoryId set on items,
-      // set items.categoryId to one of the categories (the first by rowid).
       const rows = await db.all(`SELECT item_id, category_id FROM item_categories ORDER BY rowid`);
       const seen = new Set();
       for (const r of rows) {
