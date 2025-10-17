@@ -33,9 +33,10 @@ export interface ItemEditDrawerProps {
   // When present, indicates we're editing a packing-list one-off item and can promote it to a master
   promoteContext?: { listId: string; packingListItemId: string } | null;
   zIndex?: number;
+  initialCategoryId?: string | null; // pre-select a category when creating a new item
 }
 
-export default function ItemEditDrawer({ opened, onClose, masterItemId, initialName, familyId, showNameField = false, defaultAssignedMemberId, onSaved, promoteContext, showIsOneOffCheckbox = false, zIndex }: ItemEditDrawerProps) {
+export default function ItemEditDrawer({ opened, onClose, masterItemId, initialName, familyId, showNameField = false, defaultAssignedMemberId, onSaved, promoteContext, showIsOneOffCheckbox = false, zIndex, initialCategoryId }: ItemEditDrawerProps) {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [categories, setCategories] = useState<any[]>([]);
@@ -173,9 +174,10 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
               // ignore
             }
 
-            // New item initial selection is empty (single category), except possibly a caller-provided default
-            setInitialCategory(null);
-            setSelectedCategory(null);
+            // New item initial selection: prefer caller-provided initialCategoryId, otherwise empty
+            const preselect = typeof initialCategoryId !== 'undefined' ? initialCategoryId : null;
+            setInitialCategory(preselect);
+            setSelectedCategory(preselect);
             setInitialMembers([]);
             // If caller explicitly passed `null` as the defaultAssignedMemberId,
             // that indicates "open for Whole Family" (PackingListsSideBySide uses

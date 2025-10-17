@@ -332,7 +332,7 @@ export default function CategoryManagementPage(): React.ReactElement {
               {categories.map(cat => (
                 <Tabs.Panel key={cat.id} value={cat.id}>
                   <Card withBorder mt="md">
-                    <Group mb="md">
+                    <Group mb="md" align="center" style={{ justifyContent: 'space-between' }}>
                       {editId === cat.id ? (
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%' }}>
                           <TextInput
@@ -349,21 +349,24 @@ export default function CategoryManagementPage(): React.ReactElement {
                           </ActionIcon>
                         </div>
                       ) : (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                           <Title order={4} style={{ margin: 0 }}>{cat.name}</Title>
                           <ActionIcon color="blue" variant="light" onClick={() => handleEdit(cat.id, cat.name)} title="Edit category name">
                             <IconEdit size={16} />
                           </ActionIcon>
                         </div>
                       )}
+                      <div>
+                        <Button size="xs" leftSection={<IconPlus size={14} />} onClick={() => {
+                          // Open ItemEditDrawer in create mode with category pre-selected
+                          setSelectedTab(cat.id);
+                          setShowAddPaneForCategory({ open: false, categoryId: cat.id });
+                          setEditMasterItemId(null);
+                          setShowEditDrawer(true);
+                        }}>Add</Button>
+                      </div>
                     </Group>
-                    <Group mb="sm" align="center">
-                      <Button size="sm" leftSection={<IconPlus size={14} />} onClick={() => {
-                        setSelectedTab(cat.id);
-                        setShowAddPaneForCategory({ open: true, categoryId: cat.id });
-                      }}>Add Item</Button>
-                      <Title order={5} style={{ margin: 0 }}>Items in this category</Title>
-                    </Group>
+                    <Title order={5} mb="sm">Items in this category</Title>
                     <List mb="md">
                       {categoryItems[cat.id]?.length > 0 ? (
                         categoryItems[cat.id].map(item => (
@@ -401,17 +404,7 @@ export default function CategoryManagementPage(): React.ReactElement {
                 </Tabs.Panel>
               ))}
             </Tabs>
-            <AddItemsDrawer
-              opened={showAddPaneForCategory.open}
-              onClose={() => setShowAddPaneForCategory({ open: false })}
-              familyId={familyId}
-              excludedItemIds={(showAddPaneForCategory.categoryId && categoryItems[showAddPaneForCategory.categoryId] ? categoryItems[showAddPaneForCategory.categoryId].map(i => i.id) : [])}
-              showAssignedItemsToggle={true}
-              targetCategoryId={showAddPaneForCategory.categoryId}
-              onApply={handleAddItemsToCategory}
-              showIsOneOffCheckbox={false}
-              title="Add items to category"
-            />
+            {/* AddItemsDrawer removed: Add now opens ItemEditDrawer in create mode with category pre-selected */}
             <ItemEditDrawer
               opened={showEditDrawer}
               onClose={() => { setShowEditDrawer(false); setEditMasterItemId(null); }}
@@ -419,6 +412,7 @@ export default function CategoryManagementPage(): React.ReactElement {
               initialName={editMasterItemId ? (items.find(i => i.id === editMasterItemId)?.name) : undefined}
               familyId={familyId}
               showNameField={true}
+              initialCategoryId={showAddPaneForCategory.open ? showAddPaneForCategory.categoryId : undefined}
               onSaved={async () => {
                 await fetchCategoryItems();
                 setShowEditDrawer(false);
