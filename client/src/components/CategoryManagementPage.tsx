@@ -284,9 +284,11 @@ export default function CategoryManagementPage(): React.ReactElement {
 
   return (
     <Card withBorder>
-      <Group align="center" mb="md" style={{ gap: 12 }}>
+      <Group align="center" mb="md" style={{ width: '100%' }} justify="space-between">
         <Title order={3} style={{ margin: 0 }}>Manage Categories</Title>
-        <Button size="xs" onClick={() => setSortMode(true)}>Sort categories</Button>
+        <div>
+          <Button size="xs" onClick={() => setSortMode(true)}>Sort categories</Button>
+        </div>
       </Group>
       <Stack>
         <Group>
@@ -355,7 +357,13 @@ export default function CategoryManagementPage(): React.ReactElement {
                         </div>
                       )}
                     </Group>
-                    <Title order={5} mb="sm">Items in this category</Title>
+                    <Group mb="sm" align="center">
+                      <Button size="sm" leftSection={<IconPlus size={14} />} onClick={() => {
+                        setSelectedTab(cat.id);
+                        setShowAddPaneForCategory({ open: true, categoryId: cat.id });
+                      }}>Add Item</Button>
+                      <Title order={5} style={{ margin: 0 }}>Items in this category</Title>
+                    </Group>
                     <List mb="md">
                       {categoryItems[cat.id]?.length > 0 ? (
                         categoryItems[cat.id].map(item => (
@@ -386,17 +394,8 @@ export default function CategoryManagementPage(): React.ReactElement {
                         <List.Item><Text c="dimmed">No items in this category</Text></List.Item>
                       )}
                     </List>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <Button leftSection={<IconPlus size={16} />} onClick={() => {
-                        // open AddItemsDrawer for this category
-                        setSelectedTab(cat.id);
-                        setShowAddPaneForCategory({ open: true, categoryId: cat.id });
-                      }}>Add Item</Button>
-                      <div>
-                        {/* ConfirmDelete provides a two-step delete control (trash -> Delete? -> confirm/cancel) */}
-                        {/* Lazy-load to keep bundle small if desired; imported directly here for simplicity */}
-                        <ConfirmDelete onConfirm={() => handleDelete(cat.id)} title="Delete category" />
-                      </div>
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
+                      <ConfirmDelete onConfirm={() => handleDelete(cat.id)} title="Delete category" />
                     </div>
                   </Card>
                 </Tabs.Panel>
