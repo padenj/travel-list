@@ -360,7 +360,7 @@ export default function CategoryManagementPage(): React.ReactElement {
                         <Button size="xs" leftSection={<IconPlus size={14} />} onClick={() => {
                           // Open ItemEditDrawer in create mode with category pre-selected
                           setSelectedTab(cat.id);
-                          setShowAddPaneForCategory({ open: false, categoryId: cat.id });
+                          setShowAddPaneForCategory({ open: true, categoryId: cat.id });
                           setEditMasterItemId(null);
                           setShowEditDrawer(true);
                         }}>Add</Button>
