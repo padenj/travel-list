@@ -213,8 +213,13 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
       let createdId: string | undefined;
       let updatedName: string | undefined;
   const effectiveSelected = selectedCategory ? [selectedCategory] : [];
-
       if (!masterItemId) {
+        // Validation: when creating a new item, require either Whole Family or at least one member selected
+        if (!selectedWhole && (!selectedMembers || selectedMembers.length === 0)) {
+          showNotification({ title: 'Validation', message: 'Select at least one member or assign to the whole family before saving.', color: 'red' });
+          setSaving(false);
+          return;
+        }
         // Create a new master item
         if (!familyId) throw new Error('Family not available');
         // Determine isOneOff: when checkbox shown, unchecked => isOneOff=1, checked => isOneOff=0
@@ -383,7 +388,7 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
                 <Button color="red" variant="light" onClick={handleDelete} disabled={saving}>Delete</Button>
               ) : null}
               <Button variant="default" onClick={onClose}>Cancel</Button>
-              <Button onClick={save} loading={saving}>Save</Button>
+                      <Button onClick={save} loading={saving} disabled={!masterItemId && !selectedWhole && selectedMembers.length === 0}>Save</Button>
             </Group>
           </Group>
         </div>
