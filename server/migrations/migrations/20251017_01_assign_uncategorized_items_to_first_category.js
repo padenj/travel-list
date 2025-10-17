@@ -8,7 +8,13 @@ export default {
     // a 'General' category for that family.
     await db.exec('PRAGMA foreign_keys = OFF');
     try {
-      const { v4: uuidv4 } = require('uuid');
+      // runtime-safe id generator: prefer crypto.randomUUID, fall back to timestamp+random
+      const uuidv4 = () => {
+        try {
+          if (typeof globalThis !== 'undefined' && globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function') return globalThis.crypto.randomUUID();
+        } catch (e) {}
+        return 'id-' + Date.now().toString(36) + '-' + Math.floor(Math.random() * 1e9).toString(36);
+      };
       const now = new Date().toISOString();
 
       const globalFirst = await db.get(`SELECT id FROM categories WHERE deleted_at IS NULL ORDER BY position IS NULL, position ASC, rowid ASC LIMIT 1`);
