@@ -381,6 +381,9 @@ export default function CategoryManagementPage(): React.ReactElement {
                           @media (min-width: 1024px) {
                             .tl-category-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
                           }
+                          @media (min-width: 1280px) {
+                            .tl-category-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+                          }
                           .tl-category-item {
                             display: flex;
                             align-items: center;
