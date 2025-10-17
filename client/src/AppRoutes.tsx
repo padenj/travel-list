@@ -12,7 +12,6 @@ import SettingsSecurity from './components/SettingsSecurity';
 import SplitRailLayout from './components/SplitRailLayout';
 import PackingListPage from './components/PackingListPage';
 import CategoryManagementPage from './components/CategoryManagementPage';
-import ItemManagementPage from './components/ItemManagementPage';
 import TemplateManagerPage from './components/TemplateManagerPage';
 import NavigationPrototypes from './components/NavigationPrototypes';
 
@@ -170,10 +169,7 @@ export default function AppRoutes(): React.ReactElement {
           path="/categories" 
           element={<CategoryManagementPage />} 
         />
-        <Route 
-          path="/items" 
-          element={<ItemManagementPage />} 
-        />
+        {/* Item management removed - handled via categories */}
           <Route 
             path="/templates" 
             element={<TemplateManagerPage />} 
