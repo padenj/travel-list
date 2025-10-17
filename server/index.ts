@@ -55,6 +55,21 @@ app.use('/api', routes);
 try {
   const frontendDist = path.resolve(process.cwd(), 'client', 'dist');
   if (fs.existsSync(frontendDist)) {
+    // Serve frontend static files. Add a short middleware to prevent HTML
+    // (index.html and other .html) from being cached by intermediate
+    // proxies / CDNs during development/testing. This ensures the SPA shell
+    // is always fetched from the origin and reduces stale nav/HTML issues.
+    app.use((req, res, next) => {
+      // Only apply to GET requests for HTML documents
+      if (req.method === 'GET' && (req.path === '/' || req.path.endsWith('.html'))) {
+        // Prevent caching at the edge and in browsers
+        res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+        res.setHeader('Pragma', 'no-cache');
+        res.setHeader('Expires', '0');
+      }
+      next();
+    });
+
     app.use(express.static(frontendDist));
     // SPA fallback — ensure API routes remain under /api
     app.get('*', (req: Request, res: Response, next) => {
