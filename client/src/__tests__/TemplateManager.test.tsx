@@ -149,12 +149,12 @@ if (!hasTestingLibs) {
       await waitFor(() => expect(api.getTemplates).toHaveBeenCalled());
 
   // Click the 'New Template' button
-  const newBtn = screen.getByText(/New Template/i);
+  const newBtn = screen.getByText(/New Item Group/i);
   const user = await userEventLib.setup();
   await user.click(newBtn);
 
     // Fill the modal form - our TextInput mock uses placeholder equal to label
-  const nameInput = screen.getByPlaceholderText(/Template Name/i);
+  const nameInput = screen.getByPlaceholderText(/Item Group Name/i);
   await user.type(nameInput, 'New');
   const createBtn = screen.getByText(/Create/i);
   await user.click(createBtn);
