@@ -367,37 +367,59 @@ export default function CategoryManagementPage(): React.ReactElement {
                       </div>
                     </Group>
                     <Title order={5} mb="sm">Items in this category</Title>
-                    <List mb="md">
-                      {categoryItems[cat.id]?.length > 0 ? (
-                        categoryItems[cat.id].map(item => (
-                          <List.Item key={item.id}>
-                            <Group justify="space-between" align="center">
-                              <div>
+                    {categoryItems[cat.id]?.length > 0 ? (
+                      <div>
+                        <style>{`
+                          .tl-category-grid {
+                            display: grid;
+                            gap: 8px;
+                            grid-template-columns: repeat(1, 1fr);
+                          }
+                          @media (min-width: 640px) {
+                            .tl-category-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+                          }
+                          @media (min-width: 1024px) {
+                            .tl-category-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+                          }
+                          .tl-category-item {
+                            display: flex;
+                            align-items: center;
+                            justify-content: space-between;
+                            padding: 8px 10px;
+                            border-radius: 6px;
+                            border: 1px solid rgba(0,0,0,0.04);
+                            background: #fff;
+                          }
+                          .tl-category-item .tl-item-left { flex: 1 1 auto; margin-right: 12px; }
+                          .tl-category-item .tl-item-right { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; }
+                        `}</style>
+                        <div className="tl-category-grid">
+                          {categoryItems[cat.id].map((item) => (
+                            <div key={item.id} className="tl-category-item">
+                              <div className="tl-item-left">
                                 <Text>{item.name}</Text>
                                 {itemMembers[item.id] && itemMembers[item.id].length > 0 && (
-                                  <Text c="dimmed" size="sm">{itemMembers[item.id].map(m => m.name).join(', ')}</Text>
+                                  <Text c="dimmed" size="sm">{itemMembers[item.id].map((m: any) => m.name).join(', ')}</Text>
                                 )}
                               </div>
-                              <Group>
+                              <div className="tl-item-right">
                                 <ActionIcon color="blue" variant="light" onClick={() => { setEditMasterItemId(item.id); setShowEditDrawer(true); }} title="Edit item">
                                   <IconEdit size={16} />
                                 </ActionIcon>
-                                {/* Removed per-item delete action - items are managed via the Add Item flow or global item editor. */}
                                 {itemsInAllCategories.has(item.id) ? (
-                                  // show disabled trash icon for 'All' items to indicate non-removable status
                                   <ActionIcon color="gray" variant="light" title="Item in All categories; cannot remove individually" disabled>
                                     <IconTrash size={16} />
                                   </ActionIcon>
                                 ) : null}
-                              </Group>
-                            </Group>
-                          </List.Item>
-                        ))
-                      ) : (
-                        <List.Item><Text c="dimmed">No items in this category</Text></List.Item>
-                      )}
-                    </List>
-                    <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : (
+                      <Text c="dimmed">No items in this category</Text>
+                    )}
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginTop: 16 }}>
                       <ConfirmDelete onConfirm={() => handleDelete(cat.id)} title="Delete category" />
                     </div>
                   </Card>
