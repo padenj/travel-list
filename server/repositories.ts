@@ -605,9 +605,9 @@ export class ItemRepository {
 
   if (!items || items.length === 0) return [];
 
-  // Bulk-fetch categories for master items so we can return categories array for each packing-list row (items can belong to multiple categories)
+  // Bulk-fetch the single category for each master item (items are assigned to at most one category)
   const masterIds = Array.from(new Set(items.map((it: any) => it.master_id).filter(Boolean)));
-  let categoriesByMaster: Record<string, { id: string; name: string }[]> = {};
+  let categoriesByMaster: Record<string, { id: string; name: string } | null> = {};
   if (masterIds.length > 0) {
     // Fetch category for each master item via items.categoryId
     const catRows = await db.all(
@@ -615,8 +615,8 @@ export class ItemRepository {
       masterIds
     );
     for (const r of catRows) {
-      if (r.category_id) categoriesByMaster[r.item_id] = [{ id: r.category_id, name: r.category_name }];
-      else categoriesByMaster[r.item_id] = [];
+      if (r.category_id) categoriesByMaster[r.item_id] = { id: r.category_id, name: r.category_name };
+      else categoriesByMaster[r.item_id] = null;
     }
   }
 
@@ -663,8 +663,9 @@ export class ItemRepository {
     name: it.master_name || '',
     members: membersByPli[it.id] || [],
     whole_family: wholeSet.has(it.id),
-    // category (if any) from the master item
-  categories: it.master_id ? (categoriesByMaster[it.master_id] || []) : [],
+    // single category object (if any) from the master item. Previously we returned an
+    // array of categories per master; migrate callers to use `category`.
+  category: it.master_id ? (categoriesByMaster[it.master_id] || null) : null,
     // template provenance ids (may be empty)
     template_ids: templatesByPli[it.id] || []
   }));

@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Text, Stack, Checkbox, ScrollArea, ActionIcon } from '@mantine/core';
+import { getCategories } from '../api';
 import { IconHexagonMinus, IconRotateClockwise, IconPlus, IconEdit } from '@tabler/icons-react';
 import ItemEditDrawer from './ItemEditDrawer';
 
@@ -33,6 +34,33 @@ export function PackingListsSideBySide({ userLists, wholeFamilyItems, onCheckIte
   // placeholder for master id if we later wire promotion flow
   const [editInitialName, setEditInitialName] = useState<string | undefined>(undefined);
   const [promoteContext, setPromoteContext] = useState<{ listId: string; packingListItemId: string } | null>(null);
+  const [editInitialCategoryId, setEditInitialCategoryId] = useState<string | null | undefined>(undefined);
+  const [editInitialMembers, setEditInitialMembers] = useState<string[] | undefined>(undefined);
+  const [editInitialWhole, setEditInitialWhole] = useState<boolean | undefined>(undefined);
+  const [categories, setCategories] = useState<any[]>([]);
+
+  // Load family categories so we can render lists grouped by the configured category order
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      if (!familyId) return setCategories([]);
+      try {
+        const res = await getCategories(familyId);
+        if (mounted && res && res.response && res.response.ok) {
+          const cats = res.data.categories || [];
+          // If categories have a numeric `position` use it; otherwise keep server order
+          cats.sort((a: any, b: any) => {
+            if (typeof a.position === 'number' && typeof b.position === 'number') return a.position - b.position;
+            return 0;
+          });
+          setCategories(cats);
+        }
+      } catch (err) {
+        // ignore - grouping will just fall back to uncategorized
+      }
+    })();
+    return () => { mounted = false; };
+  }, [familyId]);
 
   useEffect(() => {
     let rafId: number | null = null;
@@ -73,13 +101,18 @@ export function PackingListsSideBySide({ userLists, wholeFamilyItems, onCheckIte
         masterItemId={null}
         initialName={editInitialName}
         familyId={familyId}
-        showNameField={true}
+        initialCategoryId={editInitialCategoryId}
+        initialMembers={editInitialMembers}
+        initialWhole={editInitialWhole}
         showIsOneOffCheckbox={true}
         promoteContext={promoteContext}
         zIndex={2000}
         onSaved={async () => {
           setShowEditDrawer(false);
           setEditInitialName(undefined);
+          setEditInitialCategoryId(undefined);
+          setEditInitialMembers(undefined);
+          setEditInitialWhole(undefined);
           setPromoteContext(null);
           if (onRefresh) onRefresh();
         }}
@@ -127,35 +160,40 @@ export function PackingListsSideBySide({ userLists, wholeFamilyItems, onCheckIte
                       </div>
                     ))}
 
+                    {/* One-off section for whole-family column */}
                     {oneOffActive.length > 0 ? (
-                        <div style={{ marginTop: 10 }}>
-                          <Text size="xs" fw={700}>One-off</Text>
-                          {oneOffActive.map(item => (
-                            <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0' }}>
-                              <Checkbox
-                                checked={item.checked}
-                                onChange={e => onCheckItem(null, item.id, e.target.checked)}
-                                styles={{ body: { padding: 0 } }}
-                                aria-label={item.name}
-                              />
-                              <ItemLabel text={item.name} />
-                              {onToggleNotNeeded ? (
-                                <ActionIcon size="sm" variant="subtle" onClick={() => onToggleNotNeeded(null, item.id)} aria-label="Not needed">
-                                  <IconHexagonMinus size={14} />
-                                </ActionIcon>
-                              ) : null}
-                              {/* Edit for one-off items: open edit drawer in promote mode */}
-                              <ActionIcon size="sm" variant="light" onClick={() => {
-                                setPromoteContext({ listId: activeListId || '', packingListItemId: item.id });
-                                setEditInitialName(item.display_name || item.name);
-                                setShowEditDrawer(true);
-                              }} aria-label="Edit one-off">
-                                <IconEdit size={14} />
+                      <div style={{ marginTop: 10 }}>
+                        <Text size="xs" fw={700}>One-off</Text>
+                        {oneOffActive.map(item => (
+                          <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0' }}>
+                            <Checkbox
+                              checked={item.checked}
+                              onChange={e => onCheckItem(null, item.id, e.target.checked)}
+                              styles={{ body: { padding: 0 } }}
+                              aria-label={item.name}
+                            />
+                            <ItemLabel text={item.name} />
+                            {onToggleNotNeeded ? (
+                              <ActionIcon size="sm" variant="subtle" onClick={() => onToggleNotNeeded(null, item.id)} aria-label="Not needed">
+                                <IconHexagonMinus size={14} />
                               </ActionIcon>
-                            </div>
-                          ))}
-                        </div>
-                      ) : null}
+                            ) : null}
+                            {/* Edit for one-off items: open edit drawer in promote mode */}
+                            <ActionIcon size="sm" variant="light" onClick={() => {
+                              console.debug('[PackingListsSideBySide] opening edit (whole) for item', { item, categoryId: (item as any).category ? (item as any).category.id : undefined, members: (item as any).members ? (item as any).members.map((m: any) => m.id) : undefined, whole_family: (item as any).whole_family });
+                              setPromoteContext({ listId: activeListId || '', packingListItemId: item.id });
+                              setEditInitialName(item.display_name || item.name);
+                              setEditInitialCategoryId((item as any).category ? (item as any).category.id : undefined);
+                              setEditInitialMembers((item as any).members ? (item as any).members.map((m: any) => m.id) : undefined);
+                              setEditInitialWhole(!!(item as any).whole_family);
+                              setShowEditDrawer(true);
+                            }} aria-label="Edit one-off">
+                              <IconEdit size={14} />
+                            </ActionIcon>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
 
                       {(dismissed.length > 0 || oneOffDismissed.length > 0) ? (
                         <div style={{ marginTop: 8 }}>
@@ -214,24 +252,73 @@ export function PackingListsSideBySide({ userLists, wholeFamilyItems, onCheckIte
                   return (
                     <div>
                       {/* Regular items first */}
-                      {active.map(item => (
-                        <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0' }}>
-                          <Checkbox
-                            checked={item.checked}
-                            onChange={e => onCheckItem(list.userId, item.id, e.target.checked)}
-                            styles={{ body: { padding: 0 } }}
-                            aria-label={item.display_name || item.name}
-                          />
-                          <ItemLabel text={item.display_name || item.name} />
-                          {onToggleNotNeeded ? (
-                            <ActionIcon size="sm" variant="subtle" onClick={() => onToggleNotNeeded(list.userId, item.id)} aria-label="Not needed">
-                              <IconHexagonMinus size={14} />
-                            </ActionIcon>
-                          ) : null}
-                        </div>
-                      ))}
+                      {/* Group regular (non-one-off) active items by category in configured order */}
+                      {(() => {
+                        // Build grouped map by category id (null for uncategorized)
+                        const grouped = new Map<string | null, any[]>();
+                        for (const it of active) {
+                          const cid = (it as any).category && (it as any).category.id ? (it as any).category.id : null;
+                          if (!grouped.has(cid)) grouped.set(cid, []);
+                          grouped.get(cid)!.push(it);
+                        }
+                        const parts: any[] = [];
+                        // Render categories in configured order
+                        for (const cat of categories) {
+                          const itemsForCat = grouped.get(cat.id) || [];
+                          if (itemsForCat.length === 0) continue;
+                          parts.push(
+                            <div key={`cat-${cat.id}`} style={{ marginTop: 6 }}>
+                              <Text size="xs" fw={700}>{cat.name}</Text>
+                              {itemsForCat.map(item => (
+                                <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0' }}>
+                                  <Checkbox
+                                    checked={item.checked}
+                                    onChange={e => onCheckItem(list.userId, item.id, e.target.checked)}
+                                    styles={{ body: { padding: 0 } }}
+                                    aria-label={item.display_name || item.name}
+                                  />
+                                  <ItemLabel text={item.display_name || item.name} />
+                                  {onToggleNotNeeded ? (
+                                    <ActionIcon size="sm" variant="subtle" onClick={() => onToggleNotNeeded(list.userId, item.id)} aria-label="Not needed">
+                                      <IconHexagonMinus size={14} />
+                                    </ActionIcon>
+                                  ) : null}
+                                </div>
+                              ))}
+                            </div>
+                          );
+                          grouped.delete(cat.id);
+                        }
+                        // Remaining uncategorized items (null key)
+                        const uncats = grouped.get(null) || [];
+                        if (uncats.length > 0) {
+                          parts.push(
+                            <div key="cat-uncategorized" style={{ marginTop: 6 }}>
+                              <Text size="xs" fw={700}>Uncategorized</Text>
+                              {uncats.map(item => (
+                                <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0' }}>
+                                  <Checkbox
+                                    checked={item.checked}
+                                    onChange={e => onCheckItem(list.userId, item.id, e.target.checked)}
+                                    styles={{ body: { padding: 0 } }}
+                                    aria-label={item.display_name || item.name}
+                                  />
+                                  <ItemLabel text={item.display_name || item.name} />
+                                  {onToggleNotNeeded ? (
+                                    <ActionIcon size="sm" variant="subtle" onClick={() => onToggleNotNeeded(list.userId, item.id)} aria-label="Not needed">
+                                      <IconHexagonMinus size={14} />
+                                    </ActionIcon>
+                                  ) : null}
+                                </div>
+                              ))}
+                            </div>
+                          );
+                        }
+                        return parts;
+                      })()}
 
                       {/* One-off items above Not needed */}
+                      {/* One-off section for user column (rendered after grouped regular items) */}
                       {oneOffActive.length > 0 ? (
                         <div style={{ marginTop: 10 }}>
                           <Text size="xs" fw={700}>One-off</Text>
@@ -251,8 +338,12 @@ export function PackingListsSideBySide({ userLists, wholeFamilyItems, onCheckIte
                               ) : null}
                               {/* Edit for one-off items: open edit drawer in promote mode */}
                               <ActionIcon size="sm" variant="light" onClick={() => {
+                                console.debug('[PackingListsSideBySide] opening edit (user) for item', { item, categoryId: (item as any).category ? (item as any).category.id : undefined, members: (item as any).members ? (item as any).members.map((m: any) => m.id) : undefined, whole_family: (item as any).whole_family });
                                 setPromoteContext({ listId: activeListId || '', packingListItemId: item.id });
                                 setEditInitialName(item.display_name || item.name);
+                                setEditInitialCategoryId((item as any).category ? (item as any).category.id : undefined);
+                                setEditInitialMembers((item as any).members ? (item as any).members.map((m: any) => m.id) : undefined);
+                                setEditInitialWhole(!!(item as any).whole_family);
                                 setShowEditDrawer(true);
                               }} aria-label="Edit one-off">
                                 <IconEdit size={14} />

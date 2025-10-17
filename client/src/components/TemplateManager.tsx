@@ -215,12 +215,12 @@ export default function TemplateManager() {
   return (
     <div>
       <Group justify="space-between" mb="xl">
-        <Title order={2}>Templates</Title>
-        <Button onClick={openCreateModal}>New Template</Button>
+        <Title order={2}>Item Groups</Title>
+        <Button onClick={openCreateModal}>New Item Group</Button>
       </Group>
       
       {templates.length === 0 ? (
-        <Text c="dimmed">No templates yet. Create your first template!</Text>
+        <Text c="dimmed">No item groups yet. Create your first item group!</Text>
       ) : (
         <Tabs defaultValue={templates[0]?.id}>
           <Tabs.List>
@@ -363,7 +363,7 @@ export default function TemplateManager() {
                           {/* moved Add Item button to header */}
                         </div>
                         {(details.categories.length === 0 && (!details.items || details.items.length === 0)) && (
-                          <Text c="dimmed">This template has no categories or items assigned yet.</Text>
+                    <Text c="dimmed">This item group has no categories or items assigned yet.</Text>
                         )}
             </Stack>
         </>
@@ -376,9 +376,9 @@ export default function TemplateManager() {
                   </div>
                 </Card>
 
-                <Modal opened={showAddCategoryModal.open && showAddCategoryModal.templateId === template.id} onClose={() => setShowAddCategoryModal({ open: false })} title="Add category to template">
+                <Modal opened={showAddCategoryModal.open && showAddCategoryModal.templateId === template.id} onClose={() => setShowAddCategoryModal({ open: false })} title="Add category to item group">
                   <div>
-                    <Text mb="sm">Select categories to add to this template:</Text>
+                      <Text mb="sm">Select categories to add to this item group:</Text>
                     <Stack>
                       {categories.map(c => (
                         <Checkbox key={c.id} label={c.name} checked={addCategorySelections.includes(c.id)} onChange={e => {
@@ -403,7 +403,7 @@ export default function TemplateManager() {
                           await fetchMembersForDetails();
                         }
                         setAddCategorySelections([]);
-                        setShowAddCategoryModal({ open: false });
+                setShowAddCategoryModal({ open: false });
                       }}>Add</Button>
                       <Button variant="outline" onClick={() => { setAddCategorySelections([]); setShowAddCategoryModal({ open: false }); }}>Cancel</Button>
                     </Group>
@@ -413,9 +413,9 @@ export default function TemplateManager() {
           ))}
         </Tabs>
       )}
-      <Modal opened={modalOpen} onClose={() => setModalOpen(false)} title={selectedTemplate ? 'Edit Template' : 'New Template'}>
+      <Modal opened={modalOpen} onClose={() => setModalOpen(false)} title={selectedTemplate ? 'Edit Item Group' : 'New Item Group'}>
         <TextInput
-          label="Template Name"
+          label="Item Group Name"
           value={form.name}
           onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
         />
@@ -528,7 +528,7 @@ export default function TemplateManager() {
         onClose={() => { setShowEditDrawer(false); setEditMasterItemId(null); }}
         masterItemId={editMasterItemId || undefined}
         familyId={familyId}
-        showNameField={true}
+        
         onSaved={async () => {
           try {
             await loadTemplateDetails(templates);

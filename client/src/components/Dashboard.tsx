@@ -93,7 +93,19 @@ export default function Dashboard(): React.ReactElement {
               const checked = !!checkRow?.checked;
               
               // use the packing-list-item id (pli.id) for toggling checks so the API can locate the row
-              memberItems.push({ id: pli.id, name, checked, masterId: pli.item_id || null, added_during_packing: !!pli.added_during_packing, display_name: pli.display_name || null, masterIsOneOff: !!pli.master_is_one_off });
+              memberItems.push({
+                id: pli.id,
+                name,
+                checked,
+                masterId: pli.item_id || null,
+                added_during_packing: !!pli.added_during_packing,
+                display_name: pli.display_name || null,
+                masterIsOneOff: !!pli.master_is_one_off,
+                // include packing-list-specific metadata so parent views can seed edit drawers
+                category: pli.category || null,
+                members: pli.members || [],
+                whole_family: !!pli.whole_family,
+              });
             }
           }
           userListsData.push({ userId: member.id, userName: member.name || member.username, items: memberItems });
@@ -118,7 +130,19 @@ export default function Dashboard(): React.ReactElement {
             const checked = !!checkRow?.checked;
             
             // use packing-list-item id for whole-family items as well
-            wholeItems.push({ id: pli.id, name, checked, masterId: pli.item_id || null, added_during_packing: !!pli.added_during_packing, display_name: pli.display_name || null, masterIsOneOff: !!pli.master_is_one_off });
+            wholeItems.push({
+              id: pli.id,
+              name,
+              checked,
+              masterId: pli.item_id || null,
+              added_during_packing: !!pli.added_during_packing,
+              display_name: pli.display_name || null,
+              masterIsOneOff: !!pli.master_is_one_off,
+              // include metadata for edit seeding
+              category: pli.category || null,
+              members: pli.members || [],
+              whole_family: !!pli.whole_family,
+            });
           }
         }
 
@@ -288,7 +312,7 @@ export default function Dashboard(): React.ReactElement {
                 <Text c="dimmed" size="sm" style={{ marginTop: 8 }}>No list selected. Use the selector above to choose a packing list.</Text>
               </div>
             </div>
-          ) : (
+            ) : (
             <PackingListsSideBySide
               userLists={userLists}
               wholeFamilyItems={wholeFamilyItems}
@@ -299,9 +323,10 @@ export default function Dashboard(): React.ReactElement {
               onOpenAddDrawer={openAddDrawerFor}
               showWhole={!!activeListId}
               activeListId={activeListId}
+              familyId={familyId}
             />
           )}
-          <ItemEditDrawer opened={showItemDrawer} onClose={() => { setShowItemDrawer(false); setItemDrawerDefaultMember(null); }} masterItemId={null} initialName={undefined} familyId={familyId} showNameField={true} defaultAssignedMemberId={itemDrawerDefaultMember} onSaved={handleItemDrawerSaved} showIsOneOffCheckbox={true} />
+          <ItemEditDrawer opened={showItemDrawer} onClose={() => { setShowItemDrawer(false); setItemDrawerDefaultMember(null); }} masterItemId={null} initialName={undefined} familyId={familyId} defaultAssignedMemberId={itemDrawerDefaultMember} onSaved={handleItemDrawerSaved} showIsOneOffCheckbox={true} />
         </Stack>
       </div>
 

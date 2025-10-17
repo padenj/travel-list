@@ -181,7 +181,6 @@ export default function AddItemsDrawer({ opened, onClose, familyId, excludedItem
         masterItemId={editTargetItem?.itemId}
         initialName={editTargetItem?.name}
         familyId={familyId}
-        showNameField={true}
         showIsOneOffCheckbox={showIsOneOffCheckbox}
         onSaved={async (payload) => {
           // reload items and auto-select the created item so the user can add it

@@ -134,12 +134,10 @@ export default function Layout({ children, user, onLogout }: LayoutProps): React
                   Manage Categories
                 </Link>
 
-                <Link to="/items" style={linkStyle('/items')}>
-                  Manage Items
-                </Link>
+                {/* Manage Items page removed - item management now via Categories */}
 
                 <Link to="/templates" style={linkStyle('/templates')}>
-                  Manage Templates
+                  Manage Item Groups
                 </Link>
               </div>
             )}

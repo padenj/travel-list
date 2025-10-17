@@ -29,6 +29,7 @@ import {
 } from '@mantine/core';
 import AddItemsDrawer from './AddItemsDrawer';
 import ItemEditDrawer from './ItemEditDrawer';
+import ConfirmDelete from './ConfirmDelete';
 import { IconTrash, IconEdit, IconPlus, IconX } from '@tabler/icons-react';
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { arrayMove, SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
@@ -283,7 +284,12 @@ export default function CategoryManagementPage(): React.ReactElement {
 
   return (
     <Card withBorder>
-      <Title order={3} mb="md">Manage Categories</Title>
+      <Group align="center" mb="md" style={{ width: '100%' }} justify="space-between">
+        <Title order={3} style={{ margin: 0 }}>Manage Categories</Title>
+        <div>
+          <Button size="xs" onClick={() => setSortMode(true)}>Sort categories</Button>
+        </div>
+      </Group>
       <Stack>
         <Group>
           <TextInput
@@ -299,12 +305,7 @@ export default function CategoryManagementPage(): React.ReactElement {
           <Text c="dimmed">No categories yet.</Text>
         ) : (
           <>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div />
-              <div style={{ display: 'flex', gap: 8 }}>
-                <Button onClick={() => setSortMode(true)}>Sort categories</Button>
-              </div>
-            </div>
+            {/* header button moved inline with title */}
             <Modal opened={sortMode} onClose={() => setSortMode(false)} title="Sort Categories" size="lg">
               <div style={{ marginTop: 6 }}>
                 <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
@@ -331,7 +332,7 @@ export default function CategoryManagementPage(): React.ReactElement {
               {categories.map(cat => (
                 <Tabs.Panel key={cat.id} value={cat.id}>
                   <Card withBorder mt="md">
-                    <Group mb="md">
+                    <Group mb="md" align="center" style={{ justifyContent: 'space-between' }}>
                       {editId === cat.id ? (
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%' }}>
                           <TextInput
@@ -348,82 +349,94 @@ export default function CategoryManagementPage(): React.ReactElement {
                           </ActionIcon>
                         </div>
                       ) : (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                           <Title order={4} style={{ margin: 0 }}>{cat.name}</Title>
                           <ActionIcon color="blue" variant="light" onClick={() => handleEdit(cat.id, cat.name)} title="Edit category name">
                             <IconEdit size={16} />
                           </ActionIcon>
                         </div>
                       )}
+                      <div>
+                        <Button size="xs" leftSection={<IconPlus size={14} />} onClick={() => {
+                          // Open ItemEditDrawer in create mode with category pre-selected
+                          setSelectedTab(cat.id);
+                          setShowAddPaneForCategory({ open: true, categoryId: cat.id });
+                          setEditMasterItemId(null);
+                          setShowEditDrawer(true);
+                        }}>Add</Button>
+                      </div>
                     </Group>
                     <Title order={5} mb="sm">Items in this category</Title>
-                    <List mb="md">
-                      {categoryItems[cat.id]?.length > 0 ? (
-                        categoryItems[cat.id].map(item => (
-                          <List.Item key={item.id}>
-                            <Group justify="space-between" align="center">
-                              <div>
+                    {categoryItems[cat.id]?.length > 0 ? (
+                      <div>
+                        <style>{`
+                          .tl-category-grid {
+                            display: grid;
+                            gap: 8px;
+                            grid-template-columns: repeat(1, 1fr);
+                          }
+                          @media (min-width: 640px) {
+                            .tl-category-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+                          }
+                          @media (min-width: 1024px) {
+                            .tl-category-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+                          }
+                          @media (min-width: 1280px) {
+                            .tl-category-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+                          }
+                          .tl-category-item {
+                            display: flex;
+                            align-items: center;
+                            justify-content: space-between;
+                            padding: 8px 10px;
+                            border-radius: 6px;
+                            border: 1px solid rgba(0,0,0,0.04);
+                            background: #fff;
+                          }
+                          .tl-category-item .tl-item-left { flex: 1 1 auto; margin-right: 12px; }
+                          .tl-category-item .tl-item-right { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; }
+                        `}</style>
+                        <div className="tl-category-grid">
+                          {categoryItems[cat.id].map((item) => (
+                            <div key={item.id} className="tl-category-item">
+                              <div className="tl-item-left">
                                 <Text>{item.name}</Text>
                                 {itemMembers[item.id] && itemMembers[item.id].length > 0 && (
-                                  <Text c="dimmed" size="sm">{itemMembers[item.id].map(m => m.name).join(', ')}</Text>
+                                  <Text c="dimmed" size="sm">{itemMembers[item.id].map((m: any) => m.name).join(', ')}</Text>
                                 )}
                               </div>
-                              <Group>
+                              <div className="tl-item-right">
                                 <ActionIcon color="blue" variant="light" onClick={() => { setEditMasterItemId(item.id); setShowEditDrawer(true); }} title="Edit item">
                                   <IconEdit size={16} />
                                 </ActionIcon>
                                 {itemsInAllCategories.has(item.id) ? (
-                                  // show disabled remove icon (non-interactive) for 'All' items
                                   <ActionIcon color="gray" variant="light" title="Item in All categories; cannot remove individually" disabled>
                                     <IconTrash size={16} />
                                   </ActionIcon>
-                                ) : (
-                                  <ActionIcon color="red" variant="light" onClick={() => handleRemoveItem(item.id, cat.id)}>
-                                    <IconTrash size={16} />
-                                  </ActionIcon>
-                                )}
-                              </Group>
-                            </Group>
-                          </List.Item>
-                        ))
-                      ) : (
-                        <List.Item><Text c="dimmed">No items in this category</Text></List.Item>
-                      )}
-                    </List>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <Button leftSection={<IconPlus size={16} />} onClick={() => {
-                        // open AddItemsDrawer for this category
-                        setSelectedTab(cat.id);
-                        setShowAddPaneForCategory({ open: true, categoryId: cat.id });
-                      }}>Add Item</Button>
-                      <div>
-                        <ActionIcon color="red" variant="light" onClick={() => handleDelete(cat.id)} title="Delete category">
-                          <IconTrash size={16} />
-                        </ActionIcon>
+                                ) : null}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
                       </div>
+                    ) : (
+                      <Text c="dimmed">No items in this category</Text>
+                    )}
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginTop: 16 }}>
+                      <ConfirmDelete onConfirm={() => handleDelete(cat.id)} title="Delete category" />
                     </div>
                   </Card>
                 </Tabs.Panel>
               ))}
             </Tabs>
-            <AddItemsDrawer
-              opened={showAddPaneForCategory.open}
-              onClose={() => setShowAddPaneForCategory({ open: false })}
-              familyId={familyId}
-              excludedItemIds={(showAddPaneForCategory.categoryId && categoryItems[showAddPaneForCategory.categoryId] ? categoryItems[showAddPaneForCategory.categoryId].map(i => i.id) : [])}
-              showAssignedItemsToggle={true}
-              targetCategoryId={showAddPaneForCategory.categoryId}
-              onApply={handleAddItemsToCategory}
-              showIsOneOffCheckbox={false}
-              title="Add items to category"
-            />
+            {/* AddItemsDrawer removed: Add now opens ItemEditDrawer in create mode with category pre-selected */}
             <ItemEditDrawer
               opened={showEditDrawer}
               onClose={() => { setShowEditDrawer(false); setEditMasterItemId(null); }}
               masterItemId={editMasterItemId || undefined}
               initialName={editMasterItemId ? (items.find(i => i.id === editMasterItemId)?.name) : undefined}
               familyId={familyId}
-              showNameField={true}
+              initialCategoryId={showAddPaneForCategory.open ? showAddPaneForCategory.categoryId : undefined}
               onSaved={async () => {
                 await fetchCategoryItems();
                 setShowEditDrawer(false);
