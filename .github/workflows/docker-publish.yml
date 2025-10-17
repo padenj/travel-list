@@ -213,6 +213,8 @@ jobs:
       - name: Upload build-info.json to release
         if: ${{ steps.meta.outputs.NEW_TAG != '' && github.event_name != 'pull_request' }}
         uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: out/build-info.json
