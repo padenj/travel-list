@@ -284,7 +284,10 @@ export default function CategoryManagementPage(): React.ReactElement {
 
   return (
     <Card withBorder>
-      <Title order={3} mb="md">Manage Categories</Title>
+      <Group align="center" mb="md" style={{ gap: 12 }}>
+        <Title order={3} style={{ margin: 0 }}>Manage Categories</Title>
+        <Button size="xs" onClick={() => setSortMode(true)}>Sort categories</Button>
+      </Group>
       <Stack>
         <Group>
           <TextInput
@@ -300,11 +303,7 @@ export default function CategoryManagementPage(): React.ReactElement {
           <Text c="dimmed">No categories yet.</Text>
         ) : (
           <>
-            <div style={{ position: 'relative' }}>
-              <div style={{ position: 'absolute', top: 8, right: 8 }}>
-                <Button size="xs" onClick={() => setSortMode(true)}>Sort categories</Button>
-              </div>
-            </div>
+            {/* header button moved inline with title */}
             <Modal opened={sortMode} onClose={() => setSortMode(false)} title="Sort Categories" size="lg">
               <div style={{ marginTop: 6 }}>
                 <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
