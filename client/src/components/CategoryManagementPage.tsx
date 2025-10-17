@@ -29,6 +29,7 @@ import {
 } from '@mantine/core';
 import AddItemsDrawer from './AddItemsDrawer';
 import ItemEditDrawer from './ItemEditDrawer';
+import ConfirmDelete from './ConfirmDelete';
 import { IconTrash, IconEdit, IconPlus, IconX } from '@tabler/icons-react';
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { arrayMove, SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
@@ -394,9 +395,9 @@ export default function CategoryManagementPage(): React.ReactElement {
                         setShowAddPaneForCategory({ open: true, categoryId: cat.id });
                       }}>Add Item</Button>
                       <div>
-                        <ActionIcon color="red" variant="light" onClick={() => handleDelete(cat.id)} title="Delete category">
-                          <IconTrash size={16} />
-                        </ActionIcon>
+                        {/* ConfirmDelete provides a two-step delete control (trash -> Delete? -> confirm/cancel) */}
+                        {/* Lazy-load to keep bundle small if desired; imported directly here for simplicity */}
+                        <ConfirmDelete onConfirm={() => handleDelete(cat.id)} title="Delete category" />
                       </div>
                     </div>
                   </Card>
