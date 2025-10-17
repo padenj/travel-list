@@ -372,16 +372,13 @@ export default function CategoryManagementPage(): React.ReactElement {
                                 <ActionIcon color="blue" variant="light" onClick={() => { setEditMasterItemId(item.id); setShowEditDrawer(true); }} title="Edit item">
                                   <IconEdit size={16} />
                                 </ActionIcon>
+                                {/* Removed per-item delete action - items are managed via the Add Item flow or global item editor. */}
                                 {itemsInAllCategories.has(item.id) ? (
-                                  // show disabled remove icon (non-interactive) for 'All' items
+                                  // show disabled trash icon for 'All' items to indicate non-removable status
                                   <ActionIcon color="gray" variant="light" title="Item in All categories; cannot remove individually" disabled>
                                     <IconTrash size={16} />
                                   </ActionIcon>
-                                ) : (
-                                  <ActionIcon color="red" variant="light" onClick={() => handleRemoveItem(item.id, cat.id)}>
-                                    <IconTrash size={16} />
-                                  </ActionIcon>
-                                )}
+                                ) : null}
                               </Group>
                             </Group>
                           </List.Item>
