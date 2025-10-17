@@ -98,6 +98,21 @@ function App(): React.ReactElement {
     }
   }, []);
 
+  // In development, ensure any previously registered service workers are
+  // unregistered so the dev server and HMR load the latest files. This runs
+  // early and is intentionally minimal to avoid affecting production behavior.
+  useEffect(() => {
+    try {
+      const isDev = (typeof import.meta !== 'undefined' && (import.meta as any).env && (import.meta as any).env.DEV) || process.env.NODE_ENV === 'development';
+      if (!isDev || !('serviceWorker' in navigator)) return;
+      navigator.serviceWorker.getRegistrations().then(regs => {
+        regs.forEach(r => {
+          try { r.unregister(); } catch (e) { /* ignore */ }
+        });
+      }).catch(() => {});
+    } catch (e) { /* ignore */ }
+  }, []);
+
   // Page-based event stream fallback: connect from the window context so network
   // activity is visible in DevTools and headers can be set (Authorization).
   useEffect(() => {
