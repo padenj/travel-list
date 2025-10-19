@@ -465,6 +465,20 @@ export default function CategoryManagementPage(): React.ReactElement {
               ))}
             </Tabs>
             {/* AddItemsDrawer removed: Add now opens ItemEditDrawer in create mode with category pre-selected */}
+            <BulkEditDrawer
+              opened={showBulkEdit}
+              onClose={() => setShowBulkEdit(false)}
+              itemIds={Array.from(selectedItems)}
+              familyId={familyId}
+              initialCategoryId={selectedTab || undefined}
+              onApplied={async () => {
+                await fetchCategoryItems();
+                setSelectedItems(new Set());
+                setShowBulkEdit(false);
+                bumpRefresh();
+              }}
+            />
+
             <ItemEditDrawer
               opened={showEditDrawer}
               onClose={() => { setShowEditDrawer(false); setEditMasterItemId(null); }}
