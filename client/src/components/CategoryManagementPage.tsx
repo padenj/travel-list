@@ -91,6 +91,11 @@ export default function CategoryManagementPage(): React.ReactElement {
   const [itemMembers, setItemMembers] = useState<{ [itemId: string]: { id: string; name: string }[] }>({});
   const [itemsInAllCategories, setItemsInAllCategories] = useState<Set<string>>(new Set());
   const [selectedTab, setSelectedTab] = useState<string | null>(null);
+  const changeSelectedTab = (tab: string | null) => {
+    setSelectedTab(tab);
+    // Clear selections when the user (or code) switches category
+    setSelectedItems(new Set());
+  };
   // no local addItemLoading state needed when using AddItemsDrawer
   const [showAddPaneForCategory, setShowAddPaneForCategory] = useState<{ open: boolean; categoryId?: string }>({ open: false });
 
@@ -132,7 +137,7 @@ export default function CategoryManagementPage(): React.ReactElement {
             } catch (e) {
               // ignore
             }
-            setSelectedTab(initial);
+            changeSelectedTab(initial);
           }
         }
         const itemsRes = await getItems(fid);
@@ -192,7 +197,7 @@ export default function CategoryManagementPage(): React.ReactElement {
     if (res.response.ok) {
       setCategories([...categories, res.data.category]);
       setNewCategory('');
-      setSelectedTab(res.data.category.id);
+  changeSelectedTab(res.data.category.id);
       bumpRefresh();
     }
   };
@@ -239,7 +244,7 @@ export default function CategoryManagementPage(): React.ReactElement {
     if (res.response.ok) {
       setCategories(categories.filter(cat => cat.id !== id));
       if (selectedTab === id && categories.length > 1) {
-        setSelectedTab(categories[0].id);
+        changeSelectedTab(categories[0].id);
       }
       bumpRefresh();
     }
@@ -328,7 +333,7 @@ export default function CategoryManagementPage(): React.ReactElement {
                 </div>
               </div>
             </Modal>
-            <Tabs value={selectedTab} onChange={setSelectedTab} keepMounted={false}>
+            <Tabs value={selectedTab} onChange={changeSelectedTab} keepMounted={false}>
               <Tabs.List>
                 {categories.map(cat => (
                   <Tabs.Tab key={cat.id} value={cat.id}>{cat.name}</Tabs.Tab>
@@ -361,30 +366,30 @@ export default function CategoryManagementPage(): React.ReactElement {
                           </ActionIcon>
                         </div>
                       )}
-                      <div>
-                        <Button size="xs" leftSection={<IconPlus size={14} />} onClick={() => {
-                          // Open ItemEditDrawer in create mode with category pre-selected
-                          setSelectedTab(cat.id);
-                          setShowAddPaneForCategory({ open: true, categoryId: cat.id });
-                          setEditMasterItemId(null);
-                          setShowEditDrawer(true);
-                        }}>Add</Button>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8 }}>
+                        <div>
+                          <Button size="xs" leftSection={<IconPlus size={14} />} onClick={() => {
+                            // Open ItemEditDrawer in create mode with category pre-selected
+                            changeSelectedTab(cat.id);
+                            setShowAddPaneForCategory({ open: true, categoryId: cat.id });
+                            setEditMasterItemId(null);
+                            setShowEditDrawer(true);
+                          }}>Add</Button>
+                        </div>
+                        <div>
+                          <Checkbox label="Select multiple" checked={multiSelectMode} onChange={(e) => { setMultiSelectMode(e.currentTarget.checked); if (!e.currentTarget.checked) setSelectedItems(new Set()); }} />
+                        </div>
+                        {multiSelectMode && (
+                          <div>
+                            <Group>
+                              <Text size="sm">{selectedItems.size} selected</Text>
+                              <Button size="xs" onClick={() => setShowBulkEdit(true)} disabled={selectedItems.size === 0}>Bulk Edit</Button>
+                            </Group>
+                          </div>
+                        )}
                       </div>
                     </Group>
                     <Title order={5} mb="sm">Items in this category</Title>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                      <div>
-                        <Checkbox label="Select multiple" checked={multiSelectMode} onChange={(e) => { setMultiSelectMode(e.currentTarget.checked); if (!e.currentTarget.checked) setSelectedItems(new Set()); }} />
-                      </div>
-                      <div>
-                        {multiSelectMode && (
-                          <Group>
-                            <Text size="sm">{selectedItems.size} selected</Text>
-                            <Button size="xs" onClick={() => setShowBulkEdit(true)} disabled={selectedItems.size === 0}>Bulk Edit</Button>
-                          </Group>
-                        )}
-                      </div>
-                    </div>
                     {categoryItems[cat.id]?.length > 0 ? (
                       <div>
                         <style>{`
