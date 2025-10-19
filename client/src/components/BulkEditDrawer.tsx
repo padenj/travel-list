@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Drawer, Title, Group, Button, Select, Checkbox, Stack, Loader, Text } from '@mantine/core';
-import { getCategories, getMembersForItem, getMembersForItem as getMembers, assignItemToCategory, assignToMember, removeFromMember } from '../api';
+import { getCategories, getMembersForItem, getMembersForItem as getMembers, assignItemToCategory, assignToMember, removeFromMember, getFamily } from '../api';
 
 type Props = {
   opened: boolean;
@@ -25,11 +25,20 @@ export default function BulkEditDrawer({ opened, onClose, itemIds, familyId, ini
         if (cats.response.ok) setCategories(cats.data.categories || []);
         // load family members by fetching edit data for first item or via profile — reuse getMembersForItem by calling with any item
         try {
-          // If there are members returned by item edit data endpoints, clients already have an API; fallback to using item-based members
-          if (itemIds && itemIds.length > 0) {
-            const mres = await getMembers(itemIds[0]);
-            if (mres.response.ok) {
-              setMembers(Array.isArray(mres.data) ? mres.data : (mres.data?.members || []));
+          // Prefer a family-level members list (getFamily) so all family members are available
+          try {
+            const fam = await getFamily(familyId);
+            if (fam.response.ok && fam.data && fam.data.family) {
+              const famMembers = fam.data.family.members || [];
+              setMembers(famMembers.map((m: any) => ({ id: m.id, name: m.name })));
+            }
+          } catch (e) {
+            // fallback to using item-based members if family endpoint isn't available
+            if (itemIds && itemIds.length > 0) {
+              const mres = await getMembers(itemIds[0]);
+              if (mres.response.ok) {
+                setMembers(Array.isArray(mres.data) ? mres.data : (mres.data?.members || []));
+              }
             }
           }
         } catch (e) {
@@ -41,6 +50,28 @@ export default function BulkEditDrawer({ opened, onClose, itemIds, familyId, ini
   }, [opened, familyId]);
 
   useEffect(() => setSelectedCategory(initialCategoryId), [initialCategoryId]);
+
+  // When opening, pre-select members that are assigned to ALL of the selected items
+  useEffect(() => {
+    if (!opened || !itemIds || itemIds.length === 0) return;
+    (async () => {
+      try {
+        // fetch members for each selected item and compute intersection
+        const memberLists = await Promise.all(itemIds.map(async (itemId) => {
+          try {
+            const res = await getMembersForItem(itemId);
+            if (res.response.ok) return Array.isArray(res.data) ? res.data.map((m: any) => m.id) : (res.data?.members || []).map((m: any) => m.id);
+          } catch (e) { }
+          return [] as string[];
+        }));
+        if (memberLists.length === 0) return;
+  const intersection = memberLists.reduce((acc: string[], list: string[]) => acc.filter((x: string) => list.includes(x)), memberLists[0] || []);
+        setSelectedMembers(intersection);
+      } catch (e) {
+        // ignore
+      }
+    })();
+  }, [opened, itemIds]);
 
   const toggleMember = (id: string) => {
     setSelectedMembers(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
@@ -78,11 +109,11 @@ export default function BulkEditDrawer({ opened, onClose, itemIds, familyId, ini
   };
 
   return (
-    <Drawer opened={opened} onClose={onClose} title={<Title order={4}>Bulk Edit ({itemIds.length})</Title>} size="lg">
+    <Drawer opened={opened} onClose={onClose} title={<Title order={4}>Bulk Edit ({itemIds.length})</Title>} size="lg" position="right">
       {loading ? <Loader /> : (
         <Stack>
           <div>
-            <Text size="sm" c="dimmed">Category (this category will be preselected for context)</Text>
+            <Text size="sm" c="dimmed">Category</Text>
             <Select
               data={categories.map(c => ({ value: c.id, label: c.name }))}
               value={selectedCategory}
@@ -91,14 +122,28 @@ export default function BulkEditDrawer({ opened, onClose, itemIds, familyId, ini
             />
           </div>
           <div>
-            <Text size="sm" c="dimmed">Assign to family members</Text>
-            {members.length === 0 ? <Text c="dimmed">No family members</Text> : (
-              members.map(m => (
-                <Checkbox key={m.id} label={m.name} checked={selectedMembers.includes(m.id)} onChange={() => toggleMember(m.id)} />
-              ))
-            )}
+            <Text fw={700} mb="xs">Assignments</Text>
+            <div style={{ marginTop: 8 }}>
+              <Text size="sm" fw={600}>Members</Text>
+              {members.length === 0 ? (
+                <Text c="dimmed">No family members</Text>
+              ) : (
+                members.map((m: any) => (
+                  <div key={m.id} style={{ padding: '6px 0' }}>
+                    <Checkbox
+                      checked={selectedMembers.includes(m.id)}
+                      onChange={(e) => {
+                        const checked = (e.currentTarget as HTMLInputElement).checked;
+                        setSelectedMembers(prev => checked ? [...prev, m.id] : prev.filter(x => x !== m.id));
+                      }}
+                      label={m.name || m.username}
+                    />
+                  </div>
+                ))
+              )}
+            </div>
           </div>
-          <Group position="right">
+          <Group justify="right">
             <Button variant="default" onClick={onClose}>Cancel</Button>
             <Button onClick={apply} disabled={loading}>Apply</Button>
           </Group>

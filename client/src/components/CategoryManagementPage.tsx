@@ -26,10 +26,12 @@ import {
   Tabs,
   List,
   Modal,
+  Checkbox,
 } from '@mantine/core';
 import AddItemsDrawer from './AddItemsDrawer';
 import ItemEditDrawer from './ItemEditDrawer';
 import ConfirmDelete from './ConfirmDelete';
+import BulkEditDrawer from './BulkEditDrawer';
 import { IconTrash, IconEdit, IconPlus, IconX } from '@tabler/icons-react';
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { arrayMove, SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
@@ -89,6 +91,11 @@ export default function CategoryManagementPage(): React.ReactElement {
   const [itemMembers, setItemMembers] = useState<{ [itemId: string]: { id: string; name: string }[] }>({});
   const [itemsInAllCategories, setItemsInAllCategories] = useState<Set<string>>(new Set());
   const [selectedTab, setSelectedTab] = useState<string | null>(null);
+  const changeSelectedTab = (tab: string | null) => {
+    setSelectedTab(tab);
+    // Clear selections when the user (or code) switches category
+    setSelectedItems(new Set());
+  };
   // no local addItemLoading state needed when using AddItemsDrawer
   const [showAddPaneForCategory, setShowAddPaneForCategory] = useState<{ open: boolean; categoryId?: string }>({ open: false });
 
@@ -98,6 +105,9 @@ export default function CategoryManagementPage(): React.ReactElement {
     const [showEditDrawer, setShowEditDrawer] = useState(false);
     const [editMasterItemId, setEditMasterItemId] = useState<string | null>(null);
     const [sortMode, setSortMode] = useState(false);
+    const [multiSelectMode, setMultiSelectMode] = useState(false);
+    const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
+    const [showBulkEdit, setShowBulkEdit] = useState(false);
     const sensors = useSensors(
       useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
     );
@@ -127,7 +137,7 @@ export default function CategoryManagementPage(): React.ReactElement {
             } catch (e) {
               // ignore
             }
-            setSelectedTab(initial);
+            changeSelectedTab(initial);
           }
         }
         const itemsRes = await getItems(fid);
@@ -187,7 +197,7 @@ export default function CategoryManagementPage(): React.ReactElement {
     if (res.response.ok) {
       setCategories([...categories, res.data.category]);
       setNewCategory('');
-      setSelectedTab(res.data.category.id);
+  changeSelectedTab(res.data.category.id);
       bumpRefresh();
     }
   };
@@ -234,7 +244,7 @@ export default function CategoryManagementPage(): React.ReactElement {
     if (res.response.ok) {
       setCategories(categories.filter(cat => cat.id !== id));
       if (selectedTab === id && categories.length > 1) {
-        setSelectedTab(categories[0].id);
+        changeSelectedTab(categories[0].id);
       }
       bumpRefresh();
     }
@@ -323,7 +333,7 @@ export default function CategoryManagementPage(): React.ReactElement {
                 </div>
               </div>
             </Modal>
-            <Tabs value={selectedTab} onChange={setSelectedTab} keepMounted={false}>
+            <Tabs value={selectedTab} onChange={changeSelectedTab} keepMounted={false}>
               <Tabs.List>
                 {categories.map(cat => (
                   <Tabs.Tab key={cat.id} value={cat.id}>{cat.name}</Tabs.Tab>
@@ -356,14 +366,27 @@ export default function CategoryManagementPage(): React.ReactElement {
                           </ActionIcon>
                         </div>
                       )}
-                      <div>
-                        <Button size="xs" leftSection={<IconPlus size={14} />} onClick={() => {
-                          // Open ItemEditDrawer in create mode with category pre-selected
-                          setSelectedTab(cat.id);
-                          setShowAddPaneForCategory({ open: true, categoryId: cat.id });
-                          setEditMasterItemId(null);
-                          setShowEditDrawer(true);
-                        }}>Add</Button>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8 }}>
+                        <div>
+                          <Button size="xs" leftSection={<IconPlus size={14} />} onClick={() => {
+                            // Open ItemEditDrawer in create mode with category pre-selected
+                            changeSelectedTab(cat.id);
+                            setShowAddPaneForCategory({ open: true, categoryId: cat.id });
+                            setEditMasterItemId(null);
+                            setShowEditDrawer(true);
+                          }}>Add</Button>
+                        </div>
+                        <div>
+                          <Checkbox label="Select multiple" checked={multiSelectMode} onChange={(e) => { setMultiSelectMode(e.currentTarget.checked); if (!e.currentTarget.checked) setSelectedItems(new Set()); }} />
+                        </div>
+                        {multiSelectMode && (
+                          <div>
+                            <Group>
+                              <Text size="sm">{selectedItems.size} selected</Text>
+                              <Button size="xs" onClick={() => setShowBulkEdit(true)} disabled={selectedItems.size === 0}>Bulk Edit</Button>
+                            </Group>
+                          </div>
+                        )}
                       </div>
                     </Group>
                     <Title order={5} mb="sm">Items in this category</Title>
@@ -399,11 +422,28 @@ export default function CategoryManagementPage(): React.ReactElement {
                         <div className="tl-category-grid">
                           {categoryItems[cat.id].map((item) => (
                             <div key={item.id} className="tl-category-item">
-                              <div className="tl-item-left">
-                                <Text>{item.name}</Text>
-                                {itemMembers[item.id] && itemMembers[item.id].length > 0 && (
-                                  <Text c="dimmed" size="sm">{itemMembers[item.id].map((m: any) => m.name).join(', ')}</Text>
+                              <div className="tl-item-left" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                {multiSelectMode && (
+                                  <input
+                                    type="checkbox"
+                                    aria-label={`Select ${item.name}`}
+                                    checked={selectedItems.has(item.id)}
+                                    onChange={(e) => {
+                                      const checked = (e.currentTarget as HTMLInputElement).checked;
+                                      setSelectedItems(prev => {
+                                        const copy = new Set(prev);
+                                        if (checked) copy.add(item.id); else copy.delete(item.id);
+                                        return copy;
+                                      });
+                                    }}
+                                  />
                                 )}
+                                <div>
+                                  <Text>{item.name}</Text>
+                                  {itemMembers[item.id] && itemMembers[item.id].length > 0 && (
+                                    <Text c="dimmed" size="sm">{itemMembers[item.id].map((m: any) => m.name).join(', ')}</Text>
+                                  )}
+                                </div>
                               </div>
                               <div className="tl-item-right">
                                 <ActionIcon color="blue" variant="light" onClick={() => { setEditMasterItemId(item.id); setShowEditDrawer(true); }} title="Edit item">
@@ -430,6 +470,20 @@ export default function CategoryManagementPage(): React.ReactElement {
               ))}
             </Tabs>
             {/* AddItemsDrawer removed: Add now opens ItemEditDrawer in create mode with category pre-selected */}
+            <BulkEditDrawer
+              opened={showBulkEdit}
+              onClose={() => setShowBulkEdit(false)}
+              itemIds={Array.from(selectedItems)}
+              familyId={familyId}
+              initialCategoryId={selectedTab || undefined}
+              onApplied={async () => {
+                await fetchCategoryItems();
+                setSelectedItems(new Set());
+                setShowBulkEdit(false);
+                bumpRefresh();
+              }}
+            />
+
             <ItemEditDrawer
               opened={showEditDrawer}
               onClose={() => { setShowEditDrawer(false); setEditMasterItemId(null); }}

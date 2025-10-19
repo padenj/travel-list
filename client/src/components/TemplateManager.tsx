@@ -275,10 +275,48 @@ export default function TemplateManager() {
                 </Group>
                       <Stack style={{ flex: 1, overflow: 'auto' }}>
                         <div>
-                            <Group style={{ justifyContent: 'space-between', alignItems: 'center' }}>
-                            <Title order={4} mb="sm">Categories & Items</Title>
-                            <Button size="xs" variant="outline" onClick={() => setShowAddCategoryModal({ open: true, templateId: template.id })}>Add category</Button>
-                          </Group>
+                              <div>
+                                <Group style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+                                  <Title order={4} mb="sm">Individual Items</Title>
+                                  <Button size="xs" leftSection={<IconPlus size={16} />} onClick={() => handleAddIndividualItem(template.id)}>Add Item</Button>
+                                </Group>
+                                <List mb="md">
+                                        {details.items && details.items.length > 0 ? (
+                                    details.items.map(item => (
+                                      <List.Item key={item.id}>
+                                        <Group justify="space-between">
+                                          <Text>{item.name}</Text>
+                                          <Group>
+                                            <Text c="dimmed" size="sm">{(itemMembers[item.id] || []).map(m => m.name).join(', ')}</Text>
+                                            <ActionIcon color="blue" variant="light" onClick={() => { setEditMasterItemId(item.id); setShowEditDrawer(true); }}>
+                                              <IconEdit size={16} />
+                                            </ActionIcon>
+                                            <ActionIcon color="red" variant="light" onClick={async () => {
+                                              await removeItemFromTemplate(template.id, item.id);
+                                              setTemplateDetails(prev => ({
+                                                ...prev,
+                                                [template.id]: {
+                                                  ...prev[template.id],
+                                                  items: prev[template.id].items.filter(i => i.id !== item.id)
+                                                }
+                                              }));
+                                            }}>
+                                              <IconTrash size={16} />
+                                            </ActionIcon>
+                                          </Group>
+                                        </Group>
+                                      </List.Item>
+                                    ))
+                                  ) : (
+                                    <List.Item><Text c="dimmed">No individual items</Text></List.Item>
+                                  )}
+                                </List>
+                              </div>
+                              <div>
+                                <Group style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+                                  <Title order={4} mb="sm">Categories & Items</Title>
+                                  <Button size="xs" leftSection={<IconPlus size={16} />} onClick={() => setShowAddCategoryModal({ open: true, templateId: template.id })}>Add category</Button>
+                                </Group>
                           {details.categories.length > 0 ? (
                             details.categories.map(category => (
                               <Card key={category.id} withBorder mb="sm">
@@ -324,44 +362,8 @@ export default function TemplateManager() {
                             <Text c="dimmed">No categories on this template</Text>
                           )}
                         </div>
-                        <div>
-                          <Group style={{ justifyContent: 'space-between', alignItems: 'center' }}>
-                            <Title order={4} mb="sm">Individual Items</Title>
-                            <Button size="xs" leftSection={<IconPlus size={16} />} onClick={() => handleAddIndividualItem(template.id)}>Add Item</Button>
-                          </Group>
-                          <List mb="md">
-                                  {details.items && details.items.length > 0 ? (
-                              details.items.map(item => (
-                                <List.Item key={item.id}>
-                                  <Group justify="space-between">
-                                    <Text>{item.name}</Text>
-                                    <Group>
-                                      <Text c="dimmed" size="sm">{(itemMembers[item.id] || []).map(m => m.name).join(', ')}</Text>
-                                      <ActionIcon color="blue" variant="light" onClick={() => { setEditMasterItemId(item.id); setShowEditDrawer(true); }}>
-                                        <IconEdit size={16} />
-                                      </ActionIcon>
-                                      <ActionIcon color="red" variant="light" onClick={async () => {
-                                        await removeItemFromTemplate(template.id, item.id);
-                                        setTemplateDetails(prev => ({
-                                          ...prev,
-                                          [template.id]: {
-                                            ...prev[template.id],
-                                            items: prev[template.id].items.filter(i => i.id !== item.id)
-                                          }
-                                        }));
-                                      }}>
-                                        <IconTrash size={16} />
-                                      </ActionIcon>
-                                    </Group>
-                                  </Group>
-                                </List.Item>
-                              ))
-                            ) : (
-                              <List.Item><Text c="dimmed">No individual items</Text></List.Item>
-                            )}
-                          </List>
-                          {/* moved Add Item button to header */}
                         </div>
+
                         {(details.categories.length === 0 && (!details.items || details.items.length === 0)) && (
                     <Text c="dimmed">This item group has no categories or items assigned yet.</Text>
                         )}
