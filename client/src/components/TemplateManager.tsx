@@ -362,7 +362,8 @@ export default function TemplateManager() {
                             <Text c="dimmed">No categories on this template</Text>
                           )}
                         </div>
-                        
+                        </div>
+
                         {(details.categories.length === 0 && (!details.items || details.items.length === 0)) && (
                     <Text c="dimmed">This item group has no categories or items assigned yet.</Text>
                         )}
