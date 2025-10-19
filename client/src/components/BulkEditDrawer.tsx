@@ -113,7 +113,7 @@ export default function BulkEditDrawer({ opened, onClose, itemIds, familyId, ini
       {loading ? <Loader /> : (
         <Stack>
           <div>
-            <Text size="sm" c="dimmed">Category (this category will be preselected for context)</Text>
+            <Text size="sm" c="dimmed">Category</Text>
             <Select
               data={categories.map(c => ({ value: c.id, label: c.name }))}
               value={selectedCategory}
