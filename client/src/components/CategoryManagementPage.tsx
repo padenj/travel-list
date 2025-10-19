@@ -26,10 +26,12 @@ import {
   Tabs,
   List,
   Modal,
+  Checkbox,
 } from '@mantine/core';
 import AddItemsDrawer from './AddItemsDrawer';
 import ItemEditDrawer from './ItemEditDrawer';
 import ConfirmDelete from './ConfirmDelete';
+import BulkEditDrawer from './BulkEditDrawer';
 import { IconTrash, IconEdit, IconPlus, IconX } from '@tabler/icons-react';
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { arrayMove, SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
@@ -98,6 +100,9 @@ export default function CategoryManagementPage(): React.ReactElement {
     const [showEditDrawer, setShowEditDrawer] = useState(false);
     const [editMasterItemId, setEditMasterItemId] = useState<string | null>(null);
     const [sortMode, setSortMode] = useState(false);
+    const [multiSelectMode, setMultiSelectMode] = useState(false);
+    const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
+    const [showBulkEdit, setShowBulkEdit] = useState(false);
     const sensors = useSensors(
       useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
     );
@@ -367,6 +372,19 @@ export default function CategoryManagementPage(): React.ReactElement {
                       </div>
                     </Group>
                     <Title order={5} mb="sm">Items in this category</Title>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                      <div>
+                        <Checkbox label="Select multiple" checked={multiSelectMode} onChange={(e) => { setMultiSelectMode(e.currentTarget.checked); if (!e.currentTarget.checked) setSelectedItems(new Set()); }} />
+                      </div>
+                      <div>
+                        {multiSelectMode && (
+                          <Group>
+                            <Text size="sm">{selectedItems.size} selected</Text>
+                            <Button size="xs" onClick={() => setShowBulkEdit(true)} disabled={selectedItems.size === 0}>Bulk Edit</Button>
+                          </Group>
+                        )}
+                      </div>
+                    </div>
                     {categoryItems[cat.id]?.length > 0 ? (
                       <div>
                         <style>{`
@@ -399,11 +417,28 @@ export default function CategoryManagementPage(): React.ReactElement {
                         <div className="tl-category-grid">
                           {categoryItems[cat.id].map((item) => (
                             <div key={item.id} className="tl-category-item">
-                              <div className="tl-item-left">
-                                <Text>{item.name}</Text>
-                                {itemMembers[item.id] && itemMembers[item.id].length > 0 && (
-                                  <Text c="dimmed" size="sm">{itemMembers[item.id].map((m: any) => m.name).join(', ')}</Text>
+                              <div className="tl-item-left" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                {multiSelectMode && (
+                                  <input
+                                    type="checkbox"
+                                    aria-label={`Select ${item.name}`}
+                                    checked={selectedItems.has(item.id)}
+                                    onChange={(e) => {
+                                      const checked = (e.currentTarget as HTMLInputElement).checked;
+                                      setSelectedItems(prev => {
+                                        const copy = new Set(prev);
+                                        if (checked) copy.add(item.id); else copy.delete(item.id);
+                                        return copy;
+                                      });
+                                    }}
+                                  />
                                 )}
+                                <div>
+                                  <Text>{item.name}</Text>
+                                  {itemMembers[item.id] && itemMembers[item.id].length > 0 && (
+                                    <Text c="dimmed" size="sm">{itemMembers[item.id].map((m: any) => m.name).join(', ')}</Text>
+                                  )}
+                                </div>
                               </div>
                               <div className="tl-item-right">
                                 <ActionIcon color="blue" variant="light" onClick={() => { setEditMasterItemId(item.id); setShowEditDrawer(true); }} title="Edit item">
