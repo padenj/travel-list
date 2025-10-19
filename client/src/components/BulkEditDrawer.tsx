@@ -122,12 +122,26 @@ export default function BulkEditDrawer({ opened, onClose, itemIds, familyId, ini
             />
           </div>
           <div>
-            <Text size="sm" c="dimmed">Assign to family members</Text>
-            {members.length === 0 ? <Text c="dimmed">No family members</Text> : (
-              members.map(m => (
-                <Checkbox key={m.id} label={m.name} checked={selectedMembers.includes(m.id)} onChange={() => toggleMember(m.id)} />
-              ))
-            )}
+            <Text fw={700} mb="xs">Assignments</Text>
+            <div style={{ marginTop: 8 }}>
+              <Text size="sm" fw={600}>Members</Text>
+              {members.length === 0 ? (
+                <Text c="dimmed">No family members</Text>
+              ) : (
+                members.map((m: any) => (
+                  <div key={m.id} style={{ padding: '6px 0' }}>
+                    <Checkbox
+                      checked={selectedMembers.includes(m.id)}
+                      onChange={(e) => {
+                        const checked = (e.currentTarget as HTMLInputElement).checked;
+                        setSelectedMembers(prev => checked ? [...prev, m.id] : prev.filter(x => x !== m.id));
+                      }}
+                      label={m.name || m.username}
+                    />
+                  </div>
+                ))
+              )}
+            </div>
           </div>
           <Group justify="right">
             <Button variant="default" onClick={onClose}>Cancel</Button>
