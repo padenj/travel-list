@@ -14,12 +14,13 @@ import {
   createPackingList,
   populatePackingListFromTemplate,
 } from '../api';
+import { useImpersonation } from '../contexts/ImpersonationContext';
 import { showNotification } from '@mantine/notifications';
 import { useActivePackingList } from '../contexts/ActivePackingListContext';
 import ItemEditDrawer from './ItemEditDrawer';
-
 export default function ManagePackingLists() {
   const [familyId, setFamilyId] = useState<string | null>(null);
+  const { impersonatingFamilyId } = useImpersonation();
   const [lists, setLists] = useState<any[]>([]);
   // selected removed; edit modal holds the current list being edited in editListId
   // promote UI removed for now; will reintroduce promotion logic later
@@ -34,6 +35,7 @@ export default function ManagePackingLists() {
   const [editLoading, setEditLoading] = useState(false);
   const [showTemplateAssignDrawer, setShowTemplateAssignDrawer] = useState(false);
   const [templates, setTemplates] = useState<any[]>([]);
+  const [templateSelections, setTemplateSelections] = useState<string[]>([]);
   
   const [editAssignedTemplates, setEditAssignedTemplates] = useState<string[]>([]);
   const [showAddPane, setShowAddPane] = useState(false);
@@ -55,36 +57,79 @@ export default function ManagePackingLists() {
   const [copySourceItems, setCopySourceItems] = useState<any[]>([]);
   const [copySourceTemplateIds, setCopySourceTemplateIds] = useState<string[]>([]);
 
+  const { availableLists, refreshLists } = useActivePackingList();
+
+  // Keep local lists in sync with the provider's available lists (which
+  // already prefer impersonation). Trigger a refresh on mount or when
+  // impersonation changes so the provider can fetch the correct lists.
   useEffect(() => {
     (async () => {
-      const profile = await getCurrentUserProfile();
-      const fid = profile.response.ok && profile.data.family ? profile.data.family.id : null;
-      setFamilyId(fid);
-      if (!fid) return;
-      const res = await getFamilyPackingLists(fid);
-      if (res.response.ok) setLists(res.data.lists || []);
       try {
-        const tRes = await getTemplates(fid);
-        if (tRes.response.ok) setTemplates(tRes.data.templates || []);
+        await refreshLists();
       } catch (e) {
         // ignore
       }
     })();
-    // react-centric: open edit modal if the context has requested it
-    // (we rely on availableLists having been loaded via reload)
+  }, [impersonatingFamilyId]);
+
+  // sync local display lists whenever the provider updates
+  useEffect(() => {
+    setLists(availableLists || []);
+  }, [availableLists]);
+
+  // Keep a local familyId (used for creating/copying lists) in sync with
+  // impersonation / profile fallback.
+  useEffect(() => {
+    (async () => {
+      // Do not fall back to the current user's profile when impersonation is active.
+      let fid: string | null = null;
+      if (impersonatingFamilyId) {
+        fid = impersonatingFamilyId;
+      } else {
+        try {
+          const profile = await getCurrentUserProfile();
+          fid = profile.response.ok && profile.data.family ? profile.data.family.id : null;
+        } catch (e) {
+          fid = null;
+        }
+      }
+      setFamilyId(fid);
+      // Load templates for this family so the assignments drawer can show them
+      try {
+        if (fid) {
+          const tRes = await getTemplates(fid);
+          if (tRes.response && tRes.response.ok) {
+            setTemplates(tRes.data?.templates || []);
+          } else {
+            setTemplates([]);
+          }
+        } else {
+          setTemplates([]);
+        }
+      } catch (e) {
+        setTemplates([]);
+      }
+    })();
+  }, [impersonatingFamilyId]);
+
+  // react-centric: open edit modal if the context has requested it
+  // (we rely on availableLists having been loaded via reload)
+  useEffect(() => {
     const handleResize = () => setIsMobile(window.innerWidth < 600);
     handleResize();
     window.addEventListener('resize', handleResize);
-      return () => window.removeEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
   }, []);
 
   const { pendingOpenEditId, clearPendingOpenEdit, requestOpenEdit } = useActivePackingList();
 
   useEffect(() => {
-    if (pendingOpenEditId && familyId) {
+    if (pendingOpenEditId) {
       (async () => {
-        await reload();
-        const l = (await (async () => { const r = await getFamilyPackingLists(familyId || ''); return r.response.ok ? (r.data.lists || []) : []; })())?.find((x: any) => x.id === pendingOpenEditId);
+        // reload may return the fetched lists directly (improved provider)
+        const fetched = await refreshLists();
+        const source = Array.isArray(fetched) ? fetched : (availableLists || []);
+        const l = source.find((x: any) => x.id === pendingOpenEditId);
         if (l) {
           openEditFor(l);
           clearPendingOpenEdit && clearPendingOpenEdit();
@@ -94,9 +139,12 @@ export default function ManagePackingLists() {
   }, [pendingOpenEditId, familyId]);
 
   const reload = async () => {
-    if (!familyId) return;
-    const res = await getFamilyPackingLists(familyId);
-    if (res.response.ok) setLists(res.data.lists || []);
+    // ask the shared provider to refresh lists for the active family
+    try {
+      await refreshLists();
+    } catch (e) {
+      // ignore
+    }
   };
 
   const doRename = async () => {
@@ -395,8 +443,8 @@ export default function ManagePackingLists() {
               {/* controls panel placed between header and items list */}
               <div style={{ width: '100%', background: '#f5f5f7', padding: 12, borderRadius: 6, display: 'grid', gridTemplateColumns: '1fr auto 1fr', alignItems: 'center', gap: 12, marginBottom: 12 }}>
                 <div />
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12, justifyContent: 'center' }}>
-                  <Button onClick={() => setShowTemplateAssignDrawer(true)} size="xs">Manage Item Group Assignments</Button>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, justifyContent: 'center' }}>
+                  <Button onClick={() => { setTemplateSelections(editAssignedTemplates ? [...editAssignedTemplates] : []); setShowTemplateAssignDrawer(true); }} size="xs">Manage Item Group Assignments</Button>
                   <Button onClick={openAddItemsPane} disabled={editLoading} size="xs">Add Items</Button>
                 </div>
                 <div />
@@ -507,15 +555,27 @@ export default function ManagePackingLists() {
         <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
           <div style={{ marginBottom: 8 }}>
             <Text mb="xs">Assigned item groups</Text>
-            <MultiSelect
-              data={templates.map(t => ({ value: t.id, label: t.name }))}
-              value={editAssignedTemplates}
-              onChange={(vals) => setEditAssignedTemplates(vals)}
-              placeholder="Select item groups to assign..."
-              searchable
-              styles={{ dropdown: { zIndex: 2300 } }}
-              style={{ width: '100%' }}
-            />
+            <div style={{ maxHeight: 260, overflow: 'auto', border: '1px solid rgba(0,0,0,0.04)', borderRadius: 6, padding: 8 }}>
+              {templates.length === 0 ? (
+                <Text c="dimmed" size="sm">No item groups</Text>
+              ) : (
+                templates.map(t => {
+                  const checked = templateSelections.includes(t.id);
+                  return (
+                    <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 4px', borderBottom: '1px solid rgba(0,0,0,0.02)' }}>
+                      <input type="checkbox" checked={checked} onChange={(e) => {
+                        const next = e.currentTarget.checked ? [...templateSelections, t.id] : templateSelections.filter(id => id !== t.id);
+                        setTemplateSelections(next);
+                      }} />
+                      <div style={{ display: 'flex', flexDirection: 'column' }}>
+                        <div style={{ fontSize: 14 }}>{t.name}</div>
+                        {t.description ? <div style={{ fontSize: 12, color: 'rgba(0,0,0,0.6)' }}>{t.description}</div> : null}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
           </div>
           <div style={{ marginTop: 'auto', display: 'flex', justifyContent: 'space-between', gap: 8 }}>
             <Button variant="default" onClick={() => setShowTemplateAssignDrawer(false)}>Cancel</Button>
@@ -525,16 +585,34 @@ export default function ManagePackingLists() {
               try {
                 const serverRes = await getPackingList(editListId);
                 const serverTemplateIds: string[] = serverRes.response.ok ? (Array.isArray(serverRes.data.template_ids) ? serverRes.data.template_ids : []) : [];
-                const removed = serverTemplateIds.filter(tid => !editAssignedTemplates.includes(tid));
+                const removed = serverTemplateIds.filter(tid => !templateSelections.includes(tid));
                 let removeItemsForRemovedTemplates = false;
                 if (removed.length > 0) {
                   removeItemsForRemovedTemplates = confirm('You removed one or more item groups. Remove items that were added solely because of those item groups?');
                 }
-                const payload: any = { templateIds: editAssignedTemplates };
+                // If user removed templates we ask whether to also remove items that
+                // were added solely because of those templates. If the user cancels
+                // that confirmation, abort the save and revert the temporary
+                // selections back to the server-provided template set so nothing
+                // is changed.
+                if (removed.length > 0) {
+                  const keepGoing = removeItemsForRemovedTemplates;
+                  if (!keepGoing) {
+                    // User cancelled the confirmation -> revert selections and abort
+                    setTemplateSelections(Array.isArray(serverTemplateIds) ? [...serverTemplateIds] : []);
+                    showNotification({ title: 'Cancelled', message: 'No changes were saved', color: 'gray' });
+                    setEditLoading(false);
+                    return;
+                  }
+                }
+
+                const payload: any = { templateIds: templateSelections };
                 if (removeItemsForRemovedTemplates) payload.removeItemsForRemovedTemplates = true;
                 const res = await updatePackingList(editListId, payload);
                 if (res.response.ok) {
                   showNotification({ title: 'Saved', message: 'Item group assignments saved', color: 'green' });
+                  // Apply the confirmed selections locally so the UI reflects the saved assignments
+                  setEditAssignedTemplates([...templateSelections]);
                   await reload();
                   if (editListId) await openEditFor({ id: editListId, name: editListName });
                   setShowTemplateAssignDrawer(false);
@@ -677,8 +755,17 @@ export default function ManagePackingLists() {
             // add the created item to that packing list so it appears in the modal immediately.
                 if (payload && (payload as any).id && showAddPane && editListId) {
               try {
-                await addItemToPackingList(editListId, (payload as any).id);
-                showNotification({ title: 'Added', message: 'New item added to the packing list', color: 'green' });
+                const createdMasterId = (payload as any).id;
+                const alreadyPresent = (editItems || []).some(e => {
+                  const mid = e.itemId || e.item_id || e.master_id || e.masterId;
+                  return mid && String(mid) === String(createdMasterId);
+                });
+                if (!alreadyPresent) {
+                  await addItemToPackingList(editListId, createdMasterId);
+                  showNotification({ title: 'Added', message: 'New item added to the packing list', color: 'green' });
+                } else {
+                  console.debug('[ManagePackingLists] skipping addItemToPackingList, master already in list', createdMasterId);
+                }
               } catch (addErr) {
                 console.error('Failed to auto-add created item to packing list', addErr);
                 // continue to refresh available items even if auto-add failed

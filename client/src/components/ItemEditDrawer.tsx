@@ -13,6 +13,7 @@ import {
   createItem,
   getCategories,
   getCurrentUserProfile,
+  getFamily,
   deleteItem,
   getPackingList,
 } from '../api';
@@ -155,13 +156,24 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
               // ignore
             }
             try {
-              const profile = await getCurrentUserProfile();
-              if (profile.response.ok && profile.data.family) {
-                familyMembersFromProfile = profile.data.family.members || [];
+              // Prefer explicit family fetch so impersonation-selected family members are returned.
+              // IMPORTANT: when an explicit familyId is provided (which happens during impersonation)
+              // do NOT fall back to the current user's profile. We must avoid leaking member data
+              // from the logged-in user's profile into the impersonated family's context.
+              const famRes = await getFamily(familyId!);
+              if (famRes.response.ok && famRes.data.family) {
+                familyMembersFromProfile = famRes.data.family.members || [];
                 setFamilyMembers(familyMembersFromProfile);
+              } else {
+                // If the family fetch doesn't return a family (unexpected), treat as no members
+                familyMembersFromProfile = [];
+                setFamilyMembers([]);
               }
             } catch (e) {
-              // ignore
+              // If getFamily fails (network/server), do not fall back to profile when a familyId
+              // was explicitly provided. Leave members empty so the caller can handle missing members.
+              familyMembersFromProfile = [];
+              setFamilyMembers([]);
             }
 
             // New item initial selection: prefer caller-provided initialCategoryId and initialMembers/initialWhole, otherwise empty

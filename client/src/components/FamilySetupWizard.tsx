@@ -57,15 +57,31 @@ export default function FamilySetupWizard({ opened, onClose, onComplete, userRol
   const checkExistingFamily = async () => {
     try {
       setCheckingFamily(true);
-      const response = await getCurrentUserProfile();
-      if (response.response.ok && response.data.family) {
-        setExistingFamily(response.data.family);
+      // When a SystemAdmin opens the wizard while impersonating, prefer the impersonated family
+      // (do not fallback to the admin's profile). Otherwise use profile to detect an existing family.
+      let fam: any = null;
+      try {
+        const { useImpersonation } = await import('../contexts/ImpersonationContext');
+        const imp = useImpersonation();
+        if (imp && imp.impersonatingFamilyId) {
+          const famRes = await import('../api').then(m => m.getFamily(imp.impersonatingFamilyId!));
+          if (famRes.response.ok && famRes.data.family) fam = famRes.data.family;
+        }
+      } catch (e) {
+        // ignore and fall back to profile below
+      }
+      if (!fam) {
+        const response = await getCurrentUserProfile();
+        if (response.response.ok && response.data.family) fam = response.data.family;
+      }
+      if (fam) {
+        setExistingFamily(fam);
         setIsEditMode(true);
-        familyForm.setValues({ name: response.data.family.name });
-        setFamilyId(response.data.family.id);
+        familyForm.setValues({ name: fam.name });
+        setFamilyId(fam.id);
         // Load categories and items for existing family
-        await loadCategories(response.data.family.id);
-        await loadItems(response.data.family.id);
+        await loadCategories(fam.id);
+        await loadItems(fam.id);
       } else {
         setExistingFamily(null);
         setIsEditMode(false);

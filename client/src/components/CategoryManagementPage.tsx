@@ -10,6 +10,7 @@ import {
   getMembersForItem,
   assignItemToCategory,
   removeItemFromCategory,
+  deleteItem,
 } from '../api';
 import { useImpersonation } from '../contexts/ImpersonationContext';
 import { useRefresh } from '../contexts/RefreshContext';
@@ -115,8 +116,10 @@ export default function CategoryManagementPage(): React.ReactElement {
     async function fetchData() {
       setLoading(true);
       // prefer impersonation family id (set by SystemAdmin) otherwise load from profile
-      let fid = impersonatingFamilyId;
-      if (!fid) {
+      let fid: string | null = null;
+      if (impersonatingFamilyId) {
+        fid = impersonatingFamilyId;
+      } else {
         const profileRes = await import('../api').then(m => m.getCurrentUserProfile());
         if (profileRes.response.ok && profileRes.data.family) {
           fid = profileRes.data.family.id;
@@ -437,9 +440,24 @@ export default function CategoryManagementPage(): React.ReactElement {
                                 <ActionIcon color="blue" variant="light" onClick={() => { setEditMasterItemId(item.id); setShowEditDrawer(true); }} title="Edit item">
                                   <IconEdit size={16} />
                                 </ActionIcon>
-                                <ActionIcon color="red" variant="light" title="Remove from category" onClick={() => handleRemoveItem(item.id, cat.id)}>
-                                  <IconTrash size={16} />
-                                </ActionIcon>
+                                <ConfirmDelete
+                                  title="Delete item"
+                                  confirmText="Delete item?"
+                                  onConfirm={async () => {
+                                    const res = await deleteItem(item.id);
+                                    if (res.response.ok) {
+                                      setCategoryItems(prev => ({
+                                        ...prev,
+                                        [cat.id]: (prev[cat.id] || []).filter(i => i.id !== item.id),
+                                      }));
+                                      setItems(prev => prev.filter(i => i.id !== item.id));
+                                      bumpRefresh();
+                                    } else {
+                                      // basic error feedback; project uses notifications elsewhere
+                                      alert('Failed to delete item: ' + (res.data?.error || res.response.statusText));
+                                    }
+                                  }}
+                                />
                               </div>
                             </div>
                           ))}
