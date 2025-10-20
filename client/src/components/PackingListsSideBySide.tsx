@@ -33,6 +33,7 @@ export function PackingListsSideBySide({ userLists, wholeFamilyItems, onCheckIte
   const [showEditDrawer, setShowEditDrawer] = useState(false);
   // placeholder for master id if we later wire promotion flow
   const [editInitialName, setEditInitialName] = useState<string | undefined>(undefined);
+  const [editMasterItemId, setEditMasterItemId] = useState<string | null | undefined>(undefined);
   const [promoteContext, setPromoteContext] = useState<{ listId: string; packingListItemId: string } | null>(null);
   const [editInitialCategoryId, setEditInitialCategoryId] = useState<string | null | undefined>(undefined);
   const [editInitialMembers, setEditInitialMembers] = useState<string[] | undefined>(undefined);
@@ -61,6 +62,20 @@ export function PackingListsSideBySide({ userLists, wholeFamilyItems, onCheckIte
     })();
     return () => { mounted = false; };
   }, [familyId]);
+
+  // Helper: detect if a packing-list row should be treated as a one-off.
+  // Server/clients have historically used different shapes (snake_case vs camelCase)
+  // and sometimes used flags like `added_during_packing` or `masterIsOneOff`.
+  const isOneOffItem = (i: any) => {
+    return !!(
+      i?.added_during_packing ||
+      i?.addedDuringPacking ||
+      i?.master_is_one_off ||
+      i?.masterIsOneOff ||
+      i?.one_off ||
+      i?.oneOff
+    );
+  };
 
   useEffect(() => {
     let rafId: number | null = null;
@@ -97,8 +112,8 @@ export function PackingListsSideBySide({ userLists, wholeFamilyItems, onCheckIte
       {/* Single ItemEditDrawer instance so it can be opened from any column */}
       <ItemEditDrawer
         opened={showEditDrawer}
-        onClose={() => { setShowEditDrawer(false); setEditInitialName(undefined); setPromoteContext(null); }}
-        masterItemId={null}
+        onClose={() => { setShowEditDrawer(false); setEditInitialName(undefined); setPromoteContext(null); setEditMasterItemId(undefined); }}
+        masterItemId={editMasterItemId}
         initialName={editInitialName}
         familyId={familyId}
         initialCategoryId={editInitialCategoryId}
@@ -110,6 +125,7 @@ export function PackingListsSideBySide({ userLists, wholeFamilyItems, onCheckIte
         onSaved={async () => {
           setShowEditDrawer(false);
           setEditInitialName(undefined);
+          setEditMasterItemId(undefined);
           setEditInitialCategoryId(undefined);
           setEditInitialMembers(undefined);
           setEditInitialWhole(undefined);
@@ -135,8 +151,8 @@ export function PackingListsSideBySide({ userLists, wholeFamilyItems, onCheckIte
             ) : (
               (() => {
                 const notNeeded = new Set(notNeededWhole || []);
-                const oneOff = wholeFamilyItems.filter(i => i.added_during_packing || i.masterId == null || i.masterIsOneOff);
-                const regular = wholeFamilyItems.filter(i => !(i.added_during_packing || i.masterId == null || i.masterIsOneOff));
+                const oneOff = wholeFamilyItems.filter(i => isOneOffItem(i));
+                const regular = wholeFamilyItems.filter(i => !isOneOffItem(i));
                 const active = regular.filter(i => !notNeeded.has(i.id));
                 const dismissed = regular.filter(i => notNeeded.has(i.id));
                 const oneOffActive = oneOff.filter(i => !notNeeded.has(i.id));
@@ -181,7 +197,10 @@ export function PackingListsSideBySide({ userLists, wholeFamilyItems, onCheckIte
                             {/* Edit for one-off items: open edit drawer in promote mode */}
                             <ActionIcon size="sm" variant="light" onClick={() => {
                               console.debug('[PackingListsSideBySide] opening edit (whole) for item', { item, categoryId: (item as any).category ? (item as any).category.id : undefined, members: (item as any).members ? (item as any).members.map((m: any) => m.id) : undefined, whole_family: (item as any).whole_family });
+                              // Determine any referenced master item id from multiple possible field names
+                              const masterIdWhole = (item as any).item_id || (item as any).master_id || (item as any).itemId || (item as any).masterId || null;
                               setPromoteContext({ listId: activeListId || '', packingListItemId: item.id });
+                              setEditMasterItemId(masterIdWhole);
                               setEditInitialName(item.display_name || item.name);
                               setEditInitialCategoryId((item as any).category ? (item as any).category.id : undefined);
                               setEditInitialMembers((item as any).members ? (item as any).members.map((m: any) => m.id) : undefined);
@@ -243,8 +262,8 @@ export function PackingListsSideBySide({ userLists, wholeFamilyItems, onCheckIte
                   const notNeeded = new Set(notNeededByUser[list.userId] || []);
                   // Treat an item as one-off if added during packing, it has no masterId,
                   // or if the referenced master item itself is marked as a one-off.
-                  const oneOff = list.items.filter(i => i.added_during_packing || i.masterId == null || i.masterIsOneOff);
-                  const regular = list.items.filter(i => !(i.added_during_packing || i.masterId == null || i.masterIsOneOff));
+                  const oneOff = list.items.filter(i => isOneOffItem(i));
+                  const regular = list.items.filter(i => !isOneOffItem(i));
                   const active = regular.filter(i => !notNeeded.has(i.id));
                   const dismissed = regular.filter(i => notNeeded.has(i.id));
                   const oneOffActive = oneOff.filter(i => !notNeeded.has(i.id));
@@ -339,7 +358,9 @@ export function PackingListsSideBySide({ userLists, wholeFamilyItems, onCheckIte
                               {/* Edit for one-off items: open edit drawer in promote mode */}
                               <ActionIcon size="sm" variant="light" onClick={() => {
                                 console.debug('[PackingListsSideBySide] opening edit (user) for item', { item, categoryId: (item as any).category ? (item as any).category.id : undefined, members: (item as any).members ? (item as any).members.map((m: any) => m.id) : undefined, whole_family: (item as any).whole_family });
+                                const masterIdUser = (item as any).item_id || (item as any).master_id || (item as any).itemId || (item as any).masterId || null;
                                 setPromoteContext({ listId: activeListId || '', packingListItemId: item.id });
+                                setEditMasterItemId(masterIdUser);
                                 setEditInitialName(item.display_name || item.name);
                                 setEditInitialCategoryId((item as any).category ? (item as any).category.id : undefined);
                                 setEditInitialMembers((item as any).members ? (item as any).members.map((m: any) => m.id) : undefined);

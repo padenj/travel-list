@@ -324,6 +324,7 @@ export default function Dashboard(): React.ReactElement {
               showWhole={!!activeListId}
               activeListId={activeListId}
               familyId={familyId}
+              onRefresh={() => setListSelectionCount(prev => prev + 1)}
             />
           )}
           <ItemEditDrawer opened={showItemDrawer} onClose={() => { setShowItemDrawer(false); setItemDrawerDefaultMember(null); }} masterItemId={null} initialName={undefined} familyId={familyId} defaultAssignedMemberId={itemDrawerDefaultMember} onSaved={handleItemDrawerSaved} showIsOneOffCheckbox={true} />

@@ -11,6 +11,8 @@ import {
   deletePackingList,
   deletePackingListItem,
   addItemToPackingList,
+  createPackingList,
+  populatePackingListFromTemplate,
 } from '../api';
 import { showNotification } from '@mantine/notifications';
 import { useActivePackingList } from '../contexts/ActivePackingListContext';
@@ -44,6 +46,15 @@ export default function ManagePackingLists() {
   const [editTargetItem, setEditTargetItem] = useState<any | null>(null); // packing-list item object from editItems
   const [itemDrawerDefaultMember, setItemDrawerDefaultMember] = useState<string | null | undefined>(undefined);
 
+  // Copy drawer state
+  const [showCopyDrawer, setShowCopyDrawer] = useState(false);
+  const [copyLoading, setCopyLoading] = useState(false);
+  const [copyName, setCopyName] = useState('');
+  const [copyIncludeOneOffs, setCopyIncludeOneOffs] = useState(false);
+  const [copySourceList, setCopySourceList] = useState<any | null>(null);
+  const [copySourceItems, setCopySourceItems] = useState<any[]>([]);
+  const [copySourceTemplateIds, setCopySourceTemplateIds] = useState<string[]>([]);
+
   useEffect(() => {
     (async () => {
       const profile = await getCurrentUserProfile();
@@ -67,7 +78,7 @@ export default function ManagePackingLists() {
       return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  const { pendingOpenEditId, clearPendingOpenEdit } = useActivePackingList();
+  const { pendingOpenEditId, clearPendingOpenEdit, requestOpenEdit } = useActivePackingList();
 
   useEffect(() => {
     if (pendingOpenEditId && familyId) {
@@ -149,6 +160,129 @@ export default function ManagePackingLists() {
     }
   };
 
+  const openCopyFor = async (list: any) => {
+    setCopySourceList(list);
+    setCopyName(`${list.name} (copy)`);
+    setCopyIncludeOneOffs(false);
+    setShowCopyDrawer(true);
+
+    try {
+      const serverRes = await getPackingList(list.id);
+      if (serverRes.response.ok) {
+        setCopySourceItems(Array.isArray(serverRes.data.items) ? serverRes.data.items : []);
+        setCopySourceTemplateIds(Array.isArray(serverRes.data.template_ids) ? serverRes.data.template_ids : []);
+      } else {
+        setCopySourceItems([]);
+        setCopySourceTemplateIds([]);
+      }
+    } catch (err) {
+      setCopySourceItems([]);
+      setCopySourceTemplateIds([]);
+    }
+  };
+
+  const createCopy = async () => {
+    if (!copySourceList) return;
+    if (!familyId) {
+      showNotification({ title: 'Error', message: 'No family', color: 'red' });
+      return;
+    }
+    if (!copyName || copyName.trim() === '') {
+      showNotification({ title: 'Error', message: 'List name is required', color: 'red' });
+      return;
+    }
+
+    setCopyLoading(true);
+    try {
+      const createdRes = await createPackingList(familyId, copyName.trim());
+      if (!createdRes.response.ok || !createdRes.data || !createdRes.data.list) {
+        showNotification({ title: 'Error', message: 'Failed to create list', color: 'red' });
+        return;
+      }
+      const newList = createdRes.data.list;
+
+      // Populate templates (server will reconcile)
+      if (Array.isArray(copySourceTemplateIds) && copySourceTemplateIds.length > 0) {
+        for (const tid of copySourceTemplateIds) {
+          try {
+            await populatePackingListFromTemplate(newList.id, tid);
+          } catch (err) {
+            console.error('populate template failed', tid, err);
+          }
+        }
+      }
+
+      // Fetch new list items to avoid duplicating master items
+      let existingMasterIds = new Set<string>();
+      try {
+        const newListRes = await getPackingList(newList.id);
+        if (newListRes.response.ok) {
+          const newItems = Array.isArray(newListRes.data.items) ? newListRes.data.items : [];
+          for (const ni of newItems) {
+            const mid = ni.item_id || ni.master_id || ni.itemId || ni.masterId;
+            if (mid) existingMasterIds.add(String(mid));
+          }
+        }
+      } catch (err) {
+        // proceed anyway
+      }
+
+      // Add master and optionally one-off items from source
+      for (const srcItem of copySourceItems || []) {
+        // Robust one-off detection: prefer explicit flags from the server, but
+        // fall back to presence of a display_name if flags are missing.
+        const isOneOff = (() => {
+          if (typeof srcItem.master_is_one_off !== 'undefined') return !!srcItem.master_is_one_off;
+          if (typeof srcItem.masterIsOneOff !== 'undefined') return !!srcItem.masterIsOneOff;
+          if (typeof srcItem.oneOff !== 'undefined') return !!srcItem.oneOff;
+          // If server didn't supply flags, treat rows with an explicit display_name
+          // or an `added_during_packing` flag as one-offs (legacy/compat cases).
+          return !!(srcItem.display_name || srcItem.displayName || srcItem.added_during_packing || srcItem.addedDuringPacking);
+        })();
+        const srcMasterId = srcItem.item_id || srcItem.master_id || srcItem.itemId || srcItem.masterId;
+
+        if (!isOneOff && srcMasterId) {
+          // master item: add only if not already present
+          if (!existingMasterIds.has(String(srcMasterId))) {
+            try {
+              await addItemToPackingList(newList.id, srcMasterId);
+              existingMasterIds.add(String(srcMasterId));
+            } catch (err) {
+              console.error('Failed to add master item to copy', srcMasterId, err);
+            }
+          }
+        } else {
+          // one-off item (display_name)
+          if (copyIncludeOneOffs) {
+            try {
+              // derive category id and member assignments from source item if present
+              const srcCategoryId = srcItem.category && srcItem.category.id ? srcItem.category.id : (srcItem.master_category_id || srcItem.category_id || undefined);
+              const srcMemberIds = Array.isArray(srcItem.members) ? srcItem.members.map((m: any) => m.id).filter(Boolean) : undefined;
+              const srcWholeFamily = !!(srcItem.whole_family || srcItem.wholeFamily);
+              await addItemToPackingList(newList.id, undefined, srcItem.display_name || srcItem.name || srcItem.displayName, srcCategoryId, srcMemberIds, srcWholeFamily);
+            } catch (err) {
+              console.error('Failed to add one-off item to copy', srcItem.display_name, err);
+            }
+          }
+        }
+      }
+
+      showNotification({ title: 'Created', message: 'List copied', color: 'green' });
+      setShowCopyDrawer(false);
+      setCopySourceList(null);
+      setCopySourceItems([]);
+      setCopySourceTemplateIds([]);
+      setCopyName('');
+      try { await reload(); } catch {}
+      try { if (requestOpenEdit) requestOpenEdit(newList.id); } catch {}
+    } catch (err) {
+      console.error('Copy failed', err);
+      showNotification({ title: 'Error', message: String(err), color: 'red' });
+    } finally {
+      setCopyLoading(false);
+    }
+  };
+
   const openEditItemDrawerFor = (it: any) => {
     // If editing a one-off packing-list item, allow opening the drawer in promote mode (so user can promote to master)
     setEditTargetItem(it);
@@ -219,6 +353,7 @@ export default function ManagePackingLists() {
               <Text>{l.name}</Text>
               <Group>
                 <Button size="xs" onClick={() => openEditFor(l)}>Edit</Button>
+                <Button size="xs" onClick={() => openCopyFor(l)}>Copy</Button>
                 <Button size="xs" color="red" onClick={() => doDelete(l.id)}>Delete</Button>
                 {/* Promote One-off button removed; promotion will be implemented later */}
               </Group>
@@ -279,11 +414,22 @@ export default function ManagePackingLists() {
                   {editItems.length === 0 ? (
                 <Text c="dimmed">No items in this list</Text>
               ) : (
-                (() => {
+                  (() => {
                   const groups: Record<string, any[]> = {};
                   for (const it of editItems) {
                     const catName = it.category && it.category.name ? it.category.name : 'Uncategorized';
-                    const cat = it.item_id === null ? 'Uncategorized' : catName;
+                    // Robust one-off detection: server and client may provide multiple field names
+                    const isOneOff = (() => {
+                      if (typeof it.master_is_one_off !== 'undefined') return !!it.master_is_one_off;
+                      if (typeof it.masterIsOneOff !== 'undefined') return !!it.masterIsOneOff;
+                      if (typeof it.oneOff !== 'undefined') return !!it.oneOff;
+                      if (typeof it.added_during_packing !== 'undefined') return !!it.added_during_packing;
+                      if (typeof it.addedDuringPacking !== 'undefined') return !!it.addedDuringPacking;
+                      // If no explicit flags, treat rows without a master/item id as one-offs
+                      const mid = it.item_id || it.master_id || it.itemId || it.masterId;
+                      return !mid;
+                    })();
+                    const cat = isOneOff ? 'One-off' : catName;
                     if (!groups[cat]) groups[cat] = [];
                     groups[cat].push(it);
                   }
@@ -402,6 +548,33 @@ export default function ManagePackingLists() {
                 setEditLoading(false);
               }
             }}>Save Assignments</Button>
+          </div>
+        </div>
+      </Drawer>
+
+      {/* Copy Drawer */}
+      <Drawer
+        opened={showCopyDrawer}
+        onClose={() => { setShowCopyDrawer(false); setCopySourceList(null); }}
+        title={`Copy Packing List`}
+        position="right"
+        size={isMobile ? '80%' : 420}
+        padding="md"
+        zIndex={2200}
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+          <div style={{ marginBottom: 8 }}>
+            <Text mb="xs">New list name</Text>
+            <TextInput value={copyName} onChange={(e) => setCopyName(e.currentTarget.value)} placeholder="New list name" />
+          </div>
+          <div style={{ marginBottom: 8 }}>
+            <Checkbox label="Include one-off items" checked={copyIncludeOneOffs} onChange={(e) => setCopyIncludeOneOffs(e.currentTarget.checked)} />
+            <Text size="xs" c="dimmed" mt="xs">If unchecked, only items that reference master items and templates will be copied.</Text>
+          </div>
+
+          <div style={{ marginTop: 'auto', display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+            <Button variant="default" onClick={() => setShowCopyDrawer(false)} disabled={copyLoading}>Cancel</Button>
+            <Button onClick={createCopy} loading={copyLoading}>Create New List</Button>
           </div>
         </div>
       </Drawer>

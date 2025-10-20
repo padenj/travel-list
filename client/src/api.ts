@@ -48,10 +48,14 @@ export const createItem = async (familyId: string, name: string, isOneOff?: numb
   });
 };
 
-export const updateItem = async (id: string, name: string): Promise<ApiResponse> => {
+export const updateItem = async (id: string, name: string, isOneOff?: number): Promise<ApiResponse> => {
+  const body: any = { name };
+  if (typeof isOneOff !== 'undefined') {
+    body.isOneOff = isOneOff;
+  }
   return authenticatedApiCall(`/items/${id}`, {
     method: 'PUT',
-    body: JSON.stringify({ name }),
+    body: JSON.stringify(body),
   });
 };
 
@@ -179,10 +183,13 @@ export const setChecked = async (itemId: string, checked: boolean): Promise<ApiR
     });
   };
 
-  export const addItemToPackingList = async (listId: string, masterItemId?: string, oneOffName?: string): Promise<ApiResponse> => {
+  export const addItemToPackingList = async (listId: string, masterItemId?: string, oneOffName?: string, oneOffCategoryId?: string, memberIds?: string[], oneOffWholeFamily?: boolean): Promise<ApiResponse> => {
     const body: any = {};
     if (masterItemId) body.masterItemId = masterItemId;
     if (oneOffName) body.oneOff = { name: oneOffName };
+    if (oneOffName && oneOffCategoryId) body.oneOff.categoryId = oneOffCategoryId;
+    if (oneOffName && typeof oneOffWholeFamily !== 'undefined') body.oneOff.wholeFamily = !!oneOffWholeFamily;
+    if (Array.isArray(memberIds) && memberIds.length > 0) body.memberIds = memberIds;
     return authenticatedApiCall(`/packing-lists/${listId}/items`, {
       method: 'POST',
       body: JSON.stringify(body)

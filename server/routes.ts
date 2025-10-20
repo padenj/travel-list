@@ -555,7 +555,10 @@ router.post('/packing-lists/:id/items', authMiddleware, async (req: Request, res
     } else if (oneOff && oneOff.name) {
       try {
         // Accept optional memberIds to assign the newly created master one-off to members
-        created = await packingListRepo.addOneOffItem(id, oneOff.name, true, Array.isArray(memberIds) ? memberIds : undefined);
+        // Also accept optional categoryId to persist category on the master item
+        const categoryId = (oneOff && (oneOff.categoryId || oneOff.category_id)) || undefined;
+        const wholeFamily = (oneOff && (oneOff.wholeFamily || oneOff.whole_family)) || undefined;
+        created = await packingListRepo.addOneOffItem(id, oneOff.name, true, Array.isArray(memberIds) ? memberIds : undefined, categoryId, wholeFamily);
       } catch (err: any) {
         // Surface DB constraint errors to the caller rather than attempting
         // an automatic runtime migration. Migrations should be run explicitly.
@@ -568,7 +571,18 @@ router.post('/packing-lists/:id/items', authMiddleware, async (req: Request, res
   try { broadcastEvent({ type: 'packing_list_changed', listId: id, data: { item: created, change: 'add_item' } }); } catch (e) {}
   return res.json({ item: created });
   } catch (error) {
-    console.error('Error adding item to packing list:', error);
+    try {
+      // Ensure we only access .stack when error is an instance of Error
+      const errInfo = error instanceof Error ? (error.stack || error.message) : error;
+      console.error('Error adding item to packing list:', { err: errInfo, body: req.body });
+    } catch (logErr) {
+      // Fallback logging if serialization itself throws
+      try {
+        console.error('Error adding item to packing list (failed to serialize):', String(error));
+      } catch (e) {
+        console.error('Error adding item to packing list (failed to serialize and stringify)');
+      }
+    }
     return res.status(500).json({ error: 'Failed to add item to packing list' });
   }
 });
@@ -830,12 +844,17 @@ router.get('/items/:familyId', authMiddleware, familyAccessMiddleware('familyId'
 
 router.put('/items/:id', authMiddleware, async (req: Request, res: Response) => {
   const { id } = req.params;
-  const { name } = req.body;
+  const { name, isOneOff } = req.body;
   if (!name || name.trim() === '') {
     return res.status(400).json({ error: 'Item name is required' });
   }
   try {
-    const updated = await itemRepo.update(id, { name: name.trim() });
+    const updates: any = { name: name.trim() };
+    // Allow updating isOneOff flag (e.g., converting one-off to regular item)
+    if (typeof isOneOff !== 'undefined') {
+      updates.isOneOff = isOneOff ? 1 : 0;
+    }
+    const updated = await itemRepo.update(id, updates);
     // enqueue propagation for templates that reference this item
     try {
       const templateIds = await templateRepo.getTemplatesReferencingItem(id);
@@ -1097,7 +1116,8 @@ if (!isTestEnv) {
       let fid = familyId;
       if (!fid && req.user && req.user.familyId) fid = req.user.familyId;
 
-      const [categories, itemCategories, members, itemMembers, wholeAssigned] = await Promise.all([
+      const [item, categories, itemCategories, members, itemMembers, wholeAssigned] = await Promise.all([
+        itemRepo.findById(itemId),
         fid ? categoryRepo.findAll(fid) : Promise.resolve([]),
         itemRepo.getCategoriesForItem(itemId),
         fid ? userRepo.findByFamilyId(fid) : Promise.resolve([]),
@@ -1105,7 +1125,7 @@ if (!isTestEnv) {
         itemRepo.isAssignedToWholeFamily(itemId),
       ]);
 
-      return res.json({ categories, itemCategories, members, itemMembers, wholeAssigned });
+      return res.json({ item, categories, itemCategories, members, itemMembers, wholeAssigned });
     } catch (error) {
       console.error('Error fetching edit-data for item:', error);
       return res.status(500).json({ error: 'Failed to fetch item edit data' });
