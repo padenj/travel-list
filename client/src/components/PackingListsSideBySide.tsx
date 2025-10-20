@@ -1,7 +1,7 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Text, Stack, Checkbox, ScrollArea, ActionIcon } from '@mantine/core';
 import { getCategories } from '../api';
-import { IconHexagonMinus, IconRotateClockwise, IconPlus, IconEdit } from '@tabler/icons-react';
+import { IconHexagonMinus, IconRotateClockwise, IconPlus, IconEdit, IconArrowsMinimize, IconArrowsMaximize } from '@tabler/icons-react';
 import ItemEditDrawer from './ItemEditDrawer';
 
 export interface PackingListProps {
@@ -20,8 +20,12 @@ export interface PackingListProps {
 }
 
 const ItemLabel: React.FC<{ text: string }> = ({ text }) => (
-  <span style={{ fontSize: 13, lineHeight: '1.1', display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{text}</span>
+  // Allow wrapping: remove nowrap/ellipsis so long names wrap to the next line
+  <span style={{ fontSize: 13, lineHeight: '1.2', display: 'block', whiteSpace: 'normal', wordBreak: 'break-word', overflowWrap: 'anywhere', flex: '1 1 auto', minWidth: 0 }}>{text}</span>
 );
+
+// Fixed column width (px) used for all columns so they render equal widths
+const COLUMN_WIDTH = 203;
 
 export function PackingListsSideBySide({ userLists, wholeFamilyItems, onCheckItem, notNeededByUser = {}, notNeededWhole = [], onToggleNotNeeded, onOpenAddDrawer, showWhole = true, activeListId, familyId, onRefresh }: PackingListProps) {
 
@@ -39,6 +43,55 @@ export function PackingListsSideBySide({ userLists, wholeFamilyItems, onCheckIte
   const [editInitialMembers, setEditInitialMembers] = useState<string[] | undefined>(undefined);
   const [editInitialWhole, setEditInitialWhole] = useState<boolean | undefined>(undefined);
   const [categories, setCategories] = useState<any[]>([]);
+  const [collapsedColumns, setCollapsedColumns] = useState<Record<string, boolean>>({});
+
+  const toggleCollapse = (key: string) => {
+    setCollapsedColumns(prev => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  // Utility: measure text width using canvas. Used to compute how tall a
+  // rotated label will be so we can ensure a collapsed-only layout still is
+  // tall enough to show the full rotated title.
+  const measureText = (text: string, font = '13px system-ui, sans-serif') => {
+    try {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return 0;
+      ctx.font = font;
+      return ctx.measureText(text).width;
+    } catch (e) {
+      return 0;
+    }
+  };
+
+  // Determine whether all visible columns are collapsed. If so, we want to
+  // ensure the columns area has a minHeight large enough to display the
+  // rotated column title without clipping.
+  const allCollapsed = useMemo(() => {
+    // Consider only columns that are rendered (whole if showWhole)
+    const keys: string[] = [];
+    if (showWhole) keys.push('whole');
+    for (const l of userLists) keys.push(l.userId);
+    return keys.length > 0 && keys.every(k => !!collapsedColumns[k]);
+  }, [collapsedColumns, userLists, showWhole]);
+
+  // Compute required minHeight (px) to display the longest rotated title
+  // when collapsed. Rotated text is measured horizontally then we add padding
+  // and small safety margin. This is a best-effort approximation.
+  const requiredMinHeight = useMemo(() => {
+    const titles: string[] = [];
+    if (showWhole) titles.push('Whole Family');
+    for (const l of userLists) titles.push(l.userName);
+    let maxW = 0;
+    for (const t of titles) {
+      const w = measureText(t);
+      if (w > maxW) maxW = w;
+    }
+    // Because we rotate -90deg the visible height needed is approx the measured width
+    // plus small padding. Clamp to a sensible min value.
+    const pad = 12;
+    return Math.max(28, Math.ceil(maxW + pad));
+  }, [userLists, showWhole]);
 
   // Load family categories so we can render lists grouped by the configured category order
   useEffect(() => {
@@ -107,8 +160,207 @@ export function PackingListsSideBySide({ userLists, wholeFamilyItems, onCheckIte
 
   // Render lists horizontally in a scrollable row. Each column is a simple
   // div (no Card box). Between columns we render a subtle vertical Divider.
+
+  // Extract the Whole Family column into a variable so the JSX parser
+  // doesn't get confused by nested inline IIFEs and ternaries inside the
+  // returned markup. This keeps the return value's children simple.
+  // Simplified placeholder while we validate JSX parsing. We'll reintroduce
+  // the full detailed rendering once the parser/lint errors are resolved.
+  const wholeColumn = showWhole ? (
+    collapsedColumns['whole'] ? (
+      <div role="button" tabIndex={0} onClick={() => toggleCollapse('whole')} style={{ width: 28, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>Whole</div>
+    ) : (
+      <div style={{ minWidth: COLUMN_WIDTH, width: `${COLUMN_WIDTH}px`, padding: 8 }}>Whole Family</div>
+    )
+  ) : null;
+  // Helper that renders a column header and content area. `content` should
+  // already be prepared as an array of React nodes.
+  const renderColumn = (key: string, title: string, content: React.ReactNode[], canAdd?: boolean, addHandler?: () => void, isLast?: boolean) => {
+    if (collapsedColumns[key]) {
+      // When collapsed: use writing-mode for vertical text instead of transform.
+      // This is more predictable for positioning and won't clip at the top.
+      return (
+        <div role="button" tabIndex={0} key={`tab-${key}`} onClick={() => toggleCollapse(key)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') toggleCollapse(key); }} style={{ width: 48, minWidth: 48, flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-start', cursor: 'pointer', borderLeft: '2px solid #e0e0e0', borderRight: isLast ? '2px solid #e0e0e0' : undefined, borderTop: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', background: '#fafafa', paddingTop: 8, paddingBottom: 8, gap: 8 }} aria-label={`Expand ${title}`}>
+          <IconArrowsMaximize size={16} stroke={1.5} style={{ color: '#000', fontWeight: 600 }} />
+          <span style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)', display: 'inline-block', fontSize: 14, lineHeight: 1, whiteSpace: 'nowrap', fontWeight: 600, color: '#000' }}>{title}</span>
+        </div>
+      );
+    }
+    return (
+      <div key={`col-${key}`} style={{ minWidth: COLUMN_WIDTH, width: `${COLUMN_WIDTH}px`, borderLeft: '2px solid #e0e0e0', borderRight: isLast ? '2px solid #e0e0e0' : undefined, height: availableHeight ? `${availableHeight}px` : '60vh', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', paddingLeft: 14, background: '#fafafa', marginBottom: 0, borderTop: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <ActionIcon size="xs" variant="subtle" onClick={() => toggleCollapse(key)} aria-label={`Collapse ${title} column`} title="Collapse">
+              <IconArrowsMinimize size={14} />
+            </ActionIcon>
+            <Text size="sm" fw={600}>{title}</Text>
+          </div>
+          {canAdd && addHandler ? (
+            <ActionIcon size="sm" variant="light" onClick={addHandler} aria-label={`Add one-off to ${title}`}>
+              <IconPlus size={14} />
+            </ActionIcon>
+          ) : null}
+        </div>
+        <ScrollArea style={{ flex: 1, padding: '8px 12px', paddingLeft: 14 }}>
+          <Stack style={{ gap: 6 }}>
+            {content}
+          </Stack>
+        </ScrollArea>
+      </div>
+    );
+  };
+
+  const wholeContent: React.ReactNode[] = [];
+  if (wholeFamilyItems.length === 0) {
+    wholeContent.push(<span key="wf-empty" style={{ color: '#888', fontSize: 13 }}>No items assigned</span>);
+  } else {
+    const notNeeded = new Set(notNeededWhole || []);
+    const oneOff = wholeFamilyItems.filter(i => isOneOffItem(i));
+    const regular = wholeFamilyItems.filter(i => !isOneOffItem(i));
+    const active = regular.filter(i => !notNeeded.has(i.id));
+    const dismissed = regular.filter(i => notNeeded.has(i.id));
+    const oneOffActive = oneOff.filter(i => !notNeeded.has(i.id));
+    const oneOffDismissed = oneOff.filter(i => notNeeded.has(i.id));
+
+    active.forEach(item => wholeContent.push(
+      <div key={`wf-active-${item.id}`} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0' }}>
+        <Checkbox checked={item.checked} onChange={e => onCheckItem(null, item.id, e.target.checked)} styles={{ body: { padding: 0 } }} aria-label={item.name} />
+        <ItemLabel text={(item as any).display_name || item.name} />
+        {onToggleNotNeeded ? (<ActionIcon size="sm" variant="subtle" onClick={() => onToggleNotNeeded(null, item.id)} aria-label="Not needed"><IconHexagonMinus size={14} /></ActionIcon>) : null}
+      </div>
+    ));
+
+    if (oneOffActive.length > 0) {
+      wholeContent.push(<div key="wf-oneoff-title" style={{ marginTop: 10 }}><Text size="xs" fw={700}>One-off</Text></div>);
+      oneOffActive.forEach(item => wholeContent.push(
+        <div key={`wf-oneoff-${item.id}`} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0' }}>
+          <Checkbox checked={item.checked} onChange={e => onCheckItem(null, item.id, e.target.checked)} styles={{ body: { padding: 0 } }} aria-label={item.name} />
+          <ItemLabel text={(item as any).display_name || item.name} />
+          {onToggleNotNeeded ? (<ActionIcon size="sm" variant="subtle" onClick={() => onToggleNotNeeded(null, item.id)} aria-label="Not needed"><IconHexagonMinus size={14} /></ActionIcon>) : null}
+          <ActionIcon size="sm" variant="light" onClick={() => {
+            const masterIdWhole = (item as any).item_id || (item as any).master_id || (item as any).itemId || (item as any).masterId || null;
+            setPromoteContext({ listId: activeListId || '', packingListItemId: item.id });
+            setEditMasterItemId(masterIdWhole);
+            setEditInitialName(item.display_name || item.name);
+            setEditInitialCategoryId((item as any).category ? (item as any).category.id : undefined);
+            setEditInitialMembers((item as any).members ? (item as any).members.map((m: any) => m.id) : undefined);
+            setEditInitialWhole(!!(item as any).whole_family);
+            setShowEditDrawer(true);
+          }} aria-label="Edit one-off"><IconEdit size={14} /></ActionIcon>
+        </div>
+      ));
+    }
+
+    if (dismissed.length > 0 || oneOffDismissed.length > 0) {
+      wholeContent.push(
+        <div key="wf-dismissed" style={{ marginTop: 8 }}>
+          <Text size="xs" c="dimmed">Not needed</Text>
+          {[...dismissed, ...oneOffDismissed].map(item => (
+            <div key={`wf-dismissed-${item.id}`} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0', color: '#888' }}>
+              <Checkbox disabled checked={item.checked} onChange={e => onCheckItem(null, item.id, e.target.checked)} styles={{ body: { padding: 0 } }} aria-label={item.name} />
+              <ItemLabel text={(item as any).display_name || item.name} />
+              {onToggleNotNeeded ? (<ActionIcon size="sm" variant="subtle" onClick={() => onToggleNotNeeded(null, item.id)} aria-label="Move to active"><IconRotateClockwise size={14} /></ActionIcon>) : null}
+            </div>
+          ))}
+        </div>
+      );
+    }
+  }
+
+  const renderUserContent = (list: any) => {
+    const parts: React.ReactNode[] = [];
+    if (!list.items || list.items.length === 0) {
+      parts.push(<span key={`${list.userId}-empty`} style={{ color: '#888', fontSize: 13 }}>No items assigned</span>);
+      return parts;
+    }
+    const notNeeded = new Set(notNeededByUser[list.userId] || []);
+    const oneOff = list.items.filter((i: any) => isOneOffItem(i));
+    const regular = list.items.filter((i: any) => !isOneOffItem(i));
+    const active = regular.filter((i: any) => !notNeeded.has(i.id));
+    const dismissed = regular.filter((i: any) => notNeeded.has(i.id));
+    const oneOffActive = oneOff.filter((i: any) => !notNeeded.has(i.id));
+    const oneOffDismissed = oneOff.filter((i: any) => notNeeded.has(i.id));
+
+    const grouped = new Map<string | null, any[]>();
+    for (const it of active) {
+      const cid = (it as any).category && (it as any).category.id ? (it as any).category.id : null;
+      if (!grouped.has(cid)) grouped.set(cid, []);
+      grouped.get(cid)!.push(it);
+    }
+    for (const cat of categories) {
+      const itemsForCat = grouped.get(cat.id) || [];
+      if (itemsForCat.length === 0) continue;
+      parts.push(
+        <div key={`cat-${cat.id}`} style={{ marginTop: 6 }}>
+          <Text size="xs" fw={700}>{cat.name}</Text>
+          {itemsForCat.map(item => (
+            <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0' }}>
+              <Checkbox checked={item.checked} onChange={e => onCheckItem(list.userId, item.id, e.target.checked)} styles={{ body: { padding: 0 } }} aria-label={item.display_name || item.name} />
+              <ItemLabel text={item.display_name || item.name} />
+              {onToggleNotNeeded ? (<ActionIcon size="sm" variant="subtle" onClick={() => onToggleNotNeeded(list.userId, item.id)} aria-label="Not needed"><IconHexagonMinus size={14} /></ActionIcon>) : null}
+            </div>
+          ))}
+        </div>
+      );
+      grouped.delete(cat.id);
+    }
+    const uncats = grouped.get(null) || [];
+    if (uncats.length > 0) {
+      parts.push(
+        <div key="cat-uncategorized" style={{ marginTop: 6 }}>
+          <Text size="xs" fw={700}>Uncategorized</Text>
+          {uncats.map((item: any) => (
+            <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0' }}>
+              <Checkbox checked={item.checked} onChange={e => onCheckItem(list.userId, item.id, e.target.checked)} styles={{ body: { padding: 0 } }} aria-label={item.display_name || item.name} />
+              <ItemLabel text={item.display_name || item.name} />
+              {onToggleNotNeeded ? (<ActionIcon size="sm" variant="subtle" onClick={() => onToggleNotNeeded(list.userId, item.id)} aria-label="Not needed"><IconHexagonMinus size={14} /></ActionIcon>) : null}
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    if (oneOffActive.length > 0) {
+      parts.push(<div key={`oneoff-title-${list.userId}`} style={{ marginTop: 10 }}><Text size="xs" fw={700}>One-off</Text></div>);
+      oneOffActive.forEach((item: any) => parts.push(
+        <div key={`user-oneoff-${item.id}`} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0' }}>
+          <Checkbox checked={item.checked} onChange={e => onCheckItem(list.userId, item.id, e.target.checked)} styles={{ body: { padding: 0 } }} aria-label={item.display_name || item.name} />
+          <ItemLabel text={item.display_name || item.name} />
+          {onToggleNotNeeded ? (<ActionIcon size="sm" variant="subtle" onClick={() => onToggleNotNeeded(list.userId, item.id)} aria-label="Not needed"><IconHexagonMinus size={14} /></ActionIcon>) : null}
+          <ActionIcon size="sm" variant="light" onClick={() => {
+            const masterIdUser = (item as any).item_id || (item as any).master_id || (item as any).itemId || (item as any).masterId || null;
+            setPromoteContext({ listId: activeListId || '', packingListItemId: item.id });
+            setEditMasterItemId(masterIdUser);
+            setEditInitialName(item.display_name || item.name);
+            setEditInitialCategoryId((item as any).category ? (item as any).category.id : undefined);
+            setEditInitialMembers((item as any).members ? (item as any).members.map((m: any) => m.id) : undefined);
+            setEditInitialWhole(!!(item as any).whole_family);
+            setShowEditDrawer(true);
+          }} aria-label="Edit one-off"><IconEdit size={14} /></ActionIcon>
+        </div>
+      ));
+    }
+
+    if (dismissed.length > 0 || oneOffDismissed.length > 0) {
+      parts.push(
+        <div key={`user-dismissed-${list.userId}`} style={{ marginTop: 8 }}>
+          <Text size="xs" c="dimmed">Not needed</Text>
+          {[...dismissed, ...oneOffDismissed].map((item: any) => (
+            <div key={`user-dismissed-item-${item.id}`} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0', color: '#888' }}>
+              <Checkbox disabled checked={item.checked} onChange={e => onCheckItem(list.userId, item.id, e.target.checked)} styles={{ body: { padding: 0 } }} aria-label={item.name} />
+              <ItemLabel text={item.display_name || item.name} />
+              {onToggleNotNeeded ? (<ActionIcon size="sm" variant="subtle" onClick={() => onToggleNotNeeded(list.userId, item.id)} aria-label="Move to active"><IconRotateClockwise size={14} /></ActionIcon>) : null}
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    return parts;
+  };
+
   return (
-    <div ref={wrapperRef} style={{ display: 'flex', overflowX: 'auto', gap: 0, alignItems: 'stretch' }}>
+    <div ref={wrapperRef} style={{ display: 'flex', overflowX: 'auto', gap: 0, alignItems: 'stretch', minHeight: allCollapsed ? `${requiredMinHeight}px` : undefined }}>
       {/* Single ItemEditDrawer instance so it can be opened from any column */}
       <ItemEditDrawer
         opened={showEditDrawer}
@@ -133,273 +385,12 @@ export function PackingListsSideBySide({ userLists, wholeFamilyItems, onCheckIte
           if (onRefresh) onRefresh();
         }}
       />
+
       {/* Whole Family column first (force left-most) */}
-  {showWhole ? (
-  <div style={{ minWidth: 165, padding: '8px 12px', paddingLeft: 14, /* fill most of viewport height; computed dynamically */ height: availableHeight ? `${availableHeight}px` : '60vh', display: 'flex', flexDirection: 'column' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-          <Text size="sm" fw={600}>Whole Family</Text>
-          {onOpenAddDrawer ? (
-            <ActionIcon size="sm" variant="light" onClick={() => onOpenAddDrawer(null)} aria-label="Add one-off to whole family">
-              <IconPlus size={14} />
-            </ActionIcon>
-          ) : null}
-        </div>
-        <ScrollArea style={{ flex: 1 }}>
-          <Stack style={{ gap: 6 }}>
-            {wholeFamilyItems.length === 0 ? (
-              <span style={{ color: '#888', fontSize: 13 }}>No items assigned</span>
-            ) : (
-              (() => {
-                const notNeeded = new Set(notNeededWhole || []);
-                const oneOff = wholeFamilyItems.filter(i => isOneOffItem(i));
-                const regular = wholeFamilyItems.filter(i => !isOneOffItem(i));
-                const active = regular.filter(i => !notNeeded.has(i.id));
-                const dismissed = regular.filter(i => notNeeded.has(i.id));
-                const oneOffActive = oneOff.filter(i => !notNeeded.has(i.id));
-                const oneOffDismissed = oneOff.filter(i => notNeeded.has(i.id));
-                return (
-                  <div>
-                    {active.map(item => (
-                      <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0' }}>
-                        <Checkbox
-                          checked={item.checked}
-                          onChange={e => onCheckItem(null, item.id, e.target.checked)}
-                          styles={{ body: { padding: 0 } }}
-                          aria-label={item.name}
-                        />
-                        <ItemLabel text={item.name} />
-                        {onToggleNotNeeded ? (
-                          <ActionIcon size="sm" variant="subtle" onClick={() => onToggleNotNeeded(null, item.id)} aria-label="Not needed">
-                            <IconHexagonMinus size={14} />
-                          </ActionIcon>
-                        ) : null}
-                      </div>
-                    ))}
+      {renderColumn('whole', 'Whole Family', wholeContent, !!onOpenAddDrawer, () => onOpenAddDrawer && onOpenAddDrawer(null), userLists.length === 0)}
 
-                    {/* One-off section for whole-family column */}
-                    {oneOffActive.length > 0 ? (
-                      <div style={{ marginTop: 10 }}>
-                        <Text size="xs" fw={700}>One-off</Text>
-                        {oneOffActive.map(item => (
-                          <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0' }}>
-                            <Checkbox
-                              checked={item.checked}
-                              onChange={e => onCheckItem(null, item.id, e.target.checked)}
-                              styles={{ body: { padding: 0 } }}
-                              aria-label={item.name}
-                            />
-                            <ItemLabel text={item.name} />
-                            {onToggleNotNeeded ? (
-                              <ActionIcon size="sm" variant="subtle" onClick={() => onToggleNotNeeded(null, item.id)} aria-label="Not needed">
-                                <IconHexagonMinus size={14} />
-                              </ActionIcon>
-                            ) : null}
-                            {/* Edit for one-off items: open edit drawer in promote mode */}
-                            <ActionIcon size="sm" variant="light" onClick={() => {
-                              console.debug('[PackingListsSideBySide] opening edit (whole) for item', { item, categoryId: (item as any).category ? (item as any).category.id : undefined, members: (item as any).members ? (item as any).members.map((m: any) => m.id) : undefined, whole_family: (item as any).whole_family });
-                              // Determine any referenced master item id from multiple possible field names
-                              const masterIdWhole = (item as any).item_id || (item as any).master_id || (item as any).itemId || (item as any).masterId || null;
-                              setPromoteContext({ listId: activeListId || '', packingListItemId: item.id });
-                              setEditMasterItemId(masterIdWhole);
-                              setEditInitialName(item.display_name || item.name);
-                              setEditInitialCategoryId((item as any).category ? (item as any).category.id : undefined);
-                              setEditInitialMembers((item as any).members ? (item as any).members.map((m: any) => m.id) : undefined);
-                              setEditInitialWhole(!!(item as any).whole_family);
-                              setShowEditDrawer(true);
-                            }} aria-label="Edit one-off">
-                              <IconEdit size={14} />
-                            </ActionIcon>
-                          </div>
-                        ))}
-                      </div>
-                    ) : null}
-
-                      {(dismissed.length > 0 || oneOffDismissed.length > 0) ? (
-                        <div style={{ marginTop: 8 }}>
-                          <Text size="xs" c="dimmed">Not needed</Text>
-                          {[...dismissed, ...oneOffDismissed].map(item => (
-                            <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0', color: '#888' }}>
-                            <Checkbox disabled checked={item.checked} onChange={e => onCheckItem(null, item.id, e.target.checked)} styles={{ body: { padding: 0 } }} aria-label={item.name} />
-                            <ItemLabel text={item.name} />
-                            {onToggleNotNeeded ? (
-                              <ActionIcon size="sm" variant="subtle" onClick={() => onToggleNotNeeded(null, item.id)} aria-label="Move to active">
-                                <IconRotateClockwise size={14} />
-                              </ActionIcon>
-                            ) : null}
-                          </div>
-                          ))}
-                        </div>
-                      ) : null}
-                  </div>
-                );
-              })()
-            )}
-          </Stack>
-        </ScrollArea>
-    </div>
-  ) : null}
-
-  {userLists.map((list) => (
-        <div key={list.userId + '-wrap'} style={{ display: 'flex', alignItems: 'stretch' }}>
-          <div
-            key={list.userId}
-            style={{ minWidth: 165, padding: '8px 12px', paddingLeft: 14, borderLeft: '2px solid #e0e0e0', /* fill most of viewport height; computed dynamically */ height: availableHeight ? `${availableHeight}px` : '60vh', display: 'flex', flexDirection: 'column' }}
-          >
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-            <Text size="sm" fw={600}>{list.userName}'s List</Text>
-            {onOpenAddDrawer ? (
-              <ActionIcon size="sm" variant="light" onClick={() => onOpenAddDrawer(list.userId)} aria-label="Add one-off">
-                <IconPlus size={14} />
-              </ActionIcon>
-            ) : null}
-          </div>
-          <ScrollArea style={{ flex: 1 }}>
-            <Stack style={{ gap: 6 }}>
-              {list.items.length === 0 ? (
-                <span style={{ color: '#888', fontSize: 13 }}>No items assigned</span>
-              ) : (
-                (() => {
-                  const notNeeded = new Set(notNeededByUser[list.userId] || []);
-                  // Treat an item as one-off if added during packing, it has no masterId,
-                  // or if the referenced master item itself is marked as a one-off.
-                  const oneOff = list.items.filter(i => isOneOffItem(i));
-                  const regular = list.items.filter(i => !isOneOffItem(i));
-                  const active = regular.filter(i => !notNeeded.has(i.id));
-                  const dismissed = regular.filter(i => notNeeded.has(i.id));
-                  const oneOffActive = oneOff.filter(i => !notNeeded.has(i.id));
-                  const oneOffDismissed = oneOff.filter(i => notNeeded.has(i.id));
-                  return (
-                    <div>
-                      {/* Regular items first */}
-                      {/* Group regular (non-one-off) active items by category in configured order */}
-                      {(() => {
-                        // Build grouped map by category id (null for uncategorized)
-                        const grouped = new Map<string | null, any[]>();
-                        for (const it of active) {
-                          const cid = (it as any).category && (it as any).category.id ? (it as any).category.id : null;
-                          if (!grouped.has(cid)) grouped.set(cid, []);
-                          grouped.get(cid)!.push(it);
-                        }
-                        const parts: any[] = [];
-                        // Render categories in configured order
-                        for (const cat of categories) {
-                          const itemsForCat = grouped.get(cat.id) || [];
-                          if (itemsForCat.length === 0) continue;
-                          parts.push(
-                            <div key={`cat-${cat.id}`} style={{ marginTop: 6 }}>
-                              <Text size="xs" fw={700}>{cat.name}</Text>
-                              {itemsForCat.map(item => (
-                                <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0' }}>
-                                  <Checkbox
-                                    checked={item.checked}
-                                    onChange={e => onCheckItem(list.userId, item.id, e.target.checked)}
-                                    styles={{ body: { padding: 0 } }}
-                                    aria-label={item.display_name || item.name}
-                                  />
-                                  <ItemLabel text={item.display_name || item.name} />
-                                  {onToggleNotNeeded ? (
-                                    <ActionIcon size="sm" variant="subtle" onClick={() => onToggleNotNeeded(list.userId, item.id)} aria-label="Not needed">
-                                      <IconHexagonMinus size={14} />
-                                    </ActionIcon>
-                                  ) : null}
-                                </div>
-                              ))}
-                            </div>
-                          );
-                          grouped.delete(cat.id);
-                        }
-                        // Remaining uncategorized items (null key)
-                        const uncats = grouped.get(null) || [];
-                        if (uncats.length > 0) {
-                          parts.push(
-                            <div key="cat-uncategorized" style={{ marginTop: 6 }}>
-                              <Text size="xs" fw={700}>Uncategorized</Text>
-                              {uncats.map(item => (
-                                <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0' }}>
-                                  <Checkbox
-                                    checked={item.checked}
-                                    onChange={e => onCheckItem(list.userId, item.id, e.target.checked)}
-                                    styles={{ body: { padding: 0 } }}
-                                    aria-label={item.display_name || item.name}
-                                  />
-                                  <ItemLabel text={item.display_name || item.name} />
-                                  {onToggleNotNeeded ? (
-                                    <ActionIcon size="sm" variant="subtle" onClick={() => onToggleNotNeeded(list.userId, item.id)} aria-label="Not needed">
-                                      <IconHexagonMinus size={14} />
-                                    </ActionIcon>
-                                  ) : null}
-                                </div>
-                              ))}
-                            </div>
-                          );
-                        }
-                        return parts;
-                      })()}
-
-                      {/* One-off items above Not needed */}
-                      {/* One-off section for user column (rendered after grouped regular items) */}
-                      {oneOffActive.length > 0 ? (
-                        <div style={{ marginTop: 10 }}>
-                          <Text size="xs" fw={700}>One-off</Text>
-                          {oneOffActive.map(item => (
-                            <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0' }}>
-                              <Checkbox
-                                checked={item.checked}
-                                onChange={e => onCheckItem(list.userId, item.id, e.target.checked)}
-                                styles={{ body: { padding: 0 } }}
-                                aria-label={item.display_name || item.name}
-                              />
-                              <ItemLabel text={item.display_name || item.name} />
-                              {onToggleNotNeeded ? (
-                                <ActionIcon size="sm" variant="subtle" onClick={() => onToggleNotNeeded(list.userId, item.id)} aria-label="Not needed">
-                                  <IconHexagonMinus size={14} />
-                                </ActionIcon>
-                              ) : null}
-                              {/* Edit for one-off items: open edit drawer in promote mode */}
-                              <ActionIcon size="sm" variant="light" onClick={() => {
-                                console.debug('[PackingListsSideBySide] opening edit (user) for item', { item, categoryId: (item as any).category ? (item as any).category.id : undefined, members: (item as any).members ? (item as any).members.map((m: any) => m.id) : undefined, whole_family: (item as any).whole_family });
-                                const masterIdUser = (item as any).item_id || (item as any).master_id || (item as any).itemId || (item as any).masterId || null;
-                                setPromoteContext({ listId: activeListId || '', packingListItemId: item.id });
-                                setEditMasterItemId(masterIdUser);
-                                setEditInitialName(item.display_name || item.name);
-                                setEditInitialCategoryId((item as any).category ? (item as any).category.id : undefined);
-                                setEditInitialMembers((item as any).members ? (item as any).members.map((m: any) => m.id) : undefined);
-                                setEditInitialWhole(!!(item as any).whole_family);
-                                setShowEditDrawer(true);
-                              }} aria-label="Edit one-off">
-                                <IconEdit size={14} />
-                              </ActionIcon>
-                            </div>
-                          ))}
-                        </div>
-                      ) : null}
-
-                      {(dismissed.length > 0 || oneOffDismissed.length > 0) ? (
-                        <div style={{ marginTop: 8 }}>
-                          <Text size="xs" c="dimmed">Not needed</Text>
-                          {[...dismissed, ...oneOffDismissed].map(item => (
-                            <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0', color: '#888' }}>
-                              <Checkbox disabled checked={item.checked} onChange={e => onCheckItem(list.userId, item.id, e.target.checked)} styles={{ body: { padding: 0 } }} aria-label={item.name} />
-                              <ItemLabel text={item.display_name || item.name} />
-                              {onToggleNotNeeded ? (
-                                <ActionIcon size="sm" variant="subtle" onClick={() => onToggleNotNeeded(list.userId, item.id)} aria-label="Move to active">
-                                  <IconRotateClockwise size={14} />
-                                </ActionIcon>
-                              ) : null}
-                            </div>
-                          ))}
-                        </div>
-                      ) : null}
-                    </div>
-                  );
-                })()
-              )}
-            </Stack>
-          </ScrollArea>
-          </div>
-          {/* No standalone separator: each user column uses a left border so dividers run full column height */}
-        </div>
-      ))}
+      {/* User columns */}
+      {userLists.map((list, index) => renderColumn(list.userId, `${list.userName}'s List`, renderUserContent(list), !!onOpenAddDrawer, () => onOpenAddDrawer && onOpenAddDrawer(list.userId), index === userLists.length - 1))}
     </div>
   );
 }
