@@ -387,10 +387,13 @@ export function PackingListsSideBySide({ userLists, wholeFamilyItems, onCheckIte
       />
 
       {/* Whole Family column first (force left-most) */}
-      {renderColumn('whole', 'Whole Family', wholeContent, !!onOpenAddDrawer, () => onOpenAddDrawer && onOpenAddDrawer(null), userLists.length === 0)}
+      {showWhole ? renderColumn('whole', 'Whole Family', wholeContent, !!onOpenAddDrawer, () => onOpenAddDrawer && onOpenAddDrawer(null), userLists.length === 0) : null}
 
       {/* User columns */}
       {userLists.map((list, index) => renderColumn(list.userId, `${list.userName}'s List`, renderUserContent(list), !!onOpenAddDrawer, () => onOpenAddDrawer && onOpenAddDrawer(list.userId), index === userLists.length - 1))}
     </div>
   );
 }
+
+// Provide default export while keeping named export compatibility
+export default PackingListsSideBySide;
