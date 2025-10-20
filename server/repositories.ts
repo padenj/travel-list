@@ -657,10 +657,17 @@ export class ItemRepository {
     templatesByPli[pr.packing_list_item_id].push(pr.template_id);
   }
 
-  // For each packing-list row, derive name and assignments from the master item (no display_name fallback)
+  // For each packing-list row, derive name and assignments from the master item.
+  // When a packing-list row references a master item prefer the master's name as
+  // the single source of truth. If the row is a true legacy one-off (no master)
+  // fall back to the per-row display_name so older UI flows still have a label.
   return items.map((it: any) => ({
     ...it,
-    name: it.master_name || '',
+    // Prefer master_name when present, otherwise fall back to the packing-list row's display_name
+    name: it.master_name || it.display_name || '',
+    // Hide per-row display_name from clients when a master exists so clients
+    // can't accidentally prefer stale cached values over the canonical master name.
+    display_name: it.master_id ? null : (it.display_name || null),
     members: membersByPli[it.id] || [],
     whole_family: wholeSet.has(it.id),
     // single category object (if any) from the master item. Previously we returned an
@@ -672,21 +679,48 @@ export class ItemRepository {
     }
 
     // Add a one-off item that does not reference a master item
-    async addOneOffItem(packing_list_id: string, display_name: string, added_during_packing: boolean = true, memberIds?: string[]): Promise<PackingListItem> {
+    async addOneOffItem(packing_list_id: string, display_name: string, added_during_packing: boolean = true, memberIds?: string[], categoryId?: string, wholeFamily?: boolean): Promise<PackingListItem> {
       const db = await getDb();
       // Create a master item marked as one-off, then add it to the packing list by referencing the master item.
       const newItemId = crypto.randomUUID();
       const now = new Date().toISOString();
       const familyRow: any = await db.get(`SELECT family_id FROM packing_lists WHERE id = ?`, [packing_list_id]);
       const familyId = familyRow ? familyRow.family_id : null;
-      await db.run(
-        `INSERT INTO items (id, familyId, name, isOneOff, created_at, updated_at, deleted_at) VALUES (?, ?, ?, 1, ?, ?, NULL)`,
-        [newItemId, familyId, display_name, now, now]
-      );
+      // Persist optional categoryId on the master item row if provided
+      if (categoryId) {
+        // Ensure the number of placeholders matches the number of parameters.
+        // Columns: id, familyId, name, isOneOff, categoryId, created_at, updated_at, deleted_at
+        // We use a literal 1 for isOneOff and NULL for deleted_at, so we need 6 placeholders.
+  const sql = `INSERT INTO items (id, familyId, name, isOneOff, categoryId, created_at, updated_at, deleted_at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL)`;
+  const params = [newItemId, familyId, display_name, 1, categoryId, now, now];
+        try {
+          await db.run(sql, params);
+        } catch (e) {
+          console.error('Failed INSERT INTO items (category):', { sql, params, err: e });
+          throw e;
+        }
+      } else {
+        const sql = `INSERT INTO items (id, familyId, name, isOneOff, created_at, updated_at, deleted_at) VALUES (?, ?, ?, ?, ?, ?, NULL)`;
+        const params = [newItemId, familyId, display_name, 1, now, now];
+        try {
+          await db.run(sql, params);
+        } catch (e) {
+          console.error('Failed INSERT INTO items (no category):', { sql, params, err: e });
+          throw e;
+        }
+      }
       // Assign to specified members if provided
       if (Array.isArray(memberIds) && memberIds.length > 0) {
         for (const m of memberIds) {
           await db.run(`INSERT OR IGNORE INTO item_members (item_id, member_id) VALUES (?, ?)`, [newItemId, m]);
+        }
+      }
+      // Persist whole-family assignment on the master item if requested
+      if (wholeFamily) {
+        try {
+          await db.run(`INSERT OR REPLACE INTO item_whole_family (item_id, family_id) VALUES (?, ?)`,[newItemId, familyId]);
+        } catch (e) {
+          console.warn('Failed to persist whole-family assignment for one-off item', { newItemId, familyId, err: e });
         }
       }
       // Insert packing_list_items referencing the new master item.

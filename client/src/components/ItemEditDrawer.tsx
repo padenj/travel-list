@@ -39,11 +39,26 @@ export interface ItemEditDrawerProps {
 }
 
 export default function ItemEditDrawer({ opened, onClose, masterItemId, initialName, familyId, defaultAssignedMemberId, onSaved, promoteContext, showIsOneOffCheckbox = false, zIndex, initialCategoryId, initialMembers: initialMembersProp, initialWhole: initialWholeProp }: ItemEditDrawerProps) {
+  // Log incoming props for debugging when the component mounts / props change
+  const _incomingProps = { opened, onClose, masterItemId, initialName, familyId, defaultAssignedMemberId, onSaved, promoteContext, showIsOneOffCheckbox, zIndex, initialCategoryId, initialMembersProp, initialWholeProp };
+  console.log('[ItemEditDrawer] props', _incomingProps);
+
+  useEffect(() => {
+    if (opened) {
+      console.log('[ItemEditDrawer] opened with props', _incomingProps);
+    }
+  }, [opened, masterItemId, initialName, familyId, defaultAssignedMemberId, promoteContext, showIsOneOffCheckbox, zIndex, initialCategoryId, initialMembersProp, initialWholeProp]);
+
+  // Mount-only log to guarantee at least one visible log entry in some UIs
+  useEffect(() => {
+    console.log('[ItemEditDrawer] mounted props', _incomingProps);
+  }, []);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [categories, setCategories] = useState<any[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [initialCategory, setInitialCategory] = useState<string | null>(null);
+  const [isMasterOneOff, setIsMasterOneOff] = useState<boolean>(false);
   const [familyMembers, setFamilyMembers] = useState<any[]>([]);
   const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
   const [initialMembers, setInitialMembers] = useState<string[]>([]);
@@ -52,6 +67,17 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
   const [name, setName] = useState(initialName || '');
   // Checkbox state: when checked => also add for future trips => isOneOff = 0
   const [alsoAddForFutureTrips, setAlsoAddForFutureTrips] = useState<boolean>(false);
+
+  // Creating a one-off: new item, the "Also add for future trips" checkbox is shown
+  // and the user left it unchecked => this should create a packing-list one-off master
+  // and category selection should be disabled/optional in that flow.
+  const isCreatingOneOff = !masterItemId && showIsOneOffCheckbox && !alsoAddForFutureTrips;
+  // When editing an existing one-off, if the "add to master list" checkbox is checked,
+  // treat it as a regular item (category required). If unchecked, keep one-off behavior.
+  const isConvertingOneOffToRegular = masterItemId && isMasterOneOff && alsoAddForFutureTrips;
+  // Effective one-off flag: true when creating a packing-list one-off OR when the
+  // master item is a one-off AND not being converted to regular.
+  const isOneOff = isCreatingOneOff || (isMasterOneOff && !isConvertingOneOffToRegular);
 
   useEffect(() => {
     setName(initialName || '');
@@ -72,6 +98,11 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
           const res = await getItemEditData(masterItemId, familyId || undefined);
           if (!res.response.ok) throw new Error('Failed to load item edit data');
           const payload = res.data || {};
+          console.log('[ItemEditDrawer] master payload received', { masterItemId, payload });
+          // Simplified one-off detection: use item.isOneOff flag
+          const masterOneOffFlag = !!(payload.item?.isOneOff);
+          console.log('[ItemEditDrawer] master is one-off:', masterOneOffFlag);
+          setIsMasterOneOff(masterOneOffFlag);
           // Seed the editable name from the payload if available; fall back to prop initialName
           setName(payload.item?.name || payload.name || initialName || '');
           setCategories(payload.categories || []);
@@ -113,120 +144,6 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
           const wholeAssigned = typeof initialWholeProp !== 'undefined' ? !!initialWholeProp : !!payload.wholeAssigned;
           setInitialWhole(wholeAssigned);
           setSelectedWhole(wholeAssigned);
-        } else if (promoteContext && promoteContext.listId) {
-          const pctx = promoteContext as { listId: string; packingListItemId: string };
-          // Try consolidated endpoint first (tests expect this to be called)
-          try {
-            const editRes = await getItemEditData(pctx.packingListItemId, familyId || undefined);
-            if (editRes && editRes.response && editRes.response.ok) {
-              const payload = editRes.data || {};
-              // Seed name from payload when available (promote/edit path)
-              setName(payload.item?.name || payload.name || initialName || '');
-              setCategories(payload.categories || []);
-              // Ensure categories exist even when consolidated payload lacks them
-              if ((!payload.categories || (Array.isArray(payload.categories) && payload.categories.length === 0)) && familyId) {
-                try {
-                  const cats = await getCategories(familyId);
-                  if (cats.response && cats.response.ok) setCategories(cats.data.categories || []);
-                } catch (e) {
-                  // ignore
-                }
-              }
-              const itemCats = Array.isArray(payload.itemCategories) ? payload.itemCategories : (payload.itemCategories || []);
-              const currentCat = (typeof initialCategoryId !== 'undefined' && initialCategoryId !== null)
-                ? initialCategoryId
-                : (itemCats && itemCats.length > 0 ? itemCats[0].id : null);
-              console.debug('[ItemEditDrawer] promote consolidated computed currentCat', { currentCat, initialCategoryId, itemCats });
-              setInitialCategory(currentCat);
-              setSelectedCategory(currentCat);
-              if (currentCat && (!payload.categories || !payload.categories.find((c: any) => c.id === currentCat))) {
-                const missingName = (itemCats && itemCats.find((c: any) => c.id === currentCat)?.name) || 'Uncategorized';
-                setCategories(prev => {
-                  if (prev.find(p => p.id === currentCat)) return prev;
-                  return [...prev, { id: currentCat, name: missingName }];
-                });
-              }
-              setFamilyMembers(payload.members || []);
-              const itemMems = Array.isArray(payload.itemMembers) ? payload.itemMembers : (payload.itemMembers || []);
-              const payloadAssigned = itemMems.map((m: any) => m.id);
-              const assigned = Array.isArray(initialMembersProp) && initialMembersProp.length > 0 ? initialMembersProp : payloadAssigned;
-              setInitialMembers(assigned);
-              setSelectedMembers(assigned.slice());
-              const wholeAssigned = typeof initialWholeProp !== 'undefined' ? !!initialWholeProp : !!payload.wholeAssigned;
-              setInitialWhole(wholeAssigned);
-              setSelectedWhole(wholeAssigned);
-            } else {
-              // Fallback to older behavior if consolidated endpoint not available
-              let familyMembersFromProfile: any[] = [];
-              if (familyId) {
-                try {
-                  const cats = await getCategories(familyId);
-                  if (cats.response.ok) setCategories(cats.data.categories || []);
-                } catch (e) {}
-              }
-              try {
-                const profile = await getCurrentUserProfile();
-                if (profile.response.ok && profile.data.family) {
-                  familyMembersFromProfile = profile.data.family.members || [];
-                  setFamilyMembers(familyMembersFromProfile);
-                }
-                // fetch packing list to find the packing-list-item row
-                const listRes = await getPackingList(pctx.listId);
-                if (listRes.response.ok) {
-                  const items = listRes.data.items || [];
-                  const pli = items.find((x: any) => x.id === pctx.packingListItemId || x.id === pctx.packingListItemId);
-                  if (pli) {
-                    // initialize name and assigned members
-                    setName(pli.display_name || pli.master_name || '');
-            const assignedFromPli = (pli.members || []).map((m: any) => m.id).filter(Boolean);
-              const assigned = Array.isArray(initialMembersProp) && initialMembersProp.length > 0 ? initialMembersProp : assignedFromPli;
-              setInitialMembers(assigned);
-              setSelectedMembers(assigned.slice());
-              const wholeAssigned = typeof initialWholeProp !== 'undefined' ? !!initialWholeProp : !!pli.whole_family;
-              setInitialWhole(wholeAssigned);
-              setSelectedWhole(wholeAssigned);
-                  }
-                }
-                // If the packing-list item includes a category, prefer that (caller-provided initialCategoryId wins)
-                if (listRes.response.ok) {
-                  const items = listRes.data.items || [];
-                  const pli = items.find((x: any) => x.id === pctx.packingListItemId || x.id === pctx.packingListItemId);
-                  const pliCatId = pli && pli.category ? pli.category.id : null;
-                  const currentCat = typeof initialCategoryId !== 'undefined' && initialCategoryId !== null
-                    ? initialCategoryId
-                    : pliCatId;
-                  console.debug('[ItemEditDrawer] promote fallback computed currentCat from pli', { currentCat, initialCategoryId, pliCatId, pli });
-                  setInitialCategory(currentCat);
-                  setSelectedCategory(currentCat);
-                  if (currentCat) {
-                    setCategories(prev => {
-                      if (prev.find(p => p.id === currentCat)) return prev;
-                      const missingName = (pli && pli.category && pli.category.name) ? pli.category.name : 'Uncategorized';
-                      return [...prev, { id: currentCat, name: missingName }];
-                    });
-                  }
-                } else {
-                  setInitialCategory(null);
-                  setSelectedCategory(null);
-                }
-
-                // honor defaultAssignedMemberId if provided
-                if (!masterItemId) {
-                  if (defaultAssignedMemberId === null) {
-                    setSelectedWhole(true);
-                    setSelectedMembers([]);
-                  } else if (defaultAssignedMemberId && familyMembersFromProfile.some((m: any) => m.id === defaultAssignedMemberId)) {
-                    setSelectedMembers([defaultAssignedMemberId]);
-                    setSelectedWhole(false);
-                  }
-                }
-              } catch (err) {
-                // ignore
-              }
-            }
-          } catch (err) {
-            // ignore
-          }
         } else {
           // New item: load family-level categories and members
           if (familyId) {
@@ -295,16 +212,19 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
 
   const save = async () => {
     setSaving(true);
+  console.log('[ItemEditDrawer] save() called', { masterItemId, name, selectedCategory, selectedMembers, selectedWhole, alsoAddForFutureTrips, isCreatingOneOff, isMasterOneOff, isOneOff });
     try {
       const trimmedName = (name || '').trim();
       // Validation: name must be non-empty after trimming
       if (!trimmedName) {
+  console.log('[ItemEditDrawer] validation failed - empty name');
         showNotification({ title: 'Validation', message: 'Item name cannot be empty.', color: 'red' });
         setSaving(false);
         return;
       }
-      // Validation: category must be selected
-      if (!selectedCategory) {
+    // Validation: category must be selected unless this is a one-off (create or master one-off)
+    if (!isOneOff && !selectedCategory) {
+  console.log('[ItemEditDrawer] validation failed - category required', { isOneOff, isCreatingOneOff, isMasterOneOff, selectedCategory });
         showNotification({ title: 'Validation', message: 'Select a category before saving.', color: 'red' });
         setSaving(false);
         return;
@@ -313,8 +233,10 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
       let updatedName: string | undefined;
   const effectiveSelected = selectedCategory ? [selectedCategory] : [];
       if (!masterItemId) {
+  console.log('[ItemEditDrawer] creating new master item', { familyId, trimmedName, isOneOffValue: showIsOneOffCheckbox ? (alsoAddForFutureTrips ? 0 : 1) : 0, selectedWhole, selectedMembers });
         // Validation: when creating a new item, require either Whole Family or at least one member selected
         if (!selectedWhole && (!selectedMembers || selectedMembers.length === 0)) {
+          console.log('[ItemEditDrawer] validation failed - assignments required', { selectedWhole, selectedMembers });
           showNotification({ title: 'Validation', message: 'Select at least one member or assign to the whole family before saving.', color: 'red' });
           setSaving(false);
           return;
@@ -325,6 +247,7 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
         // When checkbox is hidden (management page), isOneOff should always be 0
         const isOneOffValue = showIsOneOffCheckbox ? (alsoAddForFutureTrips ? 0 : 1) : 0;
   const createRes = await createItem(familyId, trimmedName || 'New Item', isOneOffValue);
+  console.log('[ItemEditDrawer] createItem response', createRes);
         if (!createRes.response.ok) throw new Error('Failed to create item');
         createdId = createRes.data?.item?.id;
   updatedName = createRes.data?.item?.name || trimmedName;
@@ -346,19 +269,32 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
 
       // Existing item update
       if (!masterItemId) throw new Error('masterItemId missing');
-      if (trimmedName && initialName?.trim() !== trimmedName) {
-        const uRes = await updateItem(masterItemId, trimmedName);
+      console.log('[ItemEditDrawer] updating master item', { masterItemId, trimmedName, initialName, isOneOff, isConvertingOneOffToRegular, promoteContext });
+      
+      // Update the master item name (and isOneOff flag if converting)
+      const nameChanged = trimmedName && initialName?.trim() !== trimmedName;
+      if (nameChanged || isConvertingOneOffToRegular) {
+        // When converting one-off to regular, set isOneOff to 0
+        const newIsOneOff = isConvertingOneOffToRegular ? 0 : undefined;
+        const uRes = await updateItem(masterItemId, trimmedName, newIsOneOff);
+        console.log('[ItemEditDrawer] updateItem response', uRes);
         if (uRes.response.ok) updatedName = uRes.data?.item?.name || trimmedName;
       }
 
-  const effectiveInitial = initialCategory ? [initialCategory] : [];
-  const toAddCats = effectiveSelected.filter((c: string) => !effectiveInitial.includes(c));
-  const toRemoveCats = effectiveInitial.filter((c: string) => !effectiveSelected.includes(c));
-  const ops: Promise<any>[] = [];
-  // Since single-category, we'll add the new category (if any) and remove the old one
-  for (const cid of toAddCats) ops.push(assignItemToCategory(masterItemId, cid));
-  for (const cid of toRemoveCats) ops.push(removeItemFromCategory(masterItemId, cid));
+      // Update category and member assignments
+      const ops: Promise<any>[] = [];
+      
+      // For one-off items, skip category updates (they don't have categories)
+      if (!isOneOff) {
+        const effectiveInitial = initialCategory ? [initialCategory] : [];
+        const toAddCats = effectiveSelected.filter((c: string) => !effectiveInitial.includes(c));
+        const toRemoveCats = effectiveInitial.filter((c: string) => !effectiveSelected.includes(c));
+        // Since single-category, we'll add the new category (if any) and remove the old one
+        for (const cid of toAddCats) ops.push(assignItemToCategory(masterItemId, cid));
+        for (const cid of toRemoveCats) ops.push(removeItemFromCategory(masterItemId, cid));
+      }
 
+      // Update member assignments (for both one-off and regular items)
       if (selectedWhole && !initialWhole) {
         if (familyId) ops.push(assignToWholeFamily(masterItemId, familyId));
       } else if (!selectedWhole && initialWhole) {
@@ -373,7 +309,8 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
       }
 
       await Promise.all(ops);
-      showNotification({ title: 'Saved', message: 'Item updated (applies to all lists).', color: 'green' });
+      const message = isOneOff ? 'One-off item updated.' : 'Item updated (applies to all lists).';
+      showNotification({ title: 'Saved', message, color: 'green' });
       if (onSaved) await onSaved(updatedName ? { name: updatedName } : undefined);
       onClose();
     } catch (err) {
@@ -410,7 +347,11 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
   return (
     <Drawer opened={opened} onClose={onClose} title={masterItemId ? 'Edit Item' : 'New Item'} position="right" size={720} padding="md" zIndex={zIndex}>
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-        <Text size="sm" c="dimmed">Note: changing categories or assignments here updates the master item and will apply to all lists.</Text>
+        <Text size="sm" c="dimmed">
+          {isOneOff 
+            ? 'Note: One-off items do not have categories. Changes to name and assignments apply to this item only.'
+            : 'Note: changing categories or assignments here updates the master item and will apply to all lists.'}
+        </Text>
         {loading ? (<div style={{ padding: 16 }}>Loading item details...</div>) : null}
 
         {/* Name - full width row */}
@@ -426,16 +367,19 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
               <Text c="dimmed">No categories</Text>
             ) : (
               <div>
-                {/* Single-select using radio buttons */}
+                {/* Single-select using radio buttons; disabled/grayed when one-off */}
                 {categories.map((c: any) => (
                   <div key={c.id} style={{ padding: '6px 0' }}>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <input type="radio" name="category" value={c.id} checked={selectedCategory === c.id} onChange={() => setSelectedCategory(c.id)} />
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: isOneOff ? '#999' : undefined }}>
+                      <input type="radio" name="category" value={c.id} checked={selectedCategory === c.id} onChange={() => setSelectedCategory(c.id)} disabled={isOneOff} />
                       <span>{c.name}</span>
                     </label>
                   </div>
                 ))}
-                {/* Removed 'None' option - items must be assigned to a category after migration */}
+                {/* When one-off, show helper text that category is optional and disabled */}
+                {isOneOff ? (
+                  <Text size="xs" c="dimmed">Category selection is disabled for one-off items.</Text>
+                ) : null}
               </div>
             )}
           </div>
@@ -466,14 +410,19 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
 
         {/* Checkbox and buttons below in single column */}
         <div style={{ marginTop: 12 }}>
-          {!masterItemId && (showIsOneOffCheckbox || promoteContext) ? (
+          {/* Show checkbox when: creating with showIsOneOffCheckbox, editing via promoteContext, OR editing a one-off master item */}
+          {(showIsOneOffCheckbox && !masterItemId) || promoteContext || (masterItemId && isMasterOneOff) ? (
             <div style={{ marginBottom: 8 }}>
               <Checkbox
                 checked={alsoAddForFutureTrips}
                 onChange={(e) => setAlsoAddForFutureTrips(e.currentTarget.checked)}
-                label={promoteContext ? "Also add this item to the master list" : "Also add this item for future trips"}
+                label={promoteContext ? "Also add this item to the master list" : (masterItemId && isMasterOneOff) ? "Add this item to the master list" : "Also add this item for future trips"}
               />
-              <Text size="xs" c="dimmed">If checked, this will create a master item and convert the packing-list row to reference it. This cannot be undone.</Text>
+              <Text size="xs" c="dimmed">
+                {masterItemId && isMasterOneOff 
+                  ? "If checked, this will convert the one-off item to a regular master item (requires category). This cannot be undone."
+                  : "If checked, this will create a master item and convert the packing-list row to reference it. This cannot be undone."}
+              </Text>
             </div>
           ) : null}
 
@@ -489,8 +438,8 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
                         disabled={
                           // name must be non-empty after trimming
                           !( (name || '').trim() ) ||
-                          // category must be selected
-                          !selectedCategory ||
+                          // category must be selected when not a one-off
+                          (!isOneOff && !selectedCategory) ||
                           // when creating require assignments (whole or members)
                           (!masterItemId && !selectedWhole && selectedMembers.length === 0)
                         }

@@ -251,19 +251,7 @@ export default function CategoryManagementPage(): React.ReactElement {
   };
 
   const handleRemoveItem = async (itemId: string, categoryId: string) => {
-    // Prevent removing items that are effectively in 'All' (present in every category)
-    if (itemsInAllCategories.has(itemId)) {
-      // Inform user that this item is assigned to all categories and cannot be removed individually.
-      // Use a notification so the user understands why the remove action is disabled.
-      try {
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const { showNotification } = require('@mantine/notifications');
-        showNotification({ title: 'Cannot remove', message: 'This item is assigned to all categories and cannot be removed individually.', color: 'blue' });
-      } catch (e) {
-        // fallback: no-op
-      }
-      return;
-    }
+    // Always allow removing an item from a category.
     await removeItemFromCategory(itemId, categoryId);
     setCategoryItems(prev => ({
       ...prev,
@@ -449,11 +437,9 @@ export default function CategoryManagementPage(): React.ReactElement {
                                 <ActionIcon color="blue" variant="light" onClick={() => { setEditMasterItemId(item.id); setShowEditDrawer(true); }} title="Edit item">
                                   <IconEdit size={16} />
                                 </ActionIcon>
-                                {itemsInAllCategories.has(item.id) ? (
-                                  <ActionIcon color="gray" variant="light" title="Item in All categories; cannot remove individually" disabled>
-                                    <IconTrash size={16} />
-                                  </ActionIcon>
-                                ) : null}
+                                <ActionIcon color="red" variant="light" title="Remove from category" onClick={() => handleRemoveItem(item.id, cat.id)}>
+                                  <IconTrash size={16} />
+                                </ActionIcon>
                               </div>
                             </div>
                           ))}
