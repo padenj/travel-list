@@ -5,6 +5,7 @@ import ActivePackingListSelector from './ActivePackingListSelector';
 import { PackingListsSideBySide } from './PackingListsSideBySide';
 import ItemEditDrawer from './ItemEditDrawer';
 import { useActivePackingList } from '../contexts/ActivePackingListContext';
+import { useImpersonation } from '../contexts/ImpersonationContext';
 import { getCurrentUserProfile, getItems, getPackingList, togglePackingListItemCheck, addItemToPackingList, setPackingListItemNotNeeded, setPackingListItemNotNeededForMember } from '../api';
 
 export default function Dashboard(): React.ReactElement {
@@ -44,14 +45,32 @@ export default function Dashboard(): React.ReactElement {
     return () => window.removeEventListener('server-event', handler as EventListener);
   }, [activeListId]);
 
+  const { impersonatingFamilyId } = useImpersonation();
+
   useEffect(() => {
     
     (async () => {
       try {
-        const profile = await getCurrentUserProfile();
-          const fid = profile.response.ok && profile.data.family ? profile.data.family.id : null;
-  const membersFromProfile = profile.response.ok && profile.data.family ? profile.data.family.members || [] : [];
-  const currentUserId = profile.response.ok && profile.data.user ? profile.data.user.id : null;
+        // prefer impersonation when present
+        let fid = impersonatingFamilyId || null;
+        let membersFromProfile: any[] = [];
+        let currentUserId: string | null = null;
+        if (!fid) {
+          const profile = await getCurrentUserProfile();
+          fid = profile.response.ok && profile.data.family ? profile.data.family.id : null;
+          membersFromProfile = profile.response.ok && profile.data.family ? profile.data.family.members || [] : [];
+          currentUserId = profile.response.ok && profile.data.user ? profile.data.user.id : null;
+        } else {
+          // If impersonating, fetch the family so we have its members for user columns
+          try {
+            const famRes = await import('../api').then(m => m.getFamily(impersonatingFamilyId!));
+            if (famRes.response.ok && famRes.data.family) {
+              membersFromProfile = famRes.data.family.members || [];
+            }
+          } catch (e) {
+            membersFromProfile = [];
+          }
+        }
         if (!fid) {
           setUserLists([]);
           setWholeFamilyItems([]);
@@ -76,8 +95,32 @@ export default function Dashboard(): React.ReactElement {
         const listItems = listRes.data.items || [];
         const checks = listRes.data.checks || [];
 
+        // If we couldn't obtain members via the profile/family fetch (possible race or missing data
+        // when impersonating), derive a member list from the packing-list rows themselves so
+        // the member columns can still render. This makes the dashboard resilient to cases
+        // where the global impersonation state isn't fully reflected in the profile call.
+        let effectiveMembers = membersFromProfile || [];
+        if ((!effectiveMembers || effectiveMembers.length === 0) && Array.isArray(listItems) && listItems.length > 0) {
+          const found = new Map<string, any>();
+          for (const pli of listItems) {
+            for (const m of (pli.members || [])) {
+              if (m && m.id) found.set(m.id, m);
+            }
+          }
+          effectiveMembers = Array.from(found.values());
+        }
+
+        // Debug: log member data and list items when impersonating to trace missing member assignments
+        if (impersonatingFamilyId) {
+          try {
+            console.debug('[Dashboard][Impersonation] membersFromProfile:', membersFromProfile);
+            console.debug('[Dashboard][Impersonation] fetched listItems:', listItems);
+            console.debug('[Dashboard][Impersonation] checks:', checks);
+          } catch (e) { /* ignore */ }
+        }
+
   const userListsData: any[] = [];
-        for (const member of membersFromProfile) {
+        for (const member of effectiveMembers) {
           const memberItems: any[] = [];
           for (const pli of listItems) {
             // if master item and assigned to this member
@@ -269,18 +312,40 @@ export default function Dashboard(): React.ReactElement {
     try {
       if (!activeListId) return;
         if (payload?.id) {
-        // add the created master item to the packing list and respect any member assignment
-        try {
-          const result = await addItemToPackingList(activeListId, payload.id);
-          if (result.response.ok) {
-            const createdItem = result.data.item;
-            const assignedMemberId = itemDrawerDefaultMember;
-            if (assignedMemberId && createdItem) {
-              setUserLists(prev => prev.map(ul => ul.userId === assignedMemberId ? { ...ul, items: [{ id: createdItem.id, name: payload.name || createdItem.id, checked: false, masterId: payload.id || null }, ...ul.items] } : ul));
+        // Avoid duplicate adds: if the created master item is already present in
+        // the active list (could have been added by server-side template propagation
+        // or another client action), skip calling addItemToPackingList again.
+        const masterId = payload.id;
+        const alreadyInList = (() => {
+          try {
+            // check whole-family items
+            for (const w of wholeFamilyItems || []) {
+              if ((w.masterId && String(w.masterId) === String(masterId)) || (w.item_id && String(w.item_id) === String(masterId)) || (w.master_id && String(w.master_id) === String(masterId))) return true;
             }
+            // check per-user lists
+            for (const ul of userLists || []) {
+              for (const it of ul.items || []) {
+                if ((it.masterId && String(it.masterId) === String(masterId)) || (it.item_id && String(it.item_id) === String(masterId)) || (it.master_id && String(it.master_id) === String(masterId))) return true;
+              }
+            }
+            return false;
+          } catch (e) { return false; }
+        })();
+        if (!alreadyInList) {
+          try {
+            const result = await addItemToPackingList(activeListId, payload.id);
+            if (result.response.ok) {
+              const createdItem = result.data.item;
+              const assignedMemberId = itemDrawerDefaultMember;
+              if (assignedMemberId && createdItem) {
+                setUserLists(prev => prev.map(ul => ul.userId === assignedMemberId ? { ...ul, items: [{ id: createdItem.id, name: payload.name || createdItem.id, checked: false, masterId: payload.id || null }, ...ul.items] } : ul));
+              }
+            }
+          } catch (err) {
+            showNotification({ title: 'Failed', message: 'Failed to add item to packing list', color: 'red' });
           }
-        } catch (err) {
-          showNotification({ title: 'Failed', message: 'Failed to add item to packing list', color: 'red' });
+        } else {
+          console.debug('[Dashboard] Skipping addItemToPackingList because master already present in list', payload.id);
         }
       }
     } catch (err) {

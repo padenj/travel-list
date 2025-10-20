@@ -226,6 +226,8 @@ export class ItemRepository {
         // Delete related checks
         const placeholders = ids.map(() => '?').join(',');
         await db.run(`DELETE FROM packing_list_item_checks WHERE packing_list_item_id IN (${placeholders})`, ids);
+        // Delete any per-item not-needed rows to satisfy foreign keys
+        await db.run(`DELETE FROM packing_list_item_not_needed WHERE packing_list_item_id IN (${placeholders})`, ids);
         // Delete provenance rows that reference these packing-list items to satisfy foreign keys
         await db.run(`DELETE FROM packing_list_item_templates WHERE packing_list_item_id IN (${placeholders})`, ids);
         // Delete packing list items
@@ -490,6 +492,16 @@ export class ItemRepository {
     // Packing list items
     async addItem(packing_list_id: string, item_id: string, added_during_packing: boolean = false): Promise<PackingListItem> {
       const db = await getDb();
+      // Defensive: avoid creating duplicate packing-list rows referencing the same master item.
+      // If an existing row exists for (packing_list_id, item_id) return it instead of inserting a new one.
+      try {
+        const existing = await this.findItem(packing_list_id, item_id);
+        if (existing) {
+          return existing;
+        }
+      } catch (e) {
+        // ignore and proceed to insertion on unexpected errors
+      }
       const id = crypto.randomUUID();
       await db.run(
         `INSERT INTO packing_list_items (id, packing_list_id, item_id, checked, added_during_packing, created_at)
@@ -511,11 +523,13 @@ export class ItemRepository {
       const rows: any[] = await db.all(`SELECT id FROM packing_list_items WHERE packing_list_id = ? AND item_id = ?`, [packing_list_id, item_id]);
       if (rows && rows.length > 0) {
         const ids = rows.map(r => r.id);
-        // Delete associated checks first
-        const placeholders = ids.map(() => '?').join(',');
-        await db.run(`DELETE FROM packing_list_item_checks WHERE packing_list_item_id IN (${placeholders})`, ids);
-        // Also remove provenance rows referencing these packing-list items to satisfy FKs
-        await db.run(`DELETE FROM packing_list_item_templates WHERE packing_list_item_id IN (${placeholders})`, ids);
+          // Delete associated checks first
+          const placeholders = ids.map(() => '?').join(',');
+          await db.run(`DELETE FROM packing_list_item_checks WHERE packing_list_item_id IN (${placeholders})`, ids);
+          // Delete any per-item not-needed rows to satisfy foreign keys
+          await db.run(`DELETE FROM packing_list_item_not_needed WHERE packing_list_item_id IN (${placeholders})`, ids);
+          // Also remove provenance rows referencing these packing-list items to satisfy FKs
+          await db.run(`DELETE FROM packing_list_item_templates WHERE packing_list_item_id IN (${placeholders})`, ids);
       }
       // Remove the packing list item rows
       await db.run(`DELETE FROM packing_list_items WHERE packing_list_id = ? AND item_id = ?`, [packing_list_id, item_id]);
@@ -525,14 +539,24 @@ export class ItemRepository {
     async removeItemByPliId(packing_list_item_id: string, broadcast: boolean = false): Promise<void> {
       const db = await getDb();
       
-      // Get packing list info before deletion for broadcast
+      // Get packing list info and referenced master item before deletion for broadcast
       let listId: string | undefined;
+      let referencedItemId: string | undefined;
       if (broadcast) {
         try {
-          const pli = await db.get(`SELECT packing_list_id FROM packing_list_items WHERE id = ?`, [packing_list_item_id]);
+          const pli = await db.get(`SELECT packing_list_id, item_id FROM packing_list_items WHERE id = ?`, [packing_list_item_id]);
           listId = pli?.packing_list_id;
+          referencedItemId = pli?.item_id;
         } catch (e) {
           // Continue without broadcast if we can't get list info
+        }
+      } else {
+        // Even if not broadcasting, fetch referenced item id so we can possibly cleanup one-off master items
+        try {
+          const pli = await db.get(`SELECT item_id FROM packing_list_items WHERE id = ?`, [packing_list_item_id]);
+          referencedItemId = pli?.item_id;
+        } catch (e) {
+          // ignore
         }
       }
       
@@ -543,6 +567,8 @@ export class ItemRepository {
         await db.run(`DELETE FROM packing_list_item_checks WHERE packing_list_item_id = ?`, [packing_list_item_id]);
         // Also delete any provenance rows that reference this packing-list-item (packing_list_item_templates)
         await db.run(`DELETE FROM packing_list_item_templates WHERE packing_list_item_id = ?`, [packing_list_item_id]);
+          // Also delete any per-item not-needed rows that reference this packing-list-item
+          await db.run(`DELETE FROM packing_list_item_not_needed WHERE packing_list_item_id = ?`, [packing_list_item_id]);
         await db.run(`DELETE FROM packing_list_items WHERE id = ?`, [packing_list_item_id]);
         await db.run(`RELEASE ${sp}`);
         
@@ -553,6 +579,28 @@ export class ItemRepository {
           } catch (e) {
             console.warn('Failed to broadcast item removal event', { packing_list_item_id, listId, err: e });
           }
+        }
+        // If the removed packing-list-item referenced a master item that was a one-off,
+        // and there are no remaining packing-list_items referencing that master, then
+        // soft-delete the master item and clean up related item_members / whole-family rows
+        // to avoid orphaned one-off masters showing on dashboards.
+        try {
+          if (referencedItemId) {
+            const itemRow: any = await db.get(`SELECT id, isOneOff, deleted_at FROM items WHERE id = ?`, [referencedItemId]);
+            if (itemRow && itemRow.isOneOff && !itemRow.deleted_at) {
+              const refCountRow: any = await db.get(`SELECT COUNT(1) as cnt FROM packing_list_items WHERE item_id = ?`, [referencedItemId]);
+              const cnt = refCountRow ? (refCountRow.cnt || refCountRow['COUNT(1)'] || 0) : 0;
+              if (cnt === 0) {
+                const now = new Date().toISOString();
+                await db.run(`UPDATE items SET deleted_at = ? WHERE id = ?`, [now, referencedItemId]);
+                // cleanup member assignments and whole-family flags
+                await db.run(`DELETE FROM item_members WHERE item_id = ?`, [referencedItemId]);
+                await db.run(`DELETE FROM item_whole_family WHERE item_id = ?`, [referencedItemId]);
+              }
+            }
+          }
+        } catch (cleanupErr) {
+          console.warn('Failed to cleanup orphaned one-off master item after packing-list-item delete', { packing_list_item_id, referencedItemId, err: cleanupErr });
         }
       } catch (e) {
         try {

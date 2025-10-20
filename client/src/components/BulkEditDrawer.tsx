@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Drawer, Title, Group, Button, Select, Checkbox, Stack, Loader, Text } from '@mantine/core';
-import { getCategories, getMembersForItem, getMembersForItem as getMembers, assignItemToCategory, assignToMember, removeFromMember, getFamily } from '../api';
+import { getCategories, getMembersForItem, getMembersForItem as getMembers, assignItemToCategory, assignToMember, removeFromMember, getFamily, deleteItem } from '../api';
+import ConfirmDelete from './ConfirmDelete';
 
 type Props = {
   opened: boolean;
@@ -108,6 +109,29 @@ export default function BulkEditDrawer({ opened, onClose, itemIds, familyId, ini
     }
   };
 
+  // Bulk delete handler
+  const handleBulkDelete = async () => {
+    if (!itemIds || itemIds.length === 0) return;
+    setLoading(true);
+    try {
+      for (const id of itemIds) {
+        try {
+          const res = await deleteItem(id);
+          if (!res.response.ok) {
+            alert('Failed to delete item: ' + (res.data?.error || res.response.statusText));
+          }
+        } catch (err) {
+          console.error('Failed to delete item', err);
+          alert('Failed to delete item (network error)');
+        }
+      }
+      if (onApplied) await onApplied();
+      onClose();
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <Drawer opened={opened} onClose={onClose} title={<Title order={4}>Bulk Edit ({itemIds.length})</Title>} size="lg" position="right">
       {loading ? <Loader /> : (
@@ -147,6 +171,20 @@ export default function BulkEditDrawer({ opened, onClose, itemIds, familyId, ini
             <Button variant="default" onClick={onClose}>Cancel</Button>
             <Button onClick={apply} disabled={loading}>Apply</Button>
           </Group>
+
+          {/* Danger zone: delete selected items */}
+          <div style={{ marginTop: 12, borderTop: '1px solid #eee', paddingTop: 12 }}>
+            <Text fw={700} mb="xs" color="red">Delete selected items</Text>
+            <Text size="sm" c="dimmed">Permanently delete the selected items. This removes the master item and its references from lists and templates.</Text>
+            <div style={{ marginTop: 8 }}>
+              <ConfirmDelete
+                title="Delete selected items"
+                confirmText={`Delete ${itemIds.length} items?`}
+                onConfirm={handleBulkDelete}
+                disabled={itemIds.length === 0 || loading}
+              />
+            </div>
+          </div>
         </Stack>
       )}
     </Drawer>

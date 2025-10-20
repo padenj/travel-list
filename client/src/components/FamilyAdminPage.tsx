@@ -103,7 +103,7 @@ export default function FamilyAdminPage(): React.ReactElement {
 
   useEffect(() => {
     loadFamily();
-  }, []);
+  }, [impersonatingFamilyId]);
 
   const handleAddMember = () => {
     memberForm.reset();

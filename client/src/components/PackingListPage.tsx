@@ -14,8 +14,18 @@ export default function PackingListPage(): React.ReactElement {
   const createNewList = async () => {
     setCreating(true);
     try {
-      const profile = await getCurrentUserProfile();
-      const fid = profile.response.ok && profile.data.family ? profile.data.family.id : null;
+      // Prefer impersonation when present; otherwise fall back to current user's profile
+      let fid: string | null = null;
+      try {
+        const { impersonatingFamilyId } = await import('../contexts/ImpersonationContext').then(m => ({ impersonatingFamilyId: m.useImpersonation().impersonatingFamilyId }));
+        if (impersonatingFamilyId) fid = impersonatingFamilyId;
+      } catch (e) {
+        // ignore
+      }
+      if (!fid) {
+        const profile = await getCurrentUserProfile();
+        fid = profile.response.ok && profile.data.family ? profile.data.family.id : null;
+      }
       if (!fid) throw new Error('No family');
       if (!newListName) return;
       const result = await createPackingList(fid, newListName);
