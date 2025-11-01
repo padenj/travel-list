@@ -130,7 +130,7 @@ export default function AddItemsDrawer({ opened, onClose, familyId, excludedItem
                               return (!cats || cats.length === 0);
                             }
                             return true;
-                          });
+                          }).sort((a: any, b: any) => (a.name || '').localeCompare(b.name || ''));
 
                           if (visible.length === 0) {
                             if (!showAssigned) return <Text c="dimmed">No existing unassigned items</Text>;
