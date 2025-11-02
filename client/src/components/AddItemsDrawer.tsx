@@ -14,21 +14,21 @@ interface Props {
   title?: string;
   showIsOneOffCheckbox?: boolean;
   autoApplyOnCreate?: boolean;
-  // when true, show a checkbox that toggles whether items already assigned to other categories are visible
-  showAssignedItemsToggle?: boolean;
+  initialMembers?: string[]; // pre-select members when creating a new item from the drawer
+  initialWhole?: boolean; // pre-select whole-family when creating a new item from the drawer
+  // NOTE: the assigned-items visibility toggle was removed — items assigned to other categories are always shown
   // when adding to a specific category, provide the target category id so the drawer can indicate when
   // an item is assigned to another category (and display the warning)
   targetCategoryId?: string | null;
 }
 
-export default function AddItemsDrawer({ opened, onClose, familyId, excludedItemIds = [], onApply, title = 'Add Items', showIsOneOffCheckbox = true, autoApplyOnCreate = false, showAssignedItemsToggle = false, targetCategoryId = null }: Props) {
+export default function AddItemsDrawer({ opened, onClose, familyId, excludedItemIds = [], onApply, title = 'Add Items', showIsOneOffCheckbox = true, autoApplyOnCreate = false, initialMembers, initialWhole, targetCategoryId = null }: Props) {
   const [allItems, setAllItems] = useState<any[]>([]);
   const [selectedToAdd, setSelectedToAdd] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [showEditItemDrawer, setShowEditItemDrawer] = useState(false);
   const [editTargetItem, setEditTargetItem] = useState<any | null>(null);
   const [itemCategoriesMap, setItemCategoriesMap] = useState<Record<string, any[]>>({});
-  const [showAssigned, setShowAssigned] = useState(false);
 
   const loadItems = async () => {
     if (!familyId) return;
@@ -99,15 +99,7 @@ export default function AddItemsDrawer({ opened, onClose, familyId, excludedItem
           <div style={{ overflow: 'auto', flex: '1 1 auto', paddingTop: 8 }}>
             {loading ? <Loader /> : (
               <div>
-                {/* optional toggle to show items that are already assigned to other categories */}
-                {showAssignedItemsToggle && (
-                  <div style={{ marginBottom: 8 }}>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                      <Checkbox label="Show items assigned to other categories" checked={showAssigned} onChange={(e) => setShowAssigned(e.currentTarget.checked)} aria-label="Show items assigned to other categories" />
-                    </div>
-                    <Divider my="sm" />
-                  </div>
-                )}
+                {/* previously there was an optional toggle to hide items assigned to other categories; that feature was removed */}
                 {allItems.length === 0 ? (
                   <Text c="dimmed">No available items</Text>
                 ) : (
@@ -122,18 +114,10 @@ export default function AddItemsDrawer({ opened, onClose, familyId, excludedItem
                         {typeof ("" as any) /* dummy */ === 'undefined' ? null : null}
                         {/* Build visible list based on showAssigned and fetched category map */}
                         {(() => {
-                          // default to showing all when no toggle is used
-                          const visible = allItems.filter(it => {
-                            const cats = itemCategoriesMap[it.id] || [];
-                            if (showAssignedItemsToggle && !showAssigned) {
-                              // only show unassigned items
-                              return (!cats || cats.length === 0);
-                            }
-                            return true;
-                          }).sort((a: any, b: any) => (a.name || '').localeCompare(b.name || ''));
+                          // show all items (the assigned-items toggle was removed). Keep alphabetical ordering.
+                          const visible = allItems.slice().sort((a: any, b: any) => (a.name || '').localeCompare(b.name || ''));
 
                           if (visible.length === 0) {
-                            if (!showAssigned) return <Text c="dimmed">No existing unassigned items</Text>;
                             return <Text c="dimmed">No available items</Text>;
                           }
 
@@ -182,6 +166,8 @@ export default function AddItemsDrawer({ opened, onClose, familyId, excludedItem
         initialName={editTargetItem?.name}
         familyId={familyId}
         showIsOneOffCheckbox={showIsOneOffCheckbox}
+        initialMembers={initialMembers}
+        initialWhole={initialWhole}
         onSaved={async (payload) => {
           // reload items and auto-select the created item so the user can add it
           try {

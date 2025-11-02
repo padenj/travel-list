@@ -105,6 +105,8 @@ export default function CategoryManagementPage(): React.ReactElement {
 
     const [showEditDrawer, setShowEditDrawer] = useState(false);
     const [editMasterItemId, setEditMasterItemId] = useState<string | null>(null);
+    const [lastSelectedMembers, setLastSelectedMembers] = useState<string[]>([]);
+    const [lastSelectedWhole, setLastSelectedWhole] = useState<boolean>(false);
     const [sortMode, setSortMode] = useState(false);
     const [multiSelectMode, setMultiSelectMode] = useState(false);
     const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
@@ -364,6 +366,7 @@ export default function CategoryManagementPage(): React.ReactElement {
                             changeSelectedTab(cat.id);
                             setShowAddPaneForCategory({ open: true, categoryId: cat.id });
                             setEditMasterItemId(null);
+                            // ensure the name field is cleared when opening for create
                             setShowEditDrawer(true);
                           }}>Add</Button>
                         </div>
@@ -411,7 +414,7 @@ export default function CategoryManagementPage(): React.ReactElement {
                           .tl-category-item .tl-item-right { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; }
                         `}</style>
                         <div className="tl-category-grid">
-                          {categoryItems[cat.id].map((item) => (
+                          {categoryItems[cat.id].slice().sort((a, b) => (a.name || '').localeCompare(b.name || '')).map((item) => (
                             <div key={item.id} className="tl-category-item">
                               <div className="tl-item-left" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                                 {multiSelectMode && (
@@ -492,13 +495,22 @@ export default function CategoryManagementPage(): React.ReactElement {
               opened={showEditDrawer}
               onClose={() => { setShowEditDrawer(false); setEditMasterItemId(null); }}
               masterItemId={editMasterItemId || undefined}
-              initialName={editMasterItemId ? (items.find(i => i.id === editMasterItemId)?.name) : undefined}
+              // When creating, pass explicit empty initialName so the textbox is cleared
+              initialName={editMasterItemId ? (items.find(i => i.id === editMasterItemId)?.name) : ''}
               familyId={familyId}
               initialCategoryId={showAddPaneForCategory.open ? showAddPaneForCategory.categoryId : undefined}
-              onSaved={async () => {
+              initialMembers={lastSelectedMembers}
+              initialWhole={lastSelectedWhole}
+              onSaved={async (payload) => {
+                // When an item is created, payload may include members/whole to persist
+                if (payload && (payload as any).members) {
+                  setLastSelectedMembers((payload as any).members || []);
+                }
+                if (payload && typeof (payload as any).whole !== 'undefined') {
+                  setLastSelectedWhole(!!(payload as any).whole);
+                }
                 await fetchCategoryItems();
-                setShowEditDrawer(false);
-                setEditMasterItemId(null);
+                // keep the drawer open for additional creations; do not close here
                 bumpRefresh();
               }}
               showIsOneOffCheckbox={false}
