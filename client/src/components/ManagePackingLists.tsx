@@ -18,6 +18,7 @@ import { useImpersonation } from '../contexts/ImpersonationContext';
 import { showNotification } from '@mantine/notifications';
 import { useActivePackingList } from '../contexts/ActivePackingListContext';
 import ItemEditDrawer from './ItemEditDrawer';
+import AddItemsDrawer from './AddItemsDrawer';
 export default function ManagePackingLists() {
   const [familyId, setFamilyId] = useState<string | null>(null);
   const { impersonatingFamilyId } = useImpersonation();
@@ -39,9 +40,6 @@ export default function ManagePackingLists() {
   
   const [editAssignedTemplates, setEditAssignedTemplates] = useState<string[]>([]);
   const [showAddPane, setShowAddPane] = useState(false);
-  const [allItems, setAllItems] = useState<any[]>([]);
-  const [selectedToAdd, setSelectedToAdd] = useState<string[]>([]);
-  const [addingLoading, setAddingLoading] = useState(false);
   const [isMobile, setIsMobile] = useState<boolean>(false);
   // Item edit drawer state (moved to shared component)
   const [showEditItemDrawer, setShowEditItemDrawer] = useState(false);
@@ -350,44 +348,11 @@ export default function ManagePackingLists() {
   // Note: single-use "apply template" remains available via direct API call if needed.
 
   const openAddItemsPane = async () => {
-    if (!familyId) return;
+    // Open the shared AddItemsDrawer which will fetch items itself.
     setShowAddPane(true);
-    try {
-      const res = await getItems(familyId);
-      if (!res.response.ok) return;
-      const items = res.data.items || [];
-      // exclude items already on the edit list (by itemId)
-      const existingMasterIds = new Set(editItems.map(e => e.itemId).filter(Boolean));
-      const available = items.filter((it: any) => !existingMasterIds.has(it.id));
-      setAllItems(available);
-      setSelectedToAdd([]);
-    } catch (err) {
-      console.error('Failed to load items', err);
-    }
   };
 
-  const applyAddItems = async () => {
-    if (!editListId) return;
-    if (selectedToAdd.length === 0) {
-      setShowAddPane(false);
-      return;
-    }
-      setAddingLoading(true);
-    try {
-      await Promise.all(selectedToAdd.map(id => addItemToPackingList(editListId, id)));
-      showNotification({ title: 'Added', message: 'Items added to list', color: 'green' });
-      // refresh modal items
-      if (editListId) await openEditFor({ id: editListId, name: editListName });
-      await reload();
-      setShowAddPane(false);
-      setSelectedToAdd([]);
-    } catch (err) {
-      console.error(err);
-      showNotification({ title: 'Error', message: String(err), color: 'red' });
-    } finally {
-      setAddingLoading(false);
-    }
-  };
+  // apply logic handled by AddItemsDrawer via the onApply prop below
 
   return (
     <Card shadow="sm" padding="lg" radius="md" withBorder>
@@ -658,80 +623,31 @@ export default function ManagePackingLists() {
       </Drawer>
 
       {/* Nested Drawer for Add Items pane */}
-      <Drawer opened={showAddPane} onClose={() => setShowAddPane(false)} position="right" size={isMobile ? '80%' : 420} padding="md" zIndex={2100}>
-        <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-            <Text fw={700}>Add Items</Text>
-            <Group>
-              <Button variant="default" size="xs" onClick={() => setShowAddPane(false)}>Cancel</Button>
-              <Button size="xs" onClick={() => {
-                // Open ItemEditDrawer in create mode for a one-off item
-                setEditTargetItem({ itemId: null, name: '' });
-                // defaultAssignedMember left undefined; caller can set to null for whole-family if needed
-                setItemDrawerDefaultMember(undefined);
-                setShowEditItemDrawer(true);
-              }}>New Item</Button>
-              <Button size="xs" onClick={applyAddItems} loading={addingLoading}>Apply</Button>
-            </Group>
-          </div>
-          <div style={{ overflow: 'auto' }}>
-            {allItems.length === 0 ? (
-              <Text c="dimmed">No additional items available</Text>
-            ) : (
-              <div>
-                {allItems.map(it => (
-                  <div key={it.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 0' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <Checkbox checked={selectedToAdd.includes(it.id)} onChange={(e) => {
-                        const checked = e.currentTarget.checked;
-                        setSelectedToAdd(prev => checked ? [...prev, it.id] : prev.filter(x => x !== it.id));
-                      }} />
-                      <div>
-                        <Text style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{it.name}</Text>
-                        <Text size="xs" c="dimmed">{it.description || ''}</Text>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      </Drawer>
-      {/* Add items pane inside the modal - simple responsive overlay */}
-      {showAddPane && (
-        <div style={{ position: 'fixed', top: 80, right: 40, bottom: 80, width: isMobile ? '90%' : 420, background: '#fff', border: '1px solid rgba(0,0,0,0.08)', borderRadius: 8, zIndex: 2000, boxShadow: '0 8px 24px rgba(0,0,0,0.12)' }}>
-          <div style={{ padding: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(0,0,0,0.04)' }}>
-            <Text fw={700}>Add Items</Text>
-            <Group>
-              <Button variant="default" size="xs" onClick={() => setShowAddPane(false)}>Cancel</Button>
-              <Button size="xs" onClick={applyAddItems} loading={addingLoading}>Apply</Button>
-            </Group>
-          </div>
-          <div style={{ padding: 12, height: '100%', overflow: 'auto' }}>
-            {allItems.length === 0 ? (
-              <Text c="dimmed">No additional items available</Text>
-            ) : (
-              <div>
-                {allItems.map(it => (
-                  <div key={it.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 0' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <Checkbox checked={selectedToAdd.includes(it.id)} onChange={(e) => {
-                        const checked = e.currentTarget.checked;
-                        setSelectedToAdd(prev => checked ? [...prev, it.id] : prev.filter(x => x !== it.id));
-                      }} />
-                      <div>
-                        <Text style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{it.name}</Text>
-                        <Text size="xs" c="dimmed">{it.description || ''}</Text>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+      <AddItemsDrawer
+        opened={showAddPane}
+        onClose={() => setShowAddPane(false)}
+        familyId={familyId}
+        // Exclude items already on the current packing list
+        excludedItemIds={(editItems || []).map(i => i.itemId).filter(Boolean)}
+        onApply={async (ids: string[]) => {
+          if (!editListId) return;
+          try {
+            for (const id of ids) {
+              await addItemToPackingList(editListId, id);
+            }
+            showNotification({ title: 'Added', message: 'Items added to list', color: 'green' });
+            if (editListId) await openEditFor({ id: editListId, name: editListName });
+            await reload();
+            setShowAddPane(false);
+          } catch (err) {
+            console.error('Failed to add items from AddItemsDrawer', err);
+            showNotification({ title: 'Error', message: 'Failed to add items', color: 'red' });
+          }
+        }}
+        title="Add Items"
+        showIsOneOffCheckbox={true}
+        autoApplyOnCreate={false}
+      />
       
       <ItemEditDrawer
         opened={showEditItemDrawer}
@@ -748,33 +664,12 @@ export default function ManagePackingLists() {
   // Preselect member assignments and whole-family flag from the packing-list item
   initialMembers={editTargetItem && Array.isArray(editTargetItem.members) ? editTargetItem.members.map((m: any) => m.id) : undefined}
   initialWhole={!!(editTargetItem && editTargetItem.whole_family)}
-        onSaved={async (payload) => {
-          // When a new master item is created from the add-items pane, refresh the available items list so it can be added
+            onSaved={async (payload) => {
+          // When a new master item is created from ItemEditDrawer while AddItemsDrawer is open,
+          // AddItemsDrawer's auto-select/auto-apply (autoApplyOnCreate) will handle adding if desired.
+          // Here we refresh the edit modal and call shared handler to update list UI.
           try {
-            // If an item was created and we're editing a packing list from the Add Items pane,
-            // add the created item to that packing list so it appears in the modal immediately.
-                if (payload && (payload as any).id && showAddPane && editListId) {
-              try {
-                const createdMasterId = (payload as any).id;
-                const alreadyPresent = (editItems || []).some(e => {
-                  const mid = e.itemId || e.item_id || e.master_id || e.masterId;
-                  return mid && String(mid) === String(createdMasterId);
-                });
-                if (!alreadyPresent) {
-                  await addItemToPackingList(editListId, createdMasterId);
-                  showNotification({ title: 'Added', message: 'New item added to the packing list', color: 'green' });
-                } else {
-                  console.debug('[ManagePackingLists] skipping addItemToPackingList, master already in list', createdMasterId);
-                }
-              } catch (addErr) {
-                console.error('Failed to auto-add created item to packing list', addErr);
-                // continue to refresh available items even if auto-add failed
-              }
-            }
-            if (showAddPane && familyId) {
-              const res = await getItems(familyId);
-              if (res.response.ok) setAllItems((res.data.items || []).filter((it: any) => !new Set(editItems.map(e => e.itemId).filter(Boolean)).has(it.id)));
-            }
+            if (editListId) await openEditFor({ id: editListId, name: editListName });
           } catch (e) {
             // ignore
           }
