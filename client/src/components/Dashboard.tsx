@@ -1,9 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { Container, Group, Stack, Text } from '@mantine/core';
+import { Container, Group, Stack, Text, Button } from '@mantine/core';
 import { showNotification } from '@mantine/notifications';
 import ActivePackingListSelector from './ActivePackingListSelector';
+import { IconPlus } from '@tabler/icons-react';
 import { PackingListsSideBySide } from './PackingListsSideBySide';
 import ItemEditDrawer from './ItemEditDrawer';
+import AddItemsDrawer from './AddItemsDrawer';
+import EditPackingListDrawer from './EditPackingListDrawer';
 import { useActivePackingList } from '../contexts/ActivePackingListContext';
 import { useImpersonation } from '../contexts/ImpersonationContext';
 import { getCurrentUserProfile, getItems, getPackingList, togglePackingListItemCheck, addItemToPackingList, setPackingListItemNotNeeded, setPackingListItemNotNeededForMember } from '../api';
@@ -20,6 +23,11 @@ export default function Dashboard(): React.ReactElement {
   // familyMembers not needed in dashboard now that one-off drawer was removed
   const [showItemDrawer, setShowItemDrawer] = useState(false);
   const [itemDrawerDefaultMember, setItemDrawerDefaultMember] = useState<string | null>(null);
+  const [showAddItemsDrawer, setShowAddItemsDrawer] = useState(false);
+  const [familyMembersState, setFamilyMembersState] = useState<any[]>([]);
+  const [showEditListDrawer, setShowEditListDrawer] = useState(false);
+  const [editListNameState, setEditListNameState] = useState<string>('');
+  const [excludedItemIds, setExcludedItemIds] = useState<string[]>([]);
 
   // Increment counter whenever activeListId changes to force refresh
   useEffect(() => {
@@ -92,7 +100,7 @@ export default function Dashboard(): React.ReactElement {
           setWholeFamilyItems([]);
           return;
         }
-        const listItems = listRes.data.items || [];
+  const listItems = listRes.data.items || [];
         const checks = listRes.data.checks || [];
 
         // If we couldn't obtain members via the profile/family fetch (possible race or missing data
@@ -210,6 +218,14 @@ export default function Dashboard(): React.ReactElement {
     setUserLists(userListsData);
     setWholeFamilyItems(wholeItems);
     setFamilyId(fid);
+    setFamilyMembersState(effectiveMembers || []);
+    // compute excluded master ids for AddItemsDrawer so it hides items already present
+    const excludedMasterIds: string[] = [];
+    for (const pli of listItems || []) {
+      const mid = pli.item_id || pli.master_id || pli.itemId || pli.masterId;
+      if (mid) excludedMasterIds.push(String(mid));
+    }
+    setExcludedItemIds(excludedMasterIds);
       } catch (err) {
         console.error('Failed to load dashboard packing lists', err);
         setUserLists([]);
@@ -307,6 +323,11 @@ export default function Dashboard(): React.ReactElement {
     setShowItemDrawer(true);
   };
 
+  const openAddItemsOneOff = () => {
+    // Preselect all family members by default when opening as one-off
+    setShowAddItemsDrawer(true);
+  };
+
   const handleItemDrawerSaved = async (payload?: { id?: string; name?: string }) => {
     // If the drawer created a new master item, add it to the active packing list
     try {
@@ -369,7 +390,11 @@ export default function Dashboard(): React.ReactElement {
 
       <div style={{ marginTop: 16 }}>
         <Stack>
-          <ActivePackingListSelector onChange={(_id) => { /* optionally notify parent */ }} />
+          <Group align="center" style={{ gap: 8 }}>
+            <ActivePackingListSelector onChange={(_id) => { /* optionally notify parent */ }} />
+            <Button size="xs" leftSection={<IconPlus size={14} />} onClick={openAddItemsOneOff} aria-label="Add Item">Add Item</Button>
+            <Button size="xs" variant="default" onClick={() => { if (activeListId) { setShowEditListDrawer(true); setEditListNameState(''); } else { showNotification({ title: 'No list selected', message: 'Select an active packing list first', color: 'yellow' }); } }}>Edit list</Button>
+          </Group>
           {!activeListId ? (
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 200, padding: 24 }}>
               <div style={{ textAlign: 'center' }}>
@@ -393,6 +418,41 @@ export default function Dashboard(): React.ReactElement {
             />
           )}
           <ItemEditDrawer opened={showItemDrawer} onClose={() => { setShowItemDrawer(false); setItemDrawerDefaultMember(null); }} masterItemId={null} initialName={undefined} familyId={familyId} defaultAssignedMemberId={itemDrawerDefaultMember} onSaved={handleItemDrawerSaved} showIsOneOffCheckbox={true} />
+          <AddItemsDrawer
+            opened={showAddItemsDrawer}
+            onClose={() => setShowAddItemsDrawer(false)}
+            familyId={familyId}
+            excludedItemIds={excludedItemIds}
+            onApply={async (selectedIds: string[]) => {
+              if (!activeListId) {
+                showNotification({ title: 'No list selected', message: 'Select an active packing list before adding items', color: 'yellow' });
+                return;
+              }
+              try {
+                // run adds in parallel and collect results so we can show success/failure
+                const ops = selectedIds.map(id => addItemToPackingList(activeListId!, id));
+                const results = await Promise.all(ops);
+                const failed = results.filter(r => !(r && r.response && r.response.ok));
+                if (failed.length > 0) {
+                  console.error('Some adds failed', failed);
+                  showNotification({ title: 'Partial failure', message: `${failed.length} of ${results.length} items failed to add`, color: 'yellow' });
+                } else {
+                  showNotification({ title: 'Added', message: `${results.length} items added`, color: 'green' });
+                }
+                // refresh lists display after attempting adds
+                setListSelectionCount(prev => prev + 1);
+              } catch (e) {
+                console.error('Failed to add items from Dashboard add drawer', e);
+                showNotification({ title: 'Error', message: 'Failed to add items', color: 'red' });
+              }
+            }}
+            showIsOneOffCheckbox={true}
+            autoApplyOnCreate={true}
+            initialMembers={familyMembersState.map(m => m.id)}
+            initialWhole={false}
+            title="Add Item"
+          />
+          <EditPackingListDrawer opened={showEditListDrawer} onClose={() => setShowEditListDrawer(false)} listId={activeListId || null} initialName={editListNameState} familyId={familyId} onRefresh={() => setListSelectionCount(prev => prev + 1)} />
         </Stack>
       </div>
 

@@ -18,7 +18,7 @@ import {
   getPackingList,
 } from '../api';
 
-type OnSavedPayload = { id?: string; name?: string } | undefined;
+type OnSavedPayload = { id?: string; name?: string; members?: string[]; whole?: boolean } | undefined;
 
 export interface ItemEditDrawerProps {
   opened: boolean;
@@ -222,6 +222,33 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
     })();
   }, [opened, masterItemId, familyId, defaultAssignedMemberId, promoteContext, initialMembersProp, initialWholeProp, initialCategoryId]);
 
+  // When opening in create mode (no masterItemId), ensure the name is cleared and
+  // the selected members/whole are seeded from the parent's initial props so
+  // the parent can persist the last-used selections across opens.
+  useEffect(() => {
+    if (!opened) return;
+    if (masterItemId) return; // only for create mode
+    // Clear the name input for a fresh create
+    setName('');
+    // Seed selected members/whole from initial props
+    const assigned = Array.isArray(initialMembersProp) ? initialMembersProp.slice() : [];
+    setSelectedMembers(assigned);
+    setSelectedWhole(!!initialWholeProp);
+  }, [opened, masterItemId, initialMembersProp, initialWholeProp]);
+
+  // If familyMembers load after we seeded selectedMembers, re-apply the initialMembers
+  // to ensure checkboxes reflect the parent's selections (handles async ordering).
+  useEffect(() => {
+    if (!opened) return;
+    if (masterItemId) return;
+    if (!Array.isArray(initialMembersProp) || initialMembersProp.length === 0) return;
+    // Only re-apply if the UI hasn't already got selections
+    setSelectedMembers(prev => {
+      if (prev && prev.length > 0) return prev;
+      return initialMembersProp.slice();
+    });
+  }, [familyMembers, initialMembersProp, opened, masterItemId]);
+
   const save = async () => {
     setSaving(true);
   console.log('[ItemEditDrawer] save() called', { masterItemId, name, selectedCategory, selectedMembers, selectedWhole, alsoAddForFutureTrips, isCreatingOneOff, isMasterOneOff, isOneOff });
@@ -274,7 +301,7 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
         }
         await Promise.all(ops);
         showNotification({ title: 'Saved', message: 'Item created.', color: 'green' });
-        if (onSaved) await onSaved(createdId ? { id: createdId, name: updatedName } : undefined);
+        if (onSaved) await onSaved(createdId ? { id: createdId, name: updatedName, members: selectedMembers.slice(), whole: !!selectedWhole } : undefined);
         onClose();
         return;
       }
