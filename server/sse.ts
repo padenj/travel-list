@@ -60,14 +60,20 @@ export function addClient(res: Response, req?: Request) {
   
   // Deduplicate / limit connections by a key composed of userId|ip|ua BEFORE adding new client
   try {
-    const key = `${(client as any).userId || 'anon'}|${client.ip || 'unknown'}|${(client.ua || '').slice(0,200)}`;
+    // Prefer an explicit per-client id header when present (set by the client
+    // per-tab via sessionStorage) so a user with multiple tabs/windows won't
+    // collide.
+    const hdrClientId = req && req.headers && (req.headers['x-client-id'] as string | undefined);
+    if (hdrClientId) (client as any).clientId = hdrClientId;
+    const key = `${(client as any).userId || 'anon'}|${client.ip || 'unknown'}|${(client as any).clientId || ((client.ua || '').slice(0,200))}`;
     console.log('[SSE] checking dedupe for key:', key.slice(0, 100) + '...');
     // find existing clients with same key
     const matches = clients.filter(c => {
       const cid = (c as any).userId || 'anon';
-      const cua = c.ua || '';
       const cip = c.ip || 'unknown';
-      return `${cid}|${cip}|${cua.slice(0,200)}` === key;
+      const cclient = (c as any).clientId;
+      const cua = cclient ? cclient : (c.ua || '');
+      return `${cid}|${cip}|${(cua || '').slice(0,200)}` === key;
     });
     console.log('[SSE] found', matches.length, 'existing clients with same key');
     if (matches.length >= MAX_CONNECTIONS_PER_KEY) {

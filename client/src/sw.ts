@@ -11,6 +11,7 @@ const RUNTIME = `runtime-${CACHE_VERSION}`;
 
 let authToken: string | null = null;
 let sseController: { running: boolean } = { running: false };
+let clientId: string | null = null;
 
 // Precache injected assets
 if ((self as any).__WB_MANIFEST && Array.isArray((self as any).__WB_MANIFEST)) {
@@ -47,6 +48,9 @@ self.addEventListener('message', (event: any) => {
   const msg = event.data || {};
   if (msg && msg.type === 'setToken') {
     authToken = msg.token || null;
+  }
+  if (msg && msg.type === 'setClientId') {
+    clientId = msg.clientId || null;
   }
   if (msg && msg.type === 'skipWaiting') {
     self.skipWaiting();
@@ -92,6 +96,7 @@ async function connectEvents() {
     if (!clientsList || clientsList.length === 0) { sseController.running = false; return; }
     const headers: any = {};
     if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
+    if (clientId) headers['X-Client-Id'] = clientId;
     const resp = await fetch('/api/events', { headers, credentials: 'same-origin' });
     if (!resp || !resp.body) throw new Error('No response body');
     const reader = resp.body.getReader();

@@ -153,6 +153,9 @@ export default function Layout({ children, user, onLogout }: LayoutProps): React
                 </Group>
               </Link>
             </div>
+            <div style={{ marginTop: 8, paddingLeft: 12 }}>
+              <Text size="xs" color="dimmed">Version: <VersionText /></Text>
+            </div>
           </div>
         </div>
       </AppShell.Navbar>
