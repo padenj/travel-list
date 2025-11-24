@@ -34,23 +34,47 @@ function App(): React.ReactElement {
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('/sw.js').then(reg => {
         console.log('[SW] Registered', reg);
+        const getOrCreateClientId = () => {
+          try {
+            let clientId = sessionStorage.getItem('tl:clientId');
+            if (!clientId) {
+              try { clientId = (crypto as any).randomUUID ? (crypto as any).randomUUID() : undefined; } catch (e) { /* fallthrough */ }
+              if (!clientId) clientId = `c-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+              sessionStorage.setItem('tl:clientId', clientId);
+            }
+            return clientId;
+          } catch (e) { return undefined; }
+        };
+
         const sendTokenToSW = (sw?: ServiceWorker | null) => {
           const token = (window as any).getAuthToken ? (window as any).getAuthToken() : null;
+          const clientId = getOrCreateClientId();
           try {
             if (!token) {
               console.log('[SW] No token available to send');
+              // still send clientId if present to let SW tag its SSE connection
+              if (clientId) {
+                if (navigator.serviceWorker.controller) {
+                  navigator.serviceWorker.controller.postMessage({ type: 'setClientId', clientId });
+                } else {
+                  const target = sw || reg.active || reg.waiting || reg.installing;
+                  if (target) target.postMessage({ type: 'setClientId', clientId });
+                }
+              }
               return;
             }
             // Prefer the controller, but fall back to registration worker references
             if (navigator.serviceWorker.controller) {
               console.log('[SW] Sending token to controller');
               navigator.serviceWorker.controller.postMessage({ type: 'setToken', token });
+              if (clientId) navigator.serviceWorker.controller.postMessage({ type: 'setClientId', clientId });
               return;
             }
             const target = sw || reg.active || reg.waiting || reg.installing;
             if (target) {
               console.log('[SW] Sending token to registration worker (state=' + (target.state || 'unknown') + ')');
               target.postMessage({ type: 'setToken', token });
+              if (clientId) target.postMessage({ type: 'setClientId', clientId });
             } else {
               console.log('[SW] No worker instance available on registration to send token');
             }
@@ -103,8 +127,13 @@ function App(): React.ReactElement {
   // early and is intentionally minimal to avoid affecting production behavior.
   useEffect(() => {
     try {
-      const isDev = (typeof import.meta !== 'undefined' && (import.meta as any).env && (import.meta as any).env.DEV) || process.env.NODE_ENV === 'development';
-      if (!isDev || !('serviceWorker' in navigator)) return;
+      const metaEnv = (typeof import.meta !== 'undefined' && (import.meta as any).env) ? (import.meta as any).env : undefined;
+      const isDev = (metaEnv && metaEnv.DEV) || process.env.NODE_ENV === 'development';
+      // Allow opting out of automatic dev-mode SW unregistration by setting
+      // VITE_KEEP_SW=true in your Vite environment. This helps when you need
+      // to test service worker behavior during development.
+      const keepSw = !!(metaEnv && metaEnv.VITE_KEEP_SW && String(metaEnv.VITE_KEEP_SW).toLowerCase() === 'true');
+      if (!isDev || keepSw || !('serviceWorker' in navigator)) return;
       navigator.serviceWorker.getRegistrations().then(regs => {
         regs.forEach(r => {
           try { r.unregister(); } catch (e) { /* ignore */ }
@@ -126,6 +155,17 @@ function App(): React.ReactElement {
       connecting = true;
       const token = getAuthToken();
       const headers: any = {};
+      // Ensure each browser tab/window has a stable per-tab id so the server
+      // can differentiate multiple simultaneous windows (regular + incognito).
+      try {
+        let clientId = sessionStorage.getItem('tl:clientId');
+        if (!clientId) {
+          try { clientId = (crypto as any).randomUUID ? (crypto as any).randomUUID() : undefined; } catch (e) { /* fallthrough */ }
+          if (!clientId) clientId = `c-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+          sessionStorage.setItem('tl:clientId', clientId);
+        }
+        if (clientId) headers['X-Client-Id'] = clientId;
+      } catch (e) { /* ignore sessionStorage/crypto failures */ }
       if (token) headers['Authorization'] = `Bearer ${token}`;
       try {
         console.log('[Events] connecting to /api/events (window)');

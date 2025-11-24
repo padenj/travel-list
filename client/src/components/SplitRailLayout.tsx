@@ -28,6 +28,8 @@ import {
   IconShield,
 } from '@tabler/icons-react';
 import { useImpersonation } from '../contexts/ImpersonationContext';
+import VersionText from './VersionText';
+import ServiceWorkerStatus from './ServiceWorkerStatus';
 
 interface User {
   username?: string;
@@ -353,7 +355,15 @@ export default function SplitRailLayout({ children, user, onLogout }: SplitRailL
         onMouseEnter={() => !isDesktop && setIsRailExpanded(true)}
         onMouseLeave={() => !isDesktop && setIsRailExpanded(false)}
       >
-        <RailContent />
+        <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+          <RailContent />
+          <div style={{ marginTop: 'auto', padding: isRailExpanded ? '12px' : '8px' }}>
+            <div style={{ marginBottom: 8 }}>
+              <ServiceWorkerStatus compact={!isRailExpanded} />
+            </div>
+            <Text size="xs" color="dimmed">Version: <VersionText /></Text>
+          </div>
+        </div>
       </Paper>
 
       {/* Main Content Area */}
@@ -389,6 +399,9 @@ export default function SplitRailLayout({ children, user, onLogout }: SplitRailL
               </Menu.Dropdown>
             </Menu>
           </Group>
+          <div style={{ marginTop: 6 }}>
+            <Text size="xs" color="dimmed">Version: <VersionText /></Text>
+          </div>
         </Paper>
 
         {/* Settings Tab Bar for Desktop */}

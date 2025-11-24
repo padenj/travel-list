@@ -139,6 +139,7 @@ jobs:
             TAGS="$IMAGE:sha-${SHORT}"
             echo "TAGS=$TAGS" >> $GITHUB_OUTPUT
             echo "VERSION=sha-${SHORT}" >> $GITHUB_OUTPUT
+            # Ensure VCS_REF and BUILD_DATE are always set for downstream steps
             echo "VCS_REF=${{ github.sha }}" >> $GITHUB_OUTPUT
             echo "BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_OUTPUT
           fi
