@@ -274,29 +274,31 @@ export default function SplitRailLayout({ children, user, onLogout }: SplitRailL
               <Text fw={600}>Travel List</Text>
             </Group>
             
-            {/* Profile menu */}
-            <Menu position="bottom-end">
-              <Menu.Target>
-                <UnstyledButton>
-                  <Avatar color="blue" radius="xl" size="sm">
-                    {getInitials(user.username)}
-                  </Avatar>
-                </UnstyledButton>
-              </Menu.Target>
-              <Menu.Dropdown>
-                <Menu.Label>
-                  <Text fw={600}>{user.username}</Text>
-                </Menu.Label>
-                <Divider />
-                {canAccessFamilyAdmin && (
-                  <Menu.Item component={Link} to="/settings/profile">Settings</Menu.Item>
-                )}
-                {canAccessSystemAdmin && (
-                  <Menu.Item component={Link} to="/admin/system">System Admin</Menu.Item>
-                )}
-                <Menu.Item color="red" onClick={onLogout}>Logout</Menu.Item>
-              </Menu.Dropdown>
-            </Menu>
+            {/* Right-side controls: profile menu (SW/version moved into mobile drawer) */}
+            <Group spacing="xs">
+              <Menu position="bottom-end">
+                <Menu.Target>
+                  <UnstyledButton>
+                    <Avatar color="blue" radius="xl" size="sm">
+                      {getInitials(user.username)}
+                    </Avatar>
+                  </UnstyledButton>
+                </Menu.Target>
+                <Menu.Dropdown>
+                  <Menu.Label>
+                    <Text fw={600}>{user.username}</Text>
+                  </Menu.Label>
+                  <Divider />
+                  {canAccessFamilyAdmin && (
+                    <Menu.Item component={Link} to="/settings/profile">Settings</Menu.Item>
+                  )}
+                  {canAccessSystemAdmin && (
+                    <Menu.Item component={Link} to="/admin/system">System Admin</Menu.Item>
+                  )}
+                  <Menu.Item color="red" onClick={onLogout}>Logout</Menu.Item>
+                </Menu.Dropdown>
+              </Menu>
+            </Group>
           </Group>
         </Paper>
 
@@ -330,7 +332,15 @@ export default function SplitRailLayout({ children, user, onLogout }: SplitRailL
           title=""
           padding="md"
         >
-          <MobileNavContent />
+          <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+            <div style={{ flex: '1 1 auto', overflow: 'auto' }}>
+              <MobileNavContent />
+            </div>
+            <div style={{ borderTop: '1px solid #e9ecef', paddingTop: 12, paddingBottom: 8, display: 'flex', justifyContent: 'center', gap: 12, alignItems: 'center' }}>
+              <ServiceWorkerStatus compact={false} />
+              <Text size="xs" color="dimmed">v<VersionText /></Text>
+            </div>
+          </div>
         </Drawer>
       </div>
     );
