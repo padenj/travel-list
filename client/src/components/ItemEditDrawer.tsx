@@ -36,7 +36,8 @@ export interface ItemEditDrawerProps {
   // Whether to show the "Also add this item for future trips" checkbox when creating a new item
   showIsOneOffCheckbox?: boolean;
   // When present, indicates we're editing a packing-list one-off item and can promote it to a master
-  promoteContext?: { listId: string; packingListItemId: string } | null;
+  // Fields are optional because callers may only provide a `listId` when used from AddItemsDrawer.
+  promoteContext?: { listId?: string; packingListItemId?: string } | null;
   zIndex?: number;
   initialCategoryId?: string | null; // pre-select a category when creating a new item
   initialMembers?: string[]; // pre-select members when opening from a packing-list item

@@ -615,10 +615,12 @@ router.patch('/packing-lists/:listId/items/:itemId/check', authMiddleware, async
     if (typeof userId === 'undefined') memberId = req.user!.id;
     else memberId = userId; // may be null to indicate whole-family
 
-    // If the packing-list-item is marked as whole_family, canonicalize all
-    // check updates to the NULL-member row so there is a single source of truth
-    // for the whole-family checked state. Ignore any provided per-member id.
-    if (pli.whole_family) {
+    // If the packing-list-item is marked as whole-family (DB may use snake_case
+    // while JS code may use camelCase), canonicalize all check updates to the
+    // NULL-member row so there is a single source of truth for whole-family
+    // checked state. Ignore any provided per-member id.
+    const pliWholeFamily = (pli as any).whole_family || (pli as any).wholeFamily || false;
+    if (pliWholeFamily) {
       if (memberId !== null) console.log('Canonicalizing per-member check to whole-family for pli', pli.id, 'ignoring memberId', memberId);
       memberId = null;
     }
