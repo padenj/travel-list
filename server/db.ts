@@ -130,7 +130,7 @@ const SCHEMAS = {
       CREATE TABLE IF NOT EXISTS packing_list_item_checks (
         id TEXT PRIMARY KEY,
         packing_list_item_id TEXT NOT NULL,
-        member_id TEXT NOT NULL,
+        member_id TEXT,
         checked INTEGER DEFAULT 0,
         checked_at TEXT,
         FOREIGN KEY (packing_list_item_id) REFERENCES packing_list_items(id),
@@ -254,6 +254,37 @@ async function initializeDatabase(db: Database): Promise<void> {
         // are handled via an explicit migration framework (see project notes).
 
         // ...existing migration logic complete. No automatic cleanup here.
+        // Ensure packing_list_item_checks.member_id is nullable. Some older DBs
+        // had this column defined NOT NULL which prevents storing whole-family
+        // checks (member_id = NULL). If the existing column is NOT NULL, recreate
+        // the table with a nullable member_id and copy rows across.
+        try {
+          const colsChecks: any[] = await db.all(`PRAGMA table_info(packing_list_item_checks)`);
+          const memberCol = colsChecks.find(c => c.name === 'member_id');
+          if (memberCol && memberCol.notnull === 1) {
+            console.log('⚙️ Migrating packing_list_item_checks to allow NULL member_id');
+            await db.exec('PRAGMA foreign_keys = OFF');
+            await db.exec(`
+              CREATE TABLE IF NOT EXISTS packing_list_item_checks_new (
+                id TEXT PRIMARY KEY,
+                packing_list_item_id TEXT NOT NULL,
+                member_id TEXT,
+                checked INTEGER DEFAULT 0,
+                checked_at TEXT,
+                FOREIGN KEY (packing_list_item_id) REFERENCES packing_list_items(id),
+                FOREIGN KEY (member_id) REFERENCES users(id)
+              );
+            `);
+            // copy rows (member_id may be empty string in some old DBs; normalize to NULL)
+            await db.exec(`INSERT INTO packing_list_item_checks_new (id, packing_list_item_id, member_id, checked, checked_at) SELECT id, packing_list_item_id, CASE WHEN member_id = '' THEN NULL ELSE member_id END, checked, checked_at FROM packing_list_item_checks`);
+            await db.exec('DROP TABLE IF EXISTS packing_list_item_checks');
+            await db.exec('ALTER TABLE packing_list_item_checks_new RENAME TO packing_list_item_checks');
+            await db.exec('PRAGMA foreign_keys = ON');
+            console.log('⚙️ packing_list_item_checks migration complete');
+          }
+        } catch (merr) {
+          console.warn('Non-fatal: failed to migrate packing_list_item_checks to nullable member_id', merr);
+        }
       } catch (merr) {
         console.warn('Migration step failed (non-fatal):', merr);
       }

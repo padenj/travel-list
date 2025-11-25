@@ -30,6 +30,8 @@ import {
 import { useImpersonation } from '../contexts/ImpersonationContext';
 import VersionText from './VersionText';
 import ServiceWorkerStatus from './ServiceWorkerStatus';
+import GlobalListEditDrawer from './GlobalListEditDrawer';
+import { ListEditDrawerProvider } from '../contexts/ListEditDrawerContext';
 
 interface User {
   username?: string;
@@ -265,6 +267,7 @@ export default function SplitRailLayout({ children, user, onLogout }: SplitRailL
   if (isMobile) {
     // Mobile Layout: Full-width with drawer
     return (
+      <ListEditDrawerProvider>
       <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
         {/* Mobile Header */}
         <Paper shadow="sm" p="md" style={{ borderBottom: '1px solid #e9ecef' }}>
@@ -342,7 +345,9 @@ export default function SplitRailLayout({ children, user, onLogout }: SplitRailL
             </div>
           </div>
         </Drawer>
+        <GlobalListEditDrawer />
       </div>
+    </ListEditDrawerProvider>
     );
   }
 
@@ -350,6 +355,7 @@ export default function SplitRailLayout({ children, user, onLogout }: SplitRailL
   const railWidth = isRailExpanded ? 200 : 60;
   
   return (
+    <ListEditDrawerProvider>
     <div style={{ height: '100vh', display: 'flex' }}>
       {/* Icon Rail */}
       <Paper
@@ -433,8 +439,10 @@ export default function SplitRailLayout({ children, user, onLogout }: SplitRailL
           <Container size="xl" p="md">
             {children}
           </Container>
+          <GlobalListEditDrawer />
         </div>
       </div>
     </div>
+    </ListEditDrawerProvider>
   );
 }

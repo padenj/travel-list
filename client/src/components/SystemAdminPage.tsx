@@ -3,7 +3,6 @@ import {
   Container, 
   Title, 
   Button, 
-  Table, 
   Group, 
   Text, 
   Modal, 
@@ -18,7 +17,9 @@ import {
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
 import { IconTrash, IconPlus, IconAlertCircle } from '@tabler/icons-react';
-import { getFamilies, getUsers, createFamily, createUser, deleteFamily, deleteUser, createFamilyMember, editFamilyMember, resetFamilyMemberPassword } from '../api';
+import { getFamilies, getUsers, createFamily, deleteFamily, deleteUser, createFamilyMember, editFamilyMember, resetFamilyMemberPassword } from '../api';
+import { getCurrentUserProfile } from '../api';
+import FamilyMembersTable from './FamilyMembersTable';
 import { useNavigate } from 'react-router-dom';
 import { useImpersonation } from '../contexts/ImpersonationContext';
 
@@ -30,6 +31,7 @@ interface User {
   email?: string;
   familyId?: string;
   created_at: string;
+  position?: number;
 }
 
 interface Family {
@@ -45,117 +47,25 @@ export default function SystemAdminPage(): React.ReactElement {
     // Removed unused familyTemplates state declaration
     // const [familyTemplates, setFamilyTemplates] = useState<Record<string, any[]>>({});
   const [loading, setLoading] = useState(true);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [showFamilyModal, setShowFamilyModal] = useState(false);
-  const [showUserModal, setShowUserModal] = useState(false);
   const [showMemberModal, setShowMemberModal] = useState(false);
   const [editingMember, setEditingMember] = useState<any | null>(null);
   const [memberFamilyId, setMemberFamilyId] = useState<string | null>(null);
+  const tableRefs = React.useRef<Record<string, any>>({});
   // Family Member form
-  const memberForm = useForm({
-    initialValues: {
-      name: '',
-      canLogin: false,
-      username: '',
-      password: '',
-      role: 'FamilyMember',
-    },
-    validate: {
-      name: (value) => (!value ? 'Name is required' : null),
-      username: (value, values) => (values.canLogin && !value ? 'Username is required' : null),
-      password: (value, values) => {
-        if (!values.canLogin) return null;
-        if (!value) return 'Password is required';
-        if (value.length < 8) return 'Password must be at least 8 characters';
-        let typeCount = 0;
-        if (/[A-Z]/.test(value)) typeCount++;
-        if (/[a-z]/.test(value)) typeCount++;
-        if (/[0-9]/.test(value)) typeCount++;
-        if (/[^A-Za-z0-9]/.test(value)) typeCount++;
-        if (typeCount < 2) return 'Password must contain at least 2 of: uppercase, lowercase, numbers, symbols';
-        return null;
-      },
-    },
-  });
+  // memberForm and modal moved into FamilyMembersTable; SystemAdminPage no longer manages per-family member modals
 
   const handleAddMember = (familyId: string) => {
-  console.log('[DEBUG] Add Member button clicked for familyId:', familyId);
-  setMemberFamilyId(familyId);
-  setEditingMember(null);
-  memberForm.reset();
-  setShowMemberModal(true);
-  console.log('[DEBUG] showMemberModal set to true');
+    // trigger the shared table's add modal for the given family
+    tableRefs.current[familyId]?.openAdd?.();
   };
 
   // Create or edit family member
-  const handleCreateMember = async (values: any) => {
-    console.log('[DEBUG] handleCreateMember called with values:', values, 'memberFamilyId:', memberFamilyId, 'editingMember:', editingMember);
-    if (!memberFamilyId) {
-      console.log('[DEBUG] No memberFamilyId set, aborting');
-      return;
-    }
-    try {
-      let response;
-      if (editingMember) {
-        console.log('[DEBUG] Calling editFamilyMember API');
-        response = await editFamilyMember(memberFamilyId, editingMember.id, {
-          name: values.name,
-          username: values.canLogin ? values.username : undefined,
-          role: values.canLogin ? values.role : 'FamilyMember',
-        });
-      } else {
-        console.log('[DEBUG] Calling createFamilyMember API');
-        response = await createFamilyMember(memberFamilyId, {
-          name: values.name,
-          canLogin: values.canLogin,
-          username: values.canLogin ? values.username : undefined,
-          password: values.canLogin ? values.password : undefined,
-          role: values.canLogin ? values.role : 'FamilyMember',
-        });
-      }
-      console.log('[DEBUG] API response:', response);
-      if (response.response.ok) {
-        notifications.show({
-          title: editingMember ? 'Member updated' : 'Member added',
-          message: editingMember ? 'Family member updated successfully.' : 'Family member added successfully.',
-          color: 'green',
-        });
-        setShowMemberModal(false);
-        memberForm.reset();
-        setEditingMember(null);
-        loadData();
-      } else {
-        notifications.show({
-          title: 'Error',
-          message: response.data.error || 'Failed to save family member',
-          color: 'red',
-        });
-        console.log('[DEBUG] API error:', response.data.error);
-      }
-    } catch (error) {
-      notifications.show({
-        title: 'Error',
-        message: 'Network error',
-        color: 'red',
-      });
-      console.log('[DEBUG] Exception in handleCreateMember:', error);
-    }
-  };
+  // create/edit moved into FamilyMembersTable; SystemAdminPage delegates to the table instance
 
   // Edit member handler
-  const handleEditMember = (familyId: string, member: any) => {
-    console.log('[DEBUG] Edit Member button clicked for familyId:', familyId, 'member:', member);
-    setMemberFamilyId(familyId);
-    setEditingMember(member);
-    memberForm.setValues({
-      name: member.name || '',
-      canLogin: !!member.username,
-      username: member.username || '',
-      password: '',
-      role: member.role || 'FamilyMember',
-    });
-    setShowMemberModal(true);
-    console.log('[DEBUG] showMemberModal set to true (edit)');
-  };
+  // editing is handled by the FamilyMembersTable's internal edit controls
 
   // Password reset handler
   const handleResetPassword = async (familyId: string, memberId: string) => {
@@ -195,41 +105,15 @@ export default function SystemAdminPage(): React.ReactElement {
     },
   });
 
-  const userForm = useForm({
-    initialValues: {
-      username: '',
-      password: '',
-      role: 'FamilyMember',
-      email: '',
-      familyId: '',
-    },
-    validate: {
-      username: (value) => (!value ? 'Username is required' : null),
-      password: (value) => {
-        if (!value) return 'Password is required';
-        if (value.length < 8) return 'Password must be at least 8 characters';
-        
-        // Count character types
-        let typeCount = 0;
-        if (/[A-Z]/.test(value)) typeCount++; // Uppercase
-        if (/[a-z]/.test(value)) typeCount++; // Lowercase
-        if (/[0-9]/.test(value)) typeCount++; // Numbers
-        if (/[^A-Za-z0-9]/.test(value)) typeCount++; // Symbols
-        
-        if (typeCount < 2) return 'Password must contain at least 2 of: uppercase, lowercase, numbers, symbols';
-        return null;
-      },
-      email: (value) => (!value ? 'Email is required' : null),
-      familyId: (value) => (!value ? 'Family is required' : null),
-    },
-  });
+  
 
   const loadData = async () => {
     try {
       setLoading(true);
-      const [familiesRes, usersRes] = await Promise.all([
+      const [familiesRes, usersRes, profileRes] = await Promise.all([
         getFamilies(),
-        getUsers()
+        getUsers(),
+        getCurrentUserProfile().catch(() => ({ response: { ok: false }, data: {} }))
       ]);
 
       if (familiesRes.response.ok) {
@@ -238,6 +122,12 @@ export default function SystemAdminPage(): React.ReactElement {
 
       if (usersRes.response.ok) {
         setUsers(usersRes.data.users || []);
+      }
+
+      if (profileRes && profileRes.response && profileRes.response.ok && profileRes.data && profileRes.data.user) {
+        setCurrentUserId(profileRes.data.user.id || null);
+      } else {
+        setCurrentUserId(null);
       }
     } catch (error) {
       notifications.show({
@@ -295,33 +185,7 @@ export default function SystemAdminPage(): React.ReactElement {
     }
   };
 
-  const handleCreateUser = async (values: any) => {
-    try {
-      const response = await createUser(values);
-      if (response.response.ok) {
-        notifications.show({
-          title: 'Success',
-          message: 'User created successfully',
-          color: 'green',
-        });
-        setShowUserModal(false);
-        userForm.reset();
-        loadData();
-      } else {
-        notifications.show({
-          title: 'Error',
-          message: response.data.error || 'Failed to create user',
-          color: 'red',
-        });
-      }
-    } catch (error) {
-      notifications.show({
-        title: 'Error',
-        message: 'Network error',
-        color: 'red',
-      });
-    }
-  };
+  
 
   const handleDeleteFamily = async (familyId: string, familyName: string) => {
     if (window.confirm(`Are you sure you want to delete the family "${familyName}"? This will also remove all users in this family.`)) {
@@ -405,9 +269,6 @@ export default function SystemAdminPage(): React.ReactElement {
           <Button leftSection={<IconPlus size={16} />} onClick={() => setShowFamilyModal(true)}>
             Add Family
           </Button>
-          <Button leftSection={<IconPlus size={16} />} onClick={() => setShowUserModal(true)}>
-            Add User
-          </Button>
         </Group>
       </Group>
 
@@ -422,7 +283,12 @@ export default function SystemAdminPage(): React.ReactElement {
           </Card>
         ) : (
           families.map((family) => {
-            const familyUsers = getUsersByFamily(family.id);
+            // derive family users and respect explicit `position` ordering when provided
+            const familyUsers = getUsersByFamily(family.id).slice();
+            familyUsers.sort((a, b) => {
+              if (typeof a.position === 'number' && typeof b.position === 'number') return a.position - b.position;
+              return 0;
+            });
             return (
               <Card key={family.id} withBorder>
                 <Group justify="space-between" mb="md">
@@ -451,52 +317,14 @@ export default function SystemAdminPage(): React.ReactElement {
 
                 <Divider mb="md" />
 
-                <Text fw={500} mb="sm">Family Members ({familyUsers.length})</Text>
-                {familyUsers.length === 0 ? (
-                  <Text c="dimmed" size="sm">No users in this family</Text>
-                ) : (
-                  <Table>
-                    <Table.Thead>
-                      <Table.Tr>
-                        <Table.Th>Name</Table.Th>
-                        <Table.Th>Username</Table.Th>
-                        <Table.Th>Role</Table.Th>
-                        <Table.Th>Email</Table.Th>
-                        <Table.Th>Created</Table.Th>
-                        <Table.Th>Actions</Table.Th>
-                      </Table.Tr>
-                    </Table.Thead>
-                    <Table.Tbody>
-                      {familyUsers.map((user) => (
-                        <Table.Tr key={user.id}>
-                          <Table.Td>{user.name || user.username || 'Unknown'}</Table.Td>
-                          <Table.Td>{user.username || '-'}</Table.Td>
-                          <Table.Td>{user.role || 'No Role'}</Table.Td>
-                          <Table.Td>{user.email || '-'}</Table.Td>
-                          <Table.Td>{new Date(user.created_at).toLocaleDateString()}</Table.Td>
-                          <Table.Td>
-                            <Button size="xs" variant="light" onClick={() => handleEditMember(family.id, user)} style={{ marginRight: 8 }}>
-                              Edit
-                            </Button>
-                            {user.username && (
-                              <Button size="xs" variant="light" color="yellow" onClick={() => handleResetPassword(family.id, user.id)} style={{ marginRight: 8 }}>
-                                Reset Password
-                              </Button>
-                            )}
-                            <ActionIcon
-                              color="red"
-                              variant="light"
-                              size="sm"
-                              onClick={() => handleDeleteUser(user.id, user.username || 'Unknown User')}
-                            >
-                              <IconTrash size={14} />
-                            </ActionIcon>
-                          </Table.Td>
-                        </Table.Tr>
-                      ))}
-                    </Table.Tbody>
-                  </Table>
-                )}
+                <FamilyMembersTable
+                  ref={(el) => { tableRefs.current[family.id] = el; }}
+                  showHeader={false}
+                  familyId={family.id}
+                  familyName={family.name}
+                  initialMembers={familyUsers}
+                  currentUserId={currentUserId}
+                />
                 {/* seeded templates display removed per request */}
               </Card>
             );
@@ -504,55 +332,7 @@ export default function SystemAdminPage(): React.ReactElement {
         )}
       </Stack>
 
-      {/* Add/Edit Family Member Modal */}
-      <Modal opened={showMemberModal} onClose={() => setShowMemberModal(false)} title={editingMember ? 'Edit Family Member' : 'Add Family Member'} size="lg">
-        <form onSubmit={memberForm.onSubmit(handleCreateMember)}>
-          <Stack>
-            <TextInput
-              label="Name"
-              placeholder="Enter member name"
-              {...memberForm.getInputProps('name')}
-            />
-            <Group>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={memberForm.values.canLogin}
-                  onChange={(e) => memberForm.setFieldValue('canLogin', e.target.checked)}
-                  style={{ marginRight: 8 }}
-                />
-                Can log in?
-              </label>
-            </Group>
-            {memberForm.values.canLogin && (
-              <>
-                <TextInput
-                  label="Username"
-                  placeholder="Enter username"
-                  {...memberForm.getInputProps('username')}
-                />
-                <TextInput
-                  label="Password"
-                  placeholder="Minimum 8 chars, upper/lower/number/symbol"
-                  type="password"
-                  {...memberForm.getInputProps('password')}
-                />
-                <Select
-                  label="Role"
-                  data={[{ value: 'FamilyMember', label: 'Family Member' }, { value: 'FamilyAdmin', label: 'Family Admin' }]}
-                  {...memberForm.getInputProps('role')}
-                />
-              </>
-            )}
-            <Group justify="flex-end">
-              <Button variant="light" onClick={() => setShowMemberModal(false)}>
-                Cancel
-              </Button>
-              <Button type="submit">{editingMember ? 'Save Changes' : 'Add Member'}</Button>
-            </Group>
-          </Stack>
-        </form>
-      </Modal>
+      {/* Family member add/edit modal moved into FamilyMembersTable; removed from SystemAdminPage */}
 
       {/* Create Family Modal */}
       <Modal opened={showFamilyModal} onClose={() => setShowFamilyModal(false)} title="Create New Family">
@@ -573,51 +353,7 @@ export default function SystemAdminPage(): React.ReactElement {
         </form>
       </Modal>
 
-      {/* Create User Modal */}
-      <Modal opened={showUserModal} onClose={() => setShowUserModal(false)} title="Create New User" size="lg">
-        <form onSubmit={userForm.onSubmit(handleCreateUser)}>
-          <Stack>
-            <TextInput
-              label="Username"
-              placeholder="Enter username"
-              {...userForm.getInputProps('username')}
-            />
-            <TextInput
-              label="Password"
-              placeholder="Minimum 16 chars, upper/lower/number/symbol"
-              type="password"
-              {...userForm.getInputProps('password')}
-            />
-            <Select
-              label="Role"
-              data={[
-                { value: 'SystemAdmin', label: 'System Administrator' },
-                { value: 'FamilyAdmin', label: 'Family Administrator' },
-                { value: 'FamilyMember', label: 'Family Member' },
-              ]}
-              {...userForm.getInputProps('role')}
-            />
-            <TextInput
-              label="Email"
-              placeholder="Enter email address"
-              type="email"
-              {...userForm.getInputProps('email')}
-            />
-            <Select
-              label="Family"
-              placeholder="Select family"
-              data={families.map(f => ({ value: f.id, label: f.name || 'Unnamed Family' }))}
-              {...userForm.getInputProps('familyId')}
-            />
-            <Group justify="flex-end">
-              <Button variant="light" onClick={() => setShowUserModal(false)}>
-                Cancel
-              </Button>
-              <Button type="submit">Create User</Button>
-            </Group>
-          </Stack>
-        </form>
-      </Modal>
+      {/* Create User removed - users are created per-family via FamilyMembersTable */}
     </Container>
   );
 }

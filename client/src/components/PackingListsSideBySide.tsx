@@ -1,5 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { Text, Stack, Checkbox, ScrollArea, ActionIcon } from '@mantine/core';
+import React, { useEffect, useRef, useState, useMemo } from 'react';
+import { Text, Stack, Checkbox, ScrollArea, ActionIcon, useMantineTheme } from '@mantine/core';
 import { getCategories } from '../api';
 import { IconHexagonMinus, IconRotateClockwise, IconPlus, IconEdit } from '@tabler/icons-react';
 import ItemEditDrawer from './ItemEditDrawer';
@@ -19,9 +19,38 @@ export interface PackingListProps {
   onRefresh?: () => void;
 }
 
-const ItemLabel: React.FC<{ text: string }> = ({ text }) => (
-  <span style={{ fontSize: 13, lineHeight: '1.1', display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{text}</span>
-);
+const ItemLabel: React.FC<{ text: string; checked?: boolean }> = ({ text, checked }) => {
+  const theme = useMantineTheme();
+  const checkedColor = theme.colorScheme === 'dark' ? theme.colors.dark[2] : theme.colors.gray[6];
+  return (
+    <span style={{ fontSize: 13, lineHeight: '1.1', display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: checked ? checkedColor : undefined }}>{text}</span>
+  );
+};
+
+const ItemRow: React.FC<{ checked: boolean; onChange: (checked: boolean) => void; label: string; disabled?: boolean; onToggleNotNeeded?: () => void; onEdit?: () => void }> = React.memo(({ checked, onChange, label, disabled, onToggleNotNeeded, onEdit }) => {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0' }}>
+      <Checkbox
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        styles={{ body: { padding: 0 } }}
+        aria-label={label}
+        disabled={disabled}
+      />
+      <ItemLabel text={label} checked={checked} />
+      {onToggleNotNeeded ? (
+        <ActionIcon size="sm" variant="subtle" onClick={onToggleNotNeeded} aria-label="Not needed">
+          <IconHexagonMinus size={14} />
+        </ActionIcon>
+      ) : null}
+      {onEdit ? (
+        <ActionIcon size="sm" variant="light" onClick={onEdit} aria-label="Edit one-off">
+          <IconEdit size={14} />
+        </ActionIcon>
+      ) : null}
+    </div>
+  );
+});
 
 export function PackingListsSideBySide({ userLists, wholeFamilyItems, onCheckItem, notNeededByUser = {}, notNeededWhole = [], onToggleNotNeeded, onOpenAddDrawer, showWhole = true, activeListId, familyId, onRefresh }: PackingListProps) {
 
@@ -160,20 +189,13 @@ export function PackingListsSideBySide({ userLists, wholeFamilyItems, onCheckIte
                 return (
                   <div>
                     {active.map(item => (
-                      <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0' }}>
-                        <Checkbox
-                          checked={item.checked}
-                          onChange={e => onCheckItem(null, item.id, e.target.checked)}
-                          styles={{ body: { padding: 0 } }}
-                          aria-label={item.name}
-                        />
-                        <ItemLabel text={item.name} />
-                        {onToggleNotNeeded ? (
-                          <ActionIcon size="sm" variant="subtle" onClick={() => onToggleNotNeeded(null, item.id)} aria-label="Not needed">
-                            <IconHexagonMinus size={14} />
-                          </ActionIcon>
-                        ) : null}
-                      </div>
+                      <ItemRow
+                        key={item.id}
+                        checked={item.checked}
+                        onChange={(v) => onCheckItem(null, item.id, v)}
+                        label={item.name}
+                        onToggleNotNeeded={onToggleNotNeeded ? (() => onToggleNotNeeded(null, item.id)) : undefined}
+                      />
                     ))}
 
                     {/* One-off section for whole-family column */}
@@ -181,23 +203,13 @@ export function PackingListsSideBySide({ userLists, wholeFamilyItems, onCheckIte
                       <div style={{ marginTop: 10 }}>
                         <Text size="xs" fw={700}>One-off</Text>
                         {oneOffActive.map(item => (
-                          <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0' }}>
-                            <Checkbox
-                              checked={item.checked}
-                              onChange={e => onCheckItem(null, item.id, e.target.checked)}
-                              styles={{ body: { padding: 0 } }}
-                              aria-label={item.name}
-                            />
-                            <ItemLabel text={item.name} />
-                            {onToggleNotNeeded ? (
-                              <ActionIcon size="sm" variant="subtle" onClick={() => onToggleNotNeeded(null, item.id)} aria-label="Not needed">
-                                <IconHexagonMinus size={14} />
-                              </ActionIcon>
-                            ) : null}
-                            {/* Edit for one-off items: open edit drawer in promote mode */}
-                            <ActionIcon size="sm" variant="light" onClick={() => {
-                              console.debug('[PackingListsSideBySide] opening edit (whole) for item', { item, categoryId: (item as any).category ? (item as any).category.id : undefined, members: (item as any).members ? (item as any).members.map((m: any) => m.id) : undefined, whole_family: (item as any).whole_family });
-                              // Determine any referenced master item id from multiple possible field names
+                          <ItemRow
+                            key={item.id}
+                            checked={item.checked}
+                            onChange={(v) => onCheckItem(null, item.id, v)}
+                            label={item.name}
+                            onToggleNotNeeded={onToggleNotNeeded ? (() => onToggleNotNeeded(null, item.id)) : undefined}
+                            onEdit={() => {
                               const masterIdWhole = (item as any).item_id || (item as any).master_id || (item as any).itemId || (item as any).masterId || null;
                               setPromoteContext({ listId: activeListId || '', packingListItemId: item.id });
                               setEditMasterItemId(masterIdWhole);
@@ -206,10 +218,8 @@ export function PackingListsSideBySide({ userLists, wholeFamilyItems, onCheckIte
                               setEditInitialMembers((item as any).members ? (item as any).members.map((m: any) => m.id) : undefined);
                               setEditInitialWhole(!!(item as any).whole_family);
                               setShowEditDrawer(true);
-                            }} aria-label="Edit one-off">
-                              <IconEdit size={14} />
-                            </ActionIcon>
-                          </div>
+                            }}
+                          />
                         ))}
                       </div>
                     ) : null}
@@ -218,15 +228,14 @@ export function PackingListsSideBySide({ userLists, wholeFamilyItems, onCheckIte
                         <div style={{ marginTop: 8 }}>
                           <Text size="xs" c="dimmed">Not needed</Text>
                           {[...dismissed, ...oneOffDismissed].map(item => (
-                            <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0', color: '#888' }}>
-                            <Checkbox disabled checked={item.checked} onChange={e => onCheckItem(null, item.id, e.target.checked)} styles={{ body: { padding: 0 } }} aria-label={item.name} />
-                            <ItemLabel text={item.name} />
-                            {onToggleNotNeeded ? (
-                              <ActionIcon size="sm" variant="subtle" onClick={() => onToggleNotNeeded(null, item.id)} aria-label="Move to active">
-                                <IconRotateClockwise size={14} />
-                              </ActionIcon>
-                            ) : null}
-                          </div>
+                            <ItemRow
+                              key={item.id}
+                              checked={item.checked}
+                              onChange={() => { /* noop for disabled */ }}
+                              label={item.name}
+                              disabled={true}
+                              onToggleNotNeeded={onToggleNotNeeded ? (() => onToggleNotNeeded(null, item.id)) : undefined}
+                            />
                           ))}
                         </div>
                       ) : null}
@@ -289,20 +298,13 @@ export function PackingListsSideBySide({ userLists, wholeFamilyItems, onCheckIte
                             <div key={`cat-${cat.id}`} style={{ marginTop: 6 }}>
                               <Text size="xs" fw={700}>{cat.name}</Text>
                               {itemsForCat.map(item => (
-                                <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0' }}>
-                                  <Checkbox
-                                    checked={item.checked}
-                                    onChange={e => onCheckItem(list.userId, item.id, e.target.checked)}
-                                    styles={{ body: { padding: 0 } }}
-                                    aria-label={item.display_name || item.name}
-                                  />
-                                  <ItemLabel text={item.display_name || item.name} />
-                                  {onToggleNotNeeded ? (
-                                    <ActionIcon size="sm" variant="subtle" onClick={() => onToggleNotNeeded(list.userId, item.id)} aria-label="Not needed">
-                                      <IconHexagonMinus size={14} />
-                                    </ActionIcon>
-                                  ) : null}
-                                </div>
+                                <ItemRow
+                                  key={item.id}
+                                  checked={item.checked}
+                                  onChange={(v) => onCheckItem(list.userId, item.id, v)}
+                                  label={item.display_name || item.name}
+                                  onToggleNotNeeded={onToggleNotNeeded ? (() => onToggleNotNeeded(list.userId, item.id)) : undefined}
+                                />
                               ))}
                             </div>
                           );
@@ -315,20 +317,13 @@ export function PackingListsSideBySide({ userLists, wholeFamilyItems, onCheckIte
                             <div key="cat-uncategorized" style={{ marginTop: 6 }}>
                               <Text size="xs" fw={700}>Uncategorized</Text>
                               {uncats.map(item => (
-                                <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0' }}>
-                                  <Checkbox
-                                    checked={item.checked}
-                                    onChange={e => onCheckItem(list.userId, item.id, e.target.checked)}
-                                    styles={{ body: { padding: 0 } }}
-                                    aria-label={item.display_name || item.name}
-                                  />
-                                  <ItemLabel text={item.display_name || item.name} />
-                                  {onToggleNotNeeded ? (
-                                    <ActionIcon size="sm" variant="subtle" onClick={() => onToggleNotNeeded(list.userId, item.id)} aria-label="Not needed">
-                                      <IconHexagonMinus size={14} />
-                                    </ActionIcon>
-                                  ) : null}
-                                </div>
+                                <ItemRow
+                                  key={item.id}
+                                  checked={item.checked}
+                                  onChange={(v) => onCheckItem(list.userId, item.id, v)}
+                                  label={item.display_name || item.name}
+                                  onToggleNotNeeded={onToggleNotNeeded ? (() => onToggleNotNeeded(list.userId, item.id)) : undefined}
+                                />
                               ))}
                             </div>
                           );
@@ -342,22 +337,13 @@ export function PackingListsSideBySide({ userLists, wholeFamilyItems, onCheckIte
                         <div style={{ marginTop: 10 }}>
                           <Text size="xs" fw={700}>One-off</Text>
                           {oneOffActive.map(item => (
-                            <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0' }}>
-                              <Checkbox
-                                checked={item.checked}
-                                onChange={e => onCheckItem(list.userId, item.id, e.target.checked)}
-                                styles={{ body: { padding: 0 } }}
-                                aria-label={item.display_name || item.name}
-                              />
-                              <ItemLabel text={item.display_name || item.name} />
-                              {onToggleNotNeeded ? (
-                                <ActionIcon size="sm" variant="subtle" onClick={() => onToggleNotNeeded(list.userId, item.id)} aria-label="Not needed">
-                                  <IconHexagonMinus size={14} />
-                                </ActionIcon>
-                              ) : null}
-                              {/* Edit for one-off items: open edit drawer in promote mode */}
-                              <ActionIcon size="sm" variant="light" onClick={() => {
-                                console.debug('[PackingListsSideBySide] opening edit (user) for item', { item, categoryId: (item as any).category ? (item as any).category.id : undefined, members: (item as any).members ? (item as any).members.map((m: any) => m.id) : undefined, whole_family: (item as any).whole_family });
+                            <ItemRow
+                              key={item.id}
+                              checked={item.checked}
+                              onChange={(v) => onCheckItem(list.userId, item.id, v)}
+                              label={item.display_name || item.name}
+                              onToggleNotNeeded={onToggleNotNeeded ? (() => onToggleNotNeeded(list.userId, item.id)) : undefined}
+                              onEdit={() => {
                                 const masterIdUser = (item as any).item_id || (item as any).master_id || (item as any).itemId || (item as any).masterId || null;
                                 setPromoteContext({ listId: activeListId || '', packingListItemId: item.id });
                                 setEditMasterItemId(masterIdUser);
@@ -366,10 +352,8 @@ export function PackingListsSideBySide({ userLists, wholeFamilyItems, onCheckIte
                                 setEditInitialMembers((item as any).members ? (item as any).members.map((m: any) => m.id) : undefined);
                                 setEditInitialWhole(!!(item as any).whole_family);
                                 setShowEditDrawer(true);
-                              }} aria-label="Edit one-off">
-                                <IconEdit size={14} />
-                              </ActionIcon>
-                            </div>
+                              }}
+                            />
                           ))}
                         </div>
                       ) : null}
@@ -378,15 +362,14 @@ export function PackingListsSideBySide({ userLists, wholeFamilyItems, onCheckIte
                         <div style={{ marginTop: 8 }}>
                           <Text size="xs" c="dimmed">Not needed</Text>
                           {[...dismissed, ...oneOffDismissed].map(item => (
-                            <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0', color: '#888' }}>
-                              <Checkbox disabled checked={item.checked} onChange={e => onCheckItem(list.userId, item.id, e.target.checked)} styles={{ body: { padding: 0 } }} aria-label={item.name} />
-                              <ItemLabel text={item.display_name || item.name} />
-                              {onToggleNotNeeded ? (
-                                <ActionIcon size="sm" variant="subtle" onClick={() => onToggleNotNeeded(list.userId, item.id)} aria-label="Move to active">
-                                  <IconRotateClockwise size={14} />
-                                </ActionIcon>
-                              ) : null}
-                            </div>
+                            <ItemRow
+                              key={item.id}
+                              checked={item.checked}
+                              onChange={() => { /* noop for disabled */ }}
+                              label={item.display_name || item.name}
+                              disabled={true}
+                              onToggleNotNeeded={onToggleNotNeeded ? (() => onToggleNotNeeded(list.userId, item.id)) : undefined}
+                            />
                           ))}
                         </div>
                       ) : null}

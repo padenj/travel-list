@@ -203,6 +203,8 @@ export default function AddItemsDrawer({ opened, onClose, familyId, excludedItem
           }
         }}
         zIndex={3000}
+        // When AddItemsDrawer is used outside of a specific list, hide the "Add this to list" action
+        hideAddActionWhenNoList={true}
       />
     </>
   );

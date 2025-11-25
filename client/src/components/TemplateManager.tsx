@@ -541,6 +541,7 @@ export default function TemplateManager() {
           setEditMasterItemId(null);
         }}
         showIsOneOffCheckbox={false}
+        hideAddActionWhenNoList={true}
       />
     </div>
   );

@@ -744,23 +744,58 @@ export class ItemRepository {
     }
 
     // Per-user check state stored in packing_list_item_checks
-    async setUserItemChecked(packing_list_item_id: string, member_id: string, checked: boolean): Promise<void> {
+    async setUserItemChecked(packing_list_item_id: string, member_id: string | null, checked: boolean): Promise<void> {
       const db = await getDb();
-      // Debug: log incoming values
-      console.log('setUserItemChecked called with', { packing_list_item_id, member_id, checked });
-      const existing = await db.get(`SELECT id, checked FROM packing_list_item_checks WHERE packing_list_item_id = ? AND member_id = ?`, [packing_list_item_id, member_id]);
-      console.log('Existing check row:', existing);
+      // Debug: log incoming values (only in non-production to avoid hot-path overhead)
+      if (process.env.NODE_ENV !== 'production') console.log('setUserItemChecked called with', { packing_list_item_id, member_id, checked });
+      let existing: any | undefined;
+      if (member_id === null) {
+        existing = await db.get(`SELECT id, checked FROM packing_list_item_checks WHERE packing_list_item_id = ? AND member_id IS NULL`, [packing_list_item_id]);
+      } else {
+        existing = await db.get(`SELECT id, checked FROM packing_list_item_checks WHERE packing_list_item_id = ? AND member_id = ?`, [packing_list_item_id, member_id]);
+      }
+      if (process.env.NODE_ENV !== 'production') console.log('Existing check row:', existing);
       const now = new Date().toISOString();
       if (existing) {
         const newVal = checked ? 1 : 0;
         await db.run(`UPDATE packing_list_item_checks SET checked = ?, checked_at = ? WHERE id = ?`, [newVal, now, existing.id]);
-        console.log('Updated check row id', existing.id, 'set to', newVal);
+        if (process.env.NODE_ENV !== 'production') console.log('Updated check row id', existing.id, 'set to', newVal);
       } else {
         const id = crypto.randomUUID();
         const newVal = checked ? 1 : 0;
-        await db.run(`INSERT INTO packing_list_item_checks (id, packing_list_item_id, member_id, checked, checked_at) VALUES (?, ?, ?, ?, ?)`, [id, packing_list_item_id, member_id, newVal, now]);
-        console.log('Inserted check row id', id, 'set to', newVal);
+        if (member_id === null) {
+          await db.run(`INSERT INTO packing_list_item_checks (id, packing_list_item_id, member_id, checked, checked_at) VALUES (?, ?, NULL, ?, ?)`, [id, packing_list_item_id, newVal, now]);
+          if (process.env.NODE_ENV !== 'production') console.log('Inserted check row id', id, 'member_id NULL set to', newVal);
+          // When a whole-family check is created, remove any lingering per-member check rows
+          // so the canonical state for this packing-list-item is the NULL-member row only.
+          try {
+            await db.run(`DELETE FROM packing_list_item_checks WHERE packing_list_item_id = ? AND member_id IS NOT NULL`, [packing_list_item_id]);
+            console.log('Deleted per-member check rows for pli', packing_list_item_id, 'after inserting NULL-member row');
+          } catch (e) {
+            console.warn('Failed to delete per-member check rows after inserting NULL-member row', { packing_list_item_id, err: e });
+          }
+        } else {
+          await db.run(`INSERT INTO packing_list_item_checks (id, packing_list_item_id, member_id, checked, checked_at) VALUES (?, ?, ?, ?, ?)`, [id, packing_list_item_id, member_id, newVal, now]);
+          if (process.env.NODE_ENV !== 'production') console.log('Inserted check row id', id, 'member_id', member_id, 'set to', newVal);
+        }
       }
+      // If an existing NULL-member row was updated, also remove per-member rows to keep canonical state
+      if (member_id === null) {
+        try {
+          await db.run(`DELETE FROM packing_list_item_checks WHERE packing_list_item_id = ? AND member_id IS NOT NULL`, [packing_list_item_id]);
+          console.log('Ensured per-member check rows removed for pli', packing_list_item_id, 'after NULL-member update');
+        } catch (e) {
+          console.warn('Failed to delete per-member check rows after NULL-member update', { packing_list_item_id, err: e });
+        }
+      }
+        if (process.env.NODE_ENV !== 'production') {
+          try {
+            const rows = await db.all(`SELECT id, packing_list_item_id, member_id, checked, checked_at FROM packing_list_item_checks WHERE packing_list_item_id = ?`, [packing_list_item_id]);
+            console.log('packing_list_item_checks rows for pli', packing_list_item_id, rows);
+          } catch (e) {
+            console.warn('Failed to read back check rows for debug', e);
+          }
+        }
     }
 
     async getUserItemChecks(packing_list_id: string): Promise<any[]> {

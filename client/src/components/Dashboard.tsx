@@ -1,14 +1,17 @@
-import React, { useEffect, useState } from 'react';
-import { Container, Group, Stack, Text } from '@mantine/core';
+import React, { useEffect, useState, useCallback } from 'react';
+import { Container, Group, Stack, Text, Button } from '@mantine/core';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { showNotification } from '@mantine/notifications';
 import ActivePackingListSelector from './ActivePackingListSelector';
 import { PackingListsSideBySide } from './PackingListsSideBySide';
 import ItemEditDrawer from './ItemEditDrawer';
 import { useActivePackingList } from '../contexts/ActivePackingListContext';
+import { useListEditDrawer } from '../contexts/ListEditDrawerContext';
 import { getCurrentUserProfile, getItems, getPackingList, togglePackingListItemCheck, addItemToPackingList, setPackingListItemNotNeeded, setPackingListItemNotNeededForMember } from '../api';
 
 export default function Dashboard(): React.ReactElement {
-  const { activeListId } = useActivePackingList();
+  const { activeListId, requestOpenEdit } = useActivePackingList();
+  const { openForList } = useListEditDrawer();
   const [userLists, setUserLists] = useState<any[]>([]);
   const [wholeFamilyItems, setWholeFamilyItems] = useState<any[]>([]);
   // local UI state: items marked as 'not needed' (not persisted)
@@ -122,10 +125,12 @@ export default function Dashboard(): React.ReactElement {
             const name = pli.display_name || pli.master_name || (master ? master.name : '') || 'Item';
             // For whole-family items, checks may be stored per-user (member_id) or
             // as a null-member_id to indicate a family-level check. Prefer the
-            // current user's check when available so the UI reflects what the
-            // current user actually checked.
-            const checkRow = checks.find((c: any) => c.packing_list_item_id === pli.id && (c.member_id === currentUserId || !c.member_id));
-            
+            // NULL-member row (canonical whole-family state) when present; if not,
+            // fall back to the current user's per-member row.
+            const nullCheck = checks.find((c: any) => c.packing_list_item_id === pli.id && (c.member_id === null || typeof c.member_id === 'undefined'));
+            const personalCheck = checks.find((c: any) => c.packing_list_item_id === pli.id && c.member_id === currentUserId);
+            const checkRow = nullCheck ?? personalCheck;
+
             // Prefer server-provided check state; no local offline backup used
             const checked = !!checkRow?.checked;
             
@@ -177,14 +182,39 @@ export default function Dashboard(): React.ReactElement {
     })();
   }, [activeListId, listSelectionCount]);
 
-  const handleCheckItem = async (userId: string | null, itemId: string, checked: boolean) => {
+  const handleCheckItem = useCallback(async (userId: string | null, itemId: string, checked: boolean) => {
     if (!activeListId) return;
 
     // optimistic update immediately
     if (userId) {
-      setUserLists(lists => lists.map(list => list.userId === userId ? { ...list, items: list.items.map((it: any) => it.id === itemId ? { ...it, checked } : it) } : list));
+      setUserLists(lists => {
+        const idx = lists.findIndex(l => l.userId === userId);
+        if (idx === -1) return lists;
+        const copy = lists.slice();
+        const list = { ...copy[idx] };
+        list.items = list.items.map((it: any) => it.id === itemId ? { ...it, checked } : it);
+        copy[idx] = list;
+        return copy;
+      });
     } else {
-      setWholeFamilyItems(items => items.map(it => it.id === itemId ? { ...it, checked } : it));
+      // Update whole-family column item only
+      setWholeFamilyItems(items => {
+        const i = items.findIndex(it => it.id === itemId);
+        if (i === -1) return items;
+        const copy = items.slice();
+        copy[i] = { ...copy[i], checked };
+        return copy;
+      });
+      // Reflect change in each user's column, but update each list in place for minimal re-renders
+      setUserLists(lists => {
+        const copy = lists.map(list => {
+          // Only update rows which contain this item
+          const has = list.items.some((it: any) => it.id === itemId);
+          if (!has) return list;
+          return { ...list, items: list.items.map((it: any) => it.id === itemId ? { ...it, checked } : it) };
+        });
+        return copy;
+      });
     }
 
     // Try to send to server
@@ -202,9 +232,9 @@ export default function Dashboard(): React.ReactElement {
       console.warn('[Dashboard] Failed to sync check (offline?)', err);
       showNotification({ title: 'Offline', message: 'Failed to sync check - please try again when online', color: 'yellow' });
     }
-  };
+  }, [activeListId]);
 
-  const toggleNotNeeded = async (userId: string | null, itemId: string) => {
+  const toggleNotNeeded = useCallback(async (userId: string | null, itemId: string) => {
     if (!activeListId) {
       showNotification({ title: 'Error', message: 'No active list selected', color: 'red' });
       return;
@@ -257,12 +287,12 @@ export default function Dashboard(): React.ReactElement {
       console.warn('[Dashboard] Failed to sync not_needed (offline?)', err);
       showNotification({ title: 'Offline', message: 'Not-needed update failed - try again when online', color: 'yellow' });
     }
-  };
+  }, [activeListId, notNeededWhole, notNeededByUser]);
 
-  const openAddDrawerFor = (userId: string | null) => {
+  const openAddDrawerFor = useCallback((userId: string | null) => {
     setItemDrawerDefaultMember(userId);
     setShowItemDrawer(true);
-  };
+  }, []);
 
   const handleItemDrawerSaved = async (payload?: { id?: string; name?: string }) => {
     // If the drawer created a new master item, add it to the active packing list
@@ -304,7 +334,18 @@ export default function Dashboard(): React.ReactElement {
 
       <div style={{ marginTop: 16 }}>
         <Stack>
-          <ActivePackingListSelector onChange={(_id) => { /* optionally notify parent */ }} />
+          <Group position="left" spacing="sm">
+            <ActivePackingListSelector onChange={(_id) => { /* optionally notify parent */ }} />
+            <Button size="xs" onClick={() => {
+              if (!activeListId) {
+                showNotification({ title: 'No list selected', message: 'Select a list before editing', color: 'yellow' });
+                return;
+              }
+              // Request the active-pack list edit (keeps legacy flow) and open the global drawer
+              if (requestOpenEdit) requestOpenEdit(activeListId);
+              openForList(activeListId, undefined);
+            }}>Edit list</Button>
+          </Group>
           {!activeListId ? (
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 200, padding: 24 }}>
               <div style={{ textAlign: 'center' }}>
@@ -327,7 +368,17 @@ export default function Dashboard(): React.ReactElement {
               onRefresh={() => setListSelectionCount(prev => prev + 1)}
             />
           )}
-          <ItemEditDrawer opened={showItemDrawer} onClose={() => { setShowItemDrawer(false); setItemDrawerDefaultMember(null); }} masterItemId={null} initialName={undefined} familyId={familyId} defaultAssignedMemberId={itemDrawerDefaultMember} onSaved={handleItemDrawerSaved} showIsOneOffCheckbox={true} />
+          <ItemEditDrawer
+            opened={showItemDrawer}
+            onClose={() => { setShowItemDrawer(false); setItemDrawerDefaultMember(null); }}
+            masterItemId={null}
+            initialName={undefined}
+            familyId={familyId}
+            defaultAssignedMemberId={itemDrawerDefaultMember}
+            onSaved={handleItemDrawerSaved}
+            showIsOneOffCheckbox={true}
+            promoteContext={activeListId ? { listId: activeListId, packingListItemId: '' } : null}
+          />
         </Stack>
       </div>
 
