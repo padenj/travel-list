@@ -35,23 +35,37 @@ self.addEventListener('install', (event) => {
 });
 
 self.addEventListener('activate', (event) => {
-  event.waitUntil(
-    caches.keys().then((keys) => Promise.all(
-      keys.map((key) => {
-        if (key !== PRECACHE && key !== RUNTIME) {
-          return caches.delete(key);
-        }
-      })
-    ))
-  ).then(() => {
-    self.clients.claim();
+  // Build a promise that performs cache cleanup then notifies clients.
+  const activationPromise = caches.keys().then((keys) => Promise.all(
+    keys.map((key) => {
+      if (key !== PRECACHE && key !== RUNTIME) {
+        return caches.delete(key);
+      }
+      // ensure each map entry returns a promise (or resolved value)
+      return Promise.resolve();
+    })
+  )).then(() => {
+    // Attempt to claim clients; in some proxied/dev environments this may
+    // fail with InvalidStateError if the worker is not the active worker.
+    try {
+      if (self.clients && typeof self.clients.claim === 'function') {
+        self.clients.claim().catch((e) => {
+          console.warn('[SW] clients.claim() failed', e);
+        });
+      }
+    } catch (e) {
+      console.warn('[SW] clients.claim() threw', e);
+    }
+
     // Notify clients that a new SW is active (useful for update UI)
     return self.clients.matchAll({ includeUncontrolled: true }).then(clients => {
       for (const c of clients) {
-        c.postMessage({ type: 'swActivated', version: CACHE_VERSION });
+        try { c.postMessage({ type: 'swActivated', version: CACHE_VERSION }); } catch (err) { /* ignore */ }
       }
     });
   });
+
+  event.waitUntil(activationPromise);
 });
 
 self.addEventListener('message', (event) => {
@@ -59,6 +73,10 @@ self.addEventListener('message', (event) => {
   if (msg && msg.type === 'setToken') {
     authToken = msg.token || null;
     console.log('[SW] Received auth token (length)', authToken ? authToken.length : 0);
+  }
+  if (msg && msg.type === 'setToken' && authToken && !sseController.running) {
+    // start SSE now that we have a token
+    try { connectEvents().catch(() => {}); } catch (e) { /* ignore */ }
   }
   if (msg && msg.type === 'skipWaiting') {
     self.skipWaiting();
@@ -128,11 +146,12 @@ async function connectEvents() {
   sseController.running = true;
   try {
     // only attempt to open SSE if there are clients
-    const clientsList = await self.clients.matchAll({ includeUncontrolled: true });
-    if (!clientsList || clientsList.length === 0) {
-      sseController.running = false;
-      return;
-    }
+      // Only start SSE when we have at least one client and an auth token.
+      const clientsList = await self.clients.matchAll({ includeUncontrolled: true });
+      if (!clientsList || clientsList.length === 0 || !authToken) {
+        sseController.running = false;
+        return;
+      }
 
     const headers = {};
     if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
@@ -182,4 +201,9 @@ self.addEventListener('clientschange', () => {
 });
 
 // When the service worker starts, attempt to connect if clients exist
-connectEvents();
+// Wrap initial invocation to avoid unhandled promise rejection in edge cases
+try {
+  connectEvents().catch((e) => { console.warn('[SW] initial connectEvents error', e); });
+} catch (e) {
+  console.warn('[SW] initial connectEvents threw', e);
+}

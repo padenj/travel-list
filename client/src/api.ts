@@ -329,10 +329,10 @@ export const editFamilyMember = async (familyId: string, memberId: string, membe
   });
 };
 
-export const resetFamilyMemberPassword = async (familyId: string, memberId: string, newPassword: string): Promise<ApiResponse> => {
+export const resetFamilyMemberPassword = async (familyId: string, memberId: string, newPassword: string, requireChangeOnLogin: boolean = true): Promise<ApiResponse> => {
   return authenticatedApiCall(`/families/${familyId}/members/${memberId}/reset-password`, {
     method: 'POST',
-    body: JSON.stringify({ newPassword }),
+    body: JSON.stringify({ newPassword, requireChangeOnLogin }),
   });
 };
 
@@ -446,7 +446,8 @@ if (typeof window !== 'undefined') {
 
 export const apiCall = async (endpoint: string, options: ApiCallOptions = {}): Promise<ApiResponse> => {
   const url = `${API_BASE_URL}${endpoint}`;
-  console.log('🌐 API Call:', url, 'with options:', options);
+  const IS_DEV = !!((import.meta as any)?.env?.DEV);
+  if (IS_DEV) console.debug('🌐 API Call:', url, 'with options:', options);
 
   // Always force Content-Type to application/json for POST/PUT/PATCH requests
   const method = options.method?.toUpperCase();
@@ -464,16 +465,18 @@ export const apiCall = async (endpoint: string, options: ApiCallOptions = {}): P
 
   const data = await response.json();
   // Treat 404 as a non-exceptional case for some endpoints (e.g. whole-family lookup).
-  // Avoid logging the 404 for the whole-family lookup endpoint since it's expected when
-  // no whole-family assignment exists. Log other 404s at debug level.
+  // Only output verbose API logs in development to avoid console overhead in production.
+  const IS_DEV2 = !!((import.meta as any)?.env?.DEV);
   if (response.status === 404) {
-    if (!endpoint.includes('/whole-family')) {
+    if (IS_DEV2 && !endpoint.includes('/whole-family')) {
       console.debug('📡 API Response status:', response.status, response.statusText);
       console.debug('📋 API Response data:', data);
     }
   } else {
-    console.log('📡 API Response status:', response.status, response.statusText);
-    console.log('� API Response data:', data);
+    if (IS_DEV2) {
+      console.debug('📡 API Response status:', response.status, response.statusText);
+      try { console.debug('📋 API Response data:', data); } catch (e) { /* ignore serialization issues */ }
+    }
   }
 
   return { response, data };

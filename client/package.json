@@ -8,4 +8,8 @@
     "preview": "vite preview",
     "test": "vitest --run"
   }
+  ,
+  "dependencies": {
+    "fuse.js": "^6.6.2"
+  }
 }

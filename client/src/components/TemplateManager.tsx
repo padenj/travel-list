@@ -484,7 +484,7 @@ export default function TemplateManager() {
         excludedItemIds={excludedItemIdsForDrawer}
         showIsOneOffCheckbox={false}
         autoApplyOnCreate={true}
-        onApply={async (ids: string[]) => {
+        onApply={async (ids: string[], keepOpen?: boolean) => {
           const tid = showAddItemsDrawer.templateId;
           if (!tid) return;
           // assign items to template on the server
@@ -543,6 +543,7 @@ export default function TemplateManager() {
           setEditMasterItemId(null);
         }}
         showIsOneOffCheckbox={false}
+        hideAddActionWhenNoList={true}
       />
     </div>
   );

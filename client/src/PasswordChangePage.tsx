@@ -1,7 +1,8 @@
 import React, { useState, FormEvent } from 'react';
-import { Text, List, ThemeIcon, Progress, Stack } from '@mantine/core';
-import { IconCheck, IconX } from '@tabler/icons-react';
+import { Text, Stack } from '@mantine/core';
 import { changePassword } from './api';
+import PasswordRequirements from './components/PasswordRequirements';
+import { isPasswordValid } from './utils/password';
 
 interface PasswordChangePageProps {
   username: string;
@@ -17,19 +18,9 @@ export default function PasswordChangePage({ username, onChange, onCancel }: Pas
   const [loading, setLoading] = useState<boolean>(false);
   const [success, setSuccess] = useState<boolean>(false);
 
-  // Password validation checks
-  const passwordChecks = {
-    length: newPassword.length >= 8,
-    uppercase: /[A-Z]/.test(newPassword),
-    lowercase: /[a-z]/.test(newPassword),
-    number: /[0-9]/.test(newPassword),
-    symbol: /[^A-Za-z0-9]/.test(newPassword),
-  };
-
   const passwordsMatch = newPassword && confirmPassword && newPassword === confirmPassword;
-  const typeCount = [passwordChecks.uppercase, passwordChecks.lowercase, passwordChecks.number, passwordChecks.symbol].filter(Boolean).length;
-  const allChecksPass = passwordChecks.length && typeCount >= 2;
-  const passwordStrength = passwordChecks.length ? (1 + typeCount) : 0; // 1 for length + up to 4 for types
+  const allChecksPass = isPasswordValid(newPassword);
+  const passwordStrength = newPassword ? (1 + [/[A-Z]/.test(newPassword), /[a-z]/.test(newPassword), /[0-9]/.test(newPassword), /[^A-Za-z0-9]/.test(newPassword)].filter(Boolean).length) : 0;
   const isFormValid = allChecksPass && passwordsMatch && oldPassword;
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>): Promise<void> {
@@ -120,93 +111,8 @@ export default function PasswordChangePage({ username, onChange, onCancel }: Pas
               required
             />
             
-            {/* Password Strength Indicator */}
             {newPassword && (
-              <div style={{ marginBottom: 8 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                  <Text size="sm">Password Strength: {getPasswordStrengthLabel()}</Text>
-                  <Text size="sm">{passwordStrength}/5</Text>
-                </div>
-                <Progress 
-                  value={(passwordStrength / 5) * 100} 
-                  color={getPasswordStrengthColor()}
-                  size="sm"
-                />
-              </div>
-            )}
-
-            {/* Password Requirements Checklist */}
-            {newPassword && (
-              <List size="sm" spacing="xs">
-                <List.Item
-                  icon={
-                    <ThemeIcon size={16} color={passwordChecks.length ? 'green' : 'red'} variant="filled">
-                      {passwordChecks.length ? <IconCheck size={12} /> : <IconX size={12} />}
-                    </ThemeIcon>
-                  }
-                >
-                  <Text size="sm" c={passwordChecks.length ? 'green' : 'red'}>
-                    At least 8 characters
-                  </Text>
-                </List.Item>
-                <List.Item
-                  icon={
-                    <ThemeIcon size={16} color={typeCount >= 2 ? 'green' : 'red'} variant="filled">
-                      {typeCount >= 2 ? <IconCheck size={12} /> : <IconX size={12} />}
-                    </ThemeIcon>
-                  }
-                >
-                  <Text size="sm" c={typeCount >= 2 ? 'green' : 'red'}>
-                    At least 2 of the following types:
-                  </Text>
-                </List.Item>
-                <List ml="md" size="sm" spacing="xs">
-                  <List.Item
-                    icon={
-                      <ThemeIcon size={14} color={passwordChecks.uppercase ? 'green' : 'gray'} variant="filled">
-                        {passwordChecks.uppercase ? <IconCheck size={10} /> : <IconX size={10} />}
-                      </ThemeIcon>
-                    }
-                  >
-                    <Text size="sm" c={passwordChecks.uppercase ? 'green' : 'gray'}>
-                      Uppercase letters (A-Z)
-                    </Text>
-                  </List.Item>
-                  <List.Item
-                    icon={
-                      <ThemeIcon size={14} color={passwordChecks.lowercase ? 'green' : 'gray'} variant="filled">
-                        {passwordChecks.lowercase ? <IconCheck size={10} /> : <IconX size={10} />}
-                      </ThemeIcon>
-                    }
-                  >
-                    <Text size="sm" c={passwordChecks.lowercase ? 'green' : 'gray'}>
-                      Lowercase letters (a-z)
-                    </Text>
-                  </List.Item>
-                  <List.Item
-                    icon={
-                      <ThemeIcon size={14} color={passwordChecks.number ? 'green' : 'gray'} variant="filled">
-                        {passwordChecks.number ? <IconCheck size={10} /> : <IconX size={10} />}
-                      </ThemeIcon>
-                    }
-                  >
-                    <Text size="sm" c={passwordChecks.number ? 'green' : 'gray'}>
-                      Numbers (0-9)
-                    </Text>
-                  </List.Item>
-                  <List.Item
-                    icon={
-                      <ThemeIcon size={14} color={passwordChecks.symbol ? 'green' : 'gray'} variant="filled">
-                        {passwordChecks.symbol ? <IconCheck size={10} /> : <IconX size={10} />}
-                      </ThemeIcon>
-                    }
-                  >
-                    <Text size="sm" c={passwordChecks.symbol ? 'green' : 'gray'}>
-                      Symbols (!@#$%^&*)
-                    </Text>
-                  </List.Item>
-                </List>
-              </List>
+              <PasswordRequirements password={newPassword} />
             )}
           </div>
 

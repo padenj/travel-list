@@ -595,8 +595,8 @@ router.patch('/packing-lists/:listId/items/:itemId/check', authMiddleware, async
     const list = await packingListRepo.findById(listId);
     if (!list) return res.status(404).json({ error: 'Packing list not found' });
     if (req.user?.role !== 'SystemAdmin' && req.user?.familyId !== list.family_id) return res.status(403).json({ error: 'Forbidden' });
-    console.log('PATCH check request:', { listId, itemId, userId, checked, checkedType: typeof checked });
-    console.log('PATCH check for list:', { id: list.id, name: list.name });
+    if (process.env.NODE_ENV !== 'production') console.log('PATCH check request:', { listId, itemId, userId, checked, checkedType: typeof checked });
+    if (process.env.NODE_ENV !== 'production') console.log('PATCH check for list:', { id: list.id, name: list.name });
     let pli = await packingListRepo.findItem(listId, itemId);
     // If not found by (packing_list_id, item_id) try interpreting itemId as the packing_list_item id
     if (!pli) {
@@ -609,9 +609,29 @@ router.patch('/packing-lists/:listId/items/:itemId/check', authMiddleware, async
       console.log('List item not found for check', { listId, itemId });
       return res.status(404).json({ error: 'List item not found' });
     }
-    // userId defaults to authenticated user
-    const memberId = userId || req.user!.id;
-    console.log('About to call setUserItemChecked with', { listName: list.name, packing_list_item_id: pli.id, memberId, checked, checkedType: typeof checked });
+    // userId defaults to authenticated user. If the client explicitly provided
+    // `userId: null` that indicates a whole-family check (member_id NULL).
+    let memberId: string | null;
+    // Preserve previous semantics: when the client omits `userId` default to
+    // the authenticated user. If the client explicitly provides `null` it is
+    // intended to indicate a whole-family check (member_id NULL) and should
+    // be passed through. This prevents accidental interpretation of `null`
+    // as the authenticated user which caused whole-family checks to be
+    // converted into per-member checks.
+    let memberIdRaw = userId;
+    if (typeof memberIdRaw === 'undefined') memberId = req.user!.id;
+    else memberId = memberIdRaw; // may be null to indicate whole-family
+
+    // If the packing-list-item is marked as whole-family (DB may use snake_case
+    // while JS code may use camelCase), canonicalize all check updates to the
+    // NULL-member row so there is a single source of truth for whole-family
+    // checked state. Ignore any provided per-member id.
+    const pliWholeFamily = (pli as any).whole_family || (pli as any).wholeFamily || false;
+    if (pliWholeFamily) {
+      if (memberId !== null) console.log('Canonicalizing per-member check to whole-family for pli', pli.id, 'ignoring memberId', memberId);
+      memberId = null;
+    }
+    if (process.env.NODE_ENV !== 'production') console.log('About to call setUserItemChecked with', { listName: list.name, packing_list_item_id: pli.id, memberId, checked, checkedType: typeof checked });
   await packingListRepo.setUserItemChecked(pli.id, memberId, !!checked);
   console.log('setUserItemChecked completed for', { listName: list.name, packing_list_item_id: pli.id, memberId });
   try { broadcastEvent({ type: 'packing_list_changed', listId, data: { itemId: pli.id, change: 'check', memberId, checked: !!checked } }); } catch (e) {}
@@ -1331,10 +1351,13 @@ router.put('/families/:familyId/members/order', authMiddleware, async (req: Requ
 
 // Edit family member (SystemAdmin only)
 router.put('/families/:familyId/members/:memberId', authMiddleware, async (req: Request, res: Response): Promise<Response> => {
-  if (req.user?.role !== 'SystemAdmin') {
-    return res.status(403).json({ error: 'Forbidden' });
-  }
+  // Allow SystemAdmin, or FamilyAdmin who belongs to the same family
   const { familyId, memberId } = req.params;
+  if (req.user?.role !== 'SystemAdmin') {
+    if (!(req.user?.role === 'FamilyAdmin' && req.user?.familyId === familyId)) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+  }
   const { name, username, role } = req.body;
   if (!name || name.trim() === '') {
     return res.status(400).json({ error: 'Member name is required' });
@@ -1356,11 +1379,14 @@ router.put('/families/:familyId/members/:memberId', authMiddleware, async (req: 
 
 // Reset password for family member (SystemAdmin only)
 router.post('/families/:familyId/members/:memberId/reset-password', authMiddleware, async (req: Request, res: Response): Promise<Response> => {
+  // Allow SystemAdmin, or FamilyAdmin who belongs to the same family
+  const { familyId, memberId } = req.params;
   if (req.user?.role !== 'SystemAdmin') {
-    return res.status(403).json({ error: 'Forbidden' });
+    if (!(req.user?.role === 'FamilyAdmin' && req.user?.familyId === familyId)) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
   }
-  const { memberId } = req.params;
-  const { newPassword } = req.body;
+  const { newPassword, requireChangeOnLogin } = req.body;
   if (!newPassword || !validatePassword(newPassword)) {
     return res.status(400).json({ error: 'Password does not meet requirements' });
   }
@@ -1368,7 +1394,7 @@ router.post('/families/:familyId/members/:memberId/reset-password', authMiddlewa
     const newHash = await hashPassword(newPassword);
     const updated = await userRepo.update(memberId, {
       password_hash: newHash,
-      must_change_password: true,
+      must_change_password: typeof requireChangeOnLogin === 'undefined' ? true : !!requireChangeOnLogin,
       updated_at: new Date().toISOString(),
     });
     return res.json({ member: updated });

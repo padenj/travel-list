@@ -139,18 +139,19 @@ export default function ServiceWorkerStatus({ compact }: { compact?: boolean }):
   // Compact mode: render a small colored dot (no floating). Otherwise render a badge with tooltip.
   if (compact) {
     const dotStyle: React.CSSProperties = {
-      width: 12,
-      height: 12,
-      borderRadius: 12,
+      width: 14,
+      height: 14,
+      borderRadius: 14,
       backgroundColor: color === 'green' ? '#22c55e' : color === 'blue' ? '#3b82f6' : color === 'yellow' ? '#f59e0b' : color === 'gray' ? '#9ca3af' : '#ef4444',
       display: 'inline-block',
       verticalAlign: 'middle',
-      marginRight: 6,
+      marginRight: 8,
+      flexShrink: 0,
     };
     return (
-      <div title={detail || label} style={{ display: 'inline-flex', alignItems: 'center' }}>
+      <div title={detail || label} style={{ display: 'inline-flex', alignItems: 'center', minWidth: 0, flexShrink: 0 }}>
         <span style={dotStyle} />
-        <span style={{ fontSize: 11, color: 'var(--mantine-color-gray-6)', verticalAlign: 'middle' }}>{/* small label omitted to save space */}</span>
+        <span style={{ fontSize: 11, color: '#6b7280', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>SW</span>
       </div>
     );
   }

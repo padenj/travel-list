@@ -95,7 +95,7 @@ export default function EditPackingListDrawer({ opened, onClose, listId, initial
     }
   };
 
-  const handleAddItems = async (ids: string[]) => {
+  const handleAddItems = async (ids: string[], keepOpen?: boolean) => {
     if (!editListId) return;
     try {
       const ops = ids.map(id => addItemToPackingList(editListId!, id));
@@ -112,9 +112,46 @@ export default function EditPackingListDrawer({ opened, onClose, listId, initial
           const listItems = res.data.items || [];
           const normalized = (listItems || []).map((it: any) => ({ ...it, itemId: it.item_id, oneOff: !!it.master_is_one_off }));
           setEditItems(normalized);
+          try {
+            // Notify other UI that the packing list changed
+            window.dispatchEvent(new CustomEvent('server-event', { detail: { type: 'packing_list_changed', listId: editListId } }));
+          } catch (e) { /* ignore */ }
         }
       }
       if (onRefresh) onRefresh();
+      // Close the AddItemsDrawer unless the caller requested it to remain open
+      if (!keepOpen) setShowAddPane(false);
+            window.dispatchEvent(new CustomEvent('server-event', { detail: { type: 'packing_list_changed', listId: editListId } }));
+          } catch (e) { /* ignore */ }
+        }
+      }
+      if (onRefresh) onRefresh();
+
+  // Listen for server-event messages while this drawer is open so we can refresh
+  useEffect(() => {
+    const handler = (ev: any) => {
+      try {
+        const event = ev.detail || ev;
+        if (!event || event.type !== 'packing_list_changed') return;
+        if (!editListId) return;
+        if (event.listId === editListId) {
+          // re-fetch the current list items
+          (async () => {
+            try {
+              const r = await getPackingList(editListId);
+              if (r.response && r.response.ok) {
+                const listItems = r.data.items || [];
+                const normalized = (listItems || []).map((it: any) => ({ ...it, itemId: it.item_id, oneOff: !!it.master_is_one_off }));
+                setEditItems(normalized);
+              }
+            } catch (e) { /* ignore */ }
+          })();
+        }
+      } catch (e) {}
+    };
+    window.addEventListener('server-event', handler as EventListener);
+    return () => window.removeEventListener('server-event', handler as EventListener);
+  }, [editListId]);
       setShowAddPane(false);
     } catch (err) {
       console.error('Failed to add items from EditPackingListDrawer', err);

@@ -31,7 +31,7 @@ describe('packing list check persistence', () => {
     const patchRes = await request(app)
       .patch(`/api/packing-lists/${listId}/items/${pliId}/check`)
       .set('Authorization', `Bearer ${token}`)
-      .send({ checked: true, userId: null });
+      .send({ checked: true });
     expect(patchRes.status).toBe(200);
 
     // Fetch the packing list and assert check persisted

@@ -6,7 +6,7 @@ export default {
       CREATE TABLE IF NOT EXISTS packing_list_item_checks_new (
         id TEXT PRIMARY KEY,
         packing_list_item_id TEXT NOT NULL,
-        member_id TEXT NOT NULL,
+        member_id TEXT,
         checked INTEGER DEFAULT 0,
         checked_at TEXT,
         FOREIGN KEY (packing_list_item_id) REFERENCES packing_list_items(id),

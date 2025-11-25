@@ -17,6 +17,7 @@ import {
 import { useImpersonation } from '../contexts/ImpersonationContext';
 import { showNotification } from '@mantine/notifications';
 import { useActivePackingList } from '../contexts/ActivePackingListContext';
+import { useListEditDrawer } from '../contexts/ListEditDrawerContext';
 import ItemEditDrawer from './ItemEditDrawer';
 import AddItemsDrawer from './AddItemsDrawer';
 import EditPackingListDrawer from './EditPackingListDrawer';
@@ -27,7 +28,7 @@ export default function ManagePackingLists() {
   // selected removed; edit modal holds the current list being edited in editListId
   // promote UI removed for now; will reintroduce promotion logic later
   // edit modal state
-  const [showEditModal, setShowEditModal] = useState(false);
+  // showEditModal is managed by the global drawer
   const [editListId, setEditListId] = useState<string | null>(null);
   const [editListName, setEditListName] = useState<string>('');
   const [editItems, setEditItems] = useState<any[]>([]);
@@ -172,39 +173,12 @@ export default function ManagePackingLists() {
     }
   };
 
+  const { openForList } = useListEditDrawer();
+
   const openEditFor = async (list: any) => {
-    setEditListId(list.id);
-    setEditListName(list.name || '');
-    setShowEditModal(true);
-    setEditLoading(true);
-    try {
-      const res = await getPackingList(list.id);
-      if (!res.response.ok) {
-        showNotification({ title: 'Error', message: 'Failed to load list items', color: 'red' });
-        setEditItems([]);
-        return;
-      }
-  // server returns items with members, category (single object) and template_ids
-      const listItems = res.data.items || [];
-      // Normalize server-provided packing-list rows to include camelCase aliases
-      // so existing UI code can rely on itemId and oneOff properties.
-      const normalized = (listItems || []).map((it: any) => ({
-        ...it,
-        itemId: it.item_id,
-        oneOff: !!it.master_is_one_off,
-      }));
-      setEditItems(normalized);
-  // load templates assigned to this packing list (if server provides them)
-  const assigned = Array.isArray(res.data.template_ids) ? res.data.template_ids : (Array.isArray(res.data.templates) ? res.data.templates.map((t: any) => t.id) : []);
-  setEditAssignedTemplates(assigned || []);
-      // we now rely on server-provided category arrays and per-item template_ids
-  // rely on server-provided item.categories and item.template_ids
-    } catch (err) {
-      console.error(err);
-      setEditItems([]);
-    } finally {
-      setEditLoading(false);
-    }
+    // Prefer global drawer to host the full edit UI. Keep legacy requestOpenEdit for compatibility.
+    if (requestOpenEdit) requestOpenEdit(list.id);
+    openForList(list.id, list.name);
   };
 
   const openCopyFor = async (list: any) => {
@@ -380,7 +354,7 @@ export default function ManagePackingLists() {
 
       {/* Promote modal removed */}
 
-  <EditPackingListDrawer opened={showEditModal} onClose={() => setShowEditModal(false)} listId={editListId} initialName={editListName} familyId={familyId} onRefresh={reload} />
+      {/* Main edit drawer is now provided globally via GlobalListEditDrawer; avoid rendering it here. */}
 
       {/* Nested Drawer for managing template assignments */}
       <Drawer opened={showTemplateAssignDrawer} onClose={() => setShowTemplateAssignDrawer(false)} title="Manage Item Group Assignments" position="right" size={isMobile ? '80%' : 420} padding="md" zIndex={2200}>
@@ -496,7 +470,7 @@ export default function ManagePackingLists() {
         familyId={familyId}
         // Exclude items already on the current packing list
         excludedItemIds={(editItems || []).map(i => i.itemId).filter(Boolean)}
-        onApply={async (ids: string[]) => {
+        onApply={async (ids: string[], keepOpen?: boolean) => {
           if (!editListId) return;
           try {
             for (const id of ids) {

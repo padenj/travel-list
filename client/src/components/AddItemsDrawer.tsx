@@ -10,7 +10,7 @@ interface Props {
   onClose: () => void;
   familyId: string | null | undefined;
   excludedItemIds?: string[]; // items already present in target
-  onApply: (selectedItemIds: string[]) => Promise<void>;
+  onApply: (selectedItemIds: string[], keepOpen?: boolean) => Promise<void>;
   title?: string;
   showIsOneOffCheckbox?: boolean;
   autoApplyOnCreate?: boolean;
@@ -20,9 +20,12 @@ interface Props {
   // when adding to a specific category, provide the target category id so the drawer can indicate when
   // an item is assigned to another category (and display the warning)
   targetCategoryId?: string | null;
+  // When present, tells nested ItemEditDrawer that created/edited items can be promoted/added to
+  // a specific packing list. If provided, the Add action will be shown in ItemEditDrawer.
+  promoteContext?: { listId?: string | undefined; packingListItemId?: string | undefined } | null;
 }
 
-export default function AddItemsDrawer({ opened, onClose, familyId, excludedItemIds = [], onApply, title = 'Add Items', showIsOneOffCheckbox = true, autoApplyOnCreate = false, initialMembers, initialWhole, targetCategoryId = null }: Props) {
+export default function AddItemsDrawer({ opened, onClose, familyId, excludedItemIds = [], onApply, title = 'Add Items', showIsOneOffCheckbox = true, autoApplyOnCreate = false, initialMembers, initialWhole, targetCategoryId = null, promoteContext = null }: Props) {
   const [allItems, setAllItems] = useState<any[]>([]);
   const [selectedToAdd, setSelectedToAdd] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
@@ -121,30 +124,53 @@ export default function AddItemsDrawer({ opened, onClose, familyId, excludedItem
                             return <Text c="dimmed">No available items</Text>;
                           }
 
-                          return visible.map(it => {
+                          // Group items by category name (use 'Uncategorized' when none)
+                          const groups: Record<string, any[]> = {};
+                          for (const it of visible) {
                             const cats = itemCategoriesMap[it.id] || [];
-                            const assignedCategory = cats.length > 0 ? cats[0] : null;
-                            const assignedOther = assignedCategory && targetCategoryId && assignedCategory.id !== targetCategoryId;
+                            const catName = (cats.length > 0 && cats[0] && cats[0].name) ? cats[0].name : 'Uncategorized';
+                            if (!groups[catName]) groups[catName] = [];
+                            groups[catName].push(it);
+                          }
+
+                          // Grouping computed (debug logging removed).
+
+                          const sortedGroupNames = Object.keys(groups).sort((a, b) => a.localeCompare(b));
+
+                          return sortedGroupNames.map((groupName, gi) => {
+                            const items = groups[groupName].slice().sort((a: any, b: any) => (a.name || '').localeCompare(b.name || ''));
                             return (
-                              <div key={it.id} style={{ display: 'flex', flexDirection: 'column', padding: '6px 0' }}>
-                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                                    <Checkbox checked={selectedToAdd.includes(it.id)} onChange={(e) => {
-                                      const checked = e.currentTarget.checked;
-                                      setSelectedToAdd(prev => checked ? [...prev, it.id] : prev.filter(x => x !== it.id));
-                                    }} />
-                                    <div style={{ display: 'flex', gap: 6, alignItems: 'baseline' }}>
-                                      <Text style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{it.name}</Text>
-                                      {assignedCategory && (
-                                        <Text c="dimmed" size="sm" style={{ marginLeft: 6 }}>- {assignedCategory.name}</Text>
+                              <div key={groupName} style={{ padding: '6px 0' }}>
+                                {gi !== 0 && <Divider my="xs" />}
+                                {/* grouping header */}
+                                <Text fw={600} size="sm" style={{ margin: '8px 0' }}>{groupName}</Text>
+                                {items.map(it => {
+                                  const cats = itemCategoriesMap[it.id] || [];
+                                  const assignedCategory = cats.length > 0 ? cats[0] : null;
+                                  const assignedOther = assignedCategory && targetCategoryId && assignedCategory.id !== targetCategoryId;
+                                  return (
+                                    <div key={it.id} style={{ display: 'flex', flexDirection: 'column', padding: '6px 0' }}>
+                                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                                          <Checkbox checked={selectedToAdd.includes(it.id)} onChange={(e) => {
+                                            const checked = e.currentTarget.checked;
+                                            setSelectedToAdd(prev => checked ? [...prev, it.id] : prev.filter(x => x !== it.id));
+                                          }} />
+                                          <div style={{ display: 'flex', gap: 6, alignItems: 'baseline' }}>
+                                            <Text style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{it.name}</Text>
+                                            {assignedCategory && (
+                                              <Text c="dimmed" size="sm" style={{ marginLeft: 6 }}>- {assignedCategory.name}</Text>
+                                            )}
+                                          </div>
+                                        </div>
+                                        <div />
+                                      </div>
+                                      {selectedToAdd.includes(it.id) && assignedOther && (
+                                        <Text color="red" size="sm" style={{ marginLeft: 36, marginTop: 4 }}>This item will be moved from it's current category to this category</Text>
                                       )}
                                     </div>
-                                  </div>
-                                  <div />
-                                </div>
-                                {selectedToAdd.includes(it.id) && assignedOther && (
-                                  <Text color="red" size="sm" style={{ marginLeft: 36, marginTop: 4 }}>This item will be moved from it's current category to this category</Text>
-                                )}
+                                  );
+                                })}
                               </div>
                             );
                           });
@@ -169,18 +195,27 @@ export default function AddItemsDrawer({ opened, onClose, familyId, excludedItem
         initialMembers={initialMembers}
         initialWhole={initialWhole}
         onSaved={async (payload) => {
-          // reload items and auto-select the created item so the user can add it
           try {
             await loadItems();
             const createdId = payload && (payload as any).id;
             if (createdId) {
-              setSelectedToAdd(prev => Array.from(new Set([...prev, createdId])));
-              if (autoApplyOnCreate) {
-                // auto-apply the created item immediately
-                try {
-                  await onApply([createdId]);
-                } catch (e) {
-                  console.error('Auto-apply failed', e);
+              try {
+                // Ask parent to immediately add the existing master to the target
+                // and request that the AddItemsDrawer remain open so the user can
+                // continue adding more items.
+                await onApply([createdId], true);
+                // Close only the nested edit drawer so the user remains in AddItemsDrawer
+                setShowEditItemDrawer(false);
+                // select the created item in the visible list so it's checked
+                setSelectedToAdd(prev => Array.from(new Set([...prev, createdId])));
+                // do not close this AddItemsDrawer (keep it open for further adds)
+                return;
+              } catch (e) {
+                console.error('Immediate apply failed', e);
+                // Fall back to selecting the created id so the user can manually Apply
+                setSelectedToAdd(prev => Array.from(new Set([...prev, createdId])));
+                if (autoApplyOnCreate) {
+                  try { await onApply([createdId]); } catch (ee) { console.error('Auto-apply failed', ee); }
                 }
               }
             }
@@ -189,6 +224,9 @@ export default function AddItemsDrawer({ opened, onClose, familyId, excludedItem
           }
         }}
         zIndex={3000}
+        // Show add-to-list action when a promoteContext.listId is provided, otherwise hide it.
+        hideAddActionWhenNoList={!promoteContext || !promoteContext.listId}
+        promoteContext={promoteContext}
       />
     </>
   );
