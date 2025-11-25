@@ -13,6 +13,7 @@ import {
   createItem,
   getCategories,
   getCurrentUserProfile,
+  getFamily,
   deleteItem,
   getPackingList,
   getItems,
@@ -21,7 +22,7 @@ import {
 } from '../api';
 import Fuse from 'fuse.js';
 
-type OnSavedPayload = { id?: string; name?: string } | undefined;
+type OnSavedPayload = { id?: string; name?: string; members?: string[]; whole?: boolean } | undefined;
 
 export interface ItemEditDrawerProps {
   opened: boolean;
@@ -268,13 +269,24 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
               // ignore
             }
             try {
-              const profile = await getCurrentUserProfile();
-              if (profile.response.ok && profile.data.family) {
-                familyMembersFromProfile = profile.data.family.members || [];
+              // Prefer explicit family fetch so impersonation-selected family members are returned.
+              // IMPORTANT: when an explicit familyId is provided (which happens during impersonation)
+              // do NOT fall back to the current user's profile. We must avoid leaking member data
+              // from the logged-in user's profile into the impersonated family's context.
+              const famRes = await getFamily(familyId!);
+              if (famRes.response.ok && famRes.data.family) {
+                familyMembersFromProfile = famRes.data.family.members || [];
                 setFamilyMembers(familyMembersFromProfile);
+              } else {
+                // If the family fetch doesn't return a family (unexpected), treat as no members
+                familyMembersFromProfile = [];
+                setFamilyMembers([]);
               }
             } catch (e) {
-              // ignore
+              // If getFamily fails (network/server), do not fall back to profile when a familyId
+              // was explicitly provided. Leave members empty so the caller can handle missing members.
+              familyMembersFromProfile = [];
+              setFamilyMembers([]);
             }
 
             // New item initial selection: prefer caller-provided initialCategoryId and initialMembers/initialWhole, otherwise empty
@@ -322,6 +334,33 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
       }
     })();
   }, [opened, masterItemId, familyId, defaultAssignedMemberId, promoteContext, initialMembersProp, initialWholeProp, initialCategoryId]);
+
+  // When opening in create mode (no masterItemId), ensure the name is cleared and
+  // the selected members/whole are seeded from the parent's initial props so
+  // the parent can persist the last-used selections across opens.
+  useEffect(() => {
+    if (!opened) return;
+    if (masterItemId) return; // only for create mode
+    // Clear the name input for a fresh create
+    setName('');
+    // Seed selected members/whole from initial props
+    const assigned = Array.isArray(initialMembersProp) ? initialMembersProp.slice() : [];
+    setSelectedMembers(assigned);
+    setSelectedWhole(!!initialWholeProp);
+  }, [opened, masterItemId, initialMembersProp, initialWholeProp]);
+
+  // If familyMembers load after we seeded selectedMembers, re-apply the initialMembers
+  // to ensure checkboxes reflect the parent's selections (handles async ordering).
+  useEffect(() => {
+    if (!opened) return;
+    if (masterItemId) return;
+    if (!Array.isArray(initialMembersProp) || initialMembersProp.length === 0) return;
+    // Only re-apply if the UI hasn't already got selections
+    setSelectedMembers(prev => {
+      if (prev && prev.length > 0) return prev;
+      return initialMembersProp.slice();
+    });
+  }, [familyMembers, initialMembersProp, opened, masterItemId]);
 
   const save = async () => {
     setSaving(true);
@@ -375,7 +414,7 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
         }
         await Promise.all(ops);
         showNotification({ title: 'Saved', message: 'Item created.', color: 'green' });
-        if (onSaved) await onSaved(createdId ? { id: createdId, name: updatedName } : undefined);
+        if (onSaved) await onSaved(createdId ? { id: createdId, name: updatedName, members: selectedMembers.slice(), whole: !!selectedWhole } : undefined);
         onClose();
         return;
       }

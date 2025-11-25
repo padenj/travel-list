@@ -10,6 +10,7 @@ import {
   getMembersForItem,
   assignItemToCategory,
   removeItemFromCategory,
+  deleteItem,
 } from '../api';
 import { useImpersonation } from '../contexts/ImpersonationContext';
 import { useRefresh } from '../contexts/RefreshContext';
@@ -104,6 +105,8 @@ export default function CategoryManagementPage(): React.ReactElement {
 
     const [showEditDrawer, setShowEditDrawer] = useState(false);
     const [editMasterItemId, setEditMasterItemId] = useState<string | null>(null);
+    const [lastSelectedMembers, setLastSelectedMembers] = useState<string[]>([]);
+    const [lastSelectedWhole, setLastSelectedWhole] = useState<boolean>(false);
     const [sortMode, setSortMode] = useState(false);
     const [multiSelectMode, setMultiSelectMode] = useState(false);
     const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
@@ -115,8 +118,10 @@ export default function CategoryManagementPage(): React.ReactElement {
     async function fetchData() {
       setLoading(true);
       // prefer impersonation family id (set by SystemAdmin) otherwise load from profile
-      let fid = impersonatingFamilyId;
-      if (!fid) {
+      let fid: string | null = null;
+      if (impersonatingFamilyId) {
+        fid = impersonatingFamilyId;
+      } else {
         const profileRes = await import('../api').then(m => m.getCurrentUserProfile());
         if (profileRes.response.ok && profileRes.data.family) {
           fid = profileRes.data.family.id;
@@ -361,6 +366,7 @@ export default function CategoryManagementPage(): React.ReactElement {
                             changeSelectedTab(cat.id);
                             setShowAddPaneForCategory({ open: true, categoryId: cat.id });
                             setEditMasterItemId(null);
+                            // ensure the name field is cleared when opening for create
                             setShowEditDrawer(true);
                           }}>Add</Button>
                         </div>
@@ -408,7 +414,7 @@ export default function CategoryManagementPage(): React.ReactElement {
                           .tl-category-item .tl-item-right { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; }
                         `}</style>
                         <div className="tl-category-grid">
-                          {categoryItems[cat.id].map((item) => (
+                          {categoryItems[cat.id].slice().sort((a, b) => (a.name || '').localeCompare(b.name || '')).map((item) => (
                             <div key={item.id} className="tl-category-item">
                               <div className="tl-item-left" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                                 {multiSelectMode && (
@@ -437,9 +443,24 @@ export default function CategoryManagementPage(): React.ReactElement {
                                 <ActionIcon color="blue" variant="light" onClick={() => { setEditMasterItemId(item.id); setShowEditDrawer(true); }} title="Edit item">
                                   <IconEdit size={16} />
                                 </ActionIcon>
-                                <ActionIcon color="red" variant="light" title="Remove from category" onClick={() => handleRemoveItem(item.id, cat.id)}>
-                                  <IconTrash size={16} />
-                                </ActionIcon>
+                                <ConfirmDelete
+                                  title="Delete item"
+                                  confirmText="Delete item?"
+                                  onConfirm={async () => {
+                                    const res = await deleteItem(item.id);
+                                    if (res.response.ok) {
+                                      setCategoryItems(prev => ({
+                                        ...prev,
+                                        [cat.id]: (prev[cat.id] || []).filter(i => i.id !== item.id),
+                                      }));
+                                      setItems(prev => prev.filter(i => i.id !== item.id));
+                                      bumpRefresh();
+                                    } else {
+                                      // basic error feedback; project uses notifications elsewhere
+                                      alert('Failed to delete item: ' + (res.data?.error || res.response.statusText));
+                                    }
+                                  }}
+                                />
                               </div>
                             </div>
                           ))}
@@ -474,13 +495,22 @@ export default function CategoryManagementPage(): React.ReactElement {
               opened={showEditDrawer}
               onClose={() => { setShowEditDrawer(false); setEditMasterItemId(null); }}
               masterItemId={editMasterItemId || undefined}
-              initialName={editMasterItemId ? (items.find(i => i.id === editMasterItemId)?.name) : undefined}
+              // When creating, pass explicit empty initialName so the textbox is cleared
+              initialName={editMasterItemId ? (items.find(i => i.id === editMasterItemId)?.name) : ''}
               familyId={familyId}
               initialCategoryId={showAddPaneForCategory.open ? showAddPaneForCategory.categoryId : undefined}
-              onSaved={async () => {
+              initialMembers={lastSelectedMembers}
+              initialWhole={lastSelectedWhole}
+              onSaved={async (payload) => {
+                // When an item is created, payload may include members/whole to persist
+                if (payload && (payload as any).members) {
+                  setLastSelectedMembers((payload as any).members || []);
+                }
+                if (payload && typeof (payload as any).whole !== 'undefined') {
+                  setLastSelectedWhole(!!(payload as any).whole);
+                }
                 await fetchCategoryItems();
-                setShowEditDrawer(false);
-                setEditMasterItemId(null);
+                // keep the drawer open for additional creations; do not close here
                 bumpRefresh();
               }}
               showIsOneOffCheckbox={false}

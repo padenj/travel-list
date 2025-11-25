@@ -1,11 +1,13 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { getFamilyPackingLists, getCurrentUserProfile } from '../api';
+import { useImpersonation } from '../contexts/ImpersonationContext';
 
 type ActiveContextValue = {
   activeListId: string | null;
   setActiveListId: (id: string | null) => void;
   availableLists: any[];
-  refreshLists: () => Promise<void>;
+  // refreshLists now returns the fetched lists when available (or undefined on error)
+  refreshLists: () => Promise<any[] | undefined>;
   // React-centric way to request that a Manage UI open the edit modal for a list
   requestOpenEdit?: (listId: string) => void;
   pendingOpenEditId?: string | null;
@@ -19,17 +21,28 @@ export const ActivePackingListProvider: React.FC<React.PropsWithChildren<{}>> = 
   const [availableLists, setAvailableLists] = useState<any[]>([]);
   const [pendingOpenEditId, setPendingOpenEditId] = useState<string | null>(null);
 
-  const refreshLists = async () => {
+  // Prefer impersonation when present; fall back to the current user's profile
+  const { impersonatingFamilyId } = useImpersonation() as any;
+
+  const refreshLists = async (): Promise<any[] | undefined> => {
     try {
-      const profile = await getCurrentUserProfile();
-      const fid = profile.response.ok && profile.data.family ? profile.data.family.id : null;
-      if (!fid) return;
+      // When impersonating we must not fall back to the logged-in user's profile.
+      // Prefer the impersonation family id; if it's not present then fall back to profile.
+      let fid: string | null = null;
+      if (impersonatingFamilyId) {
+        fid = impersonatingFamilyId;
+      } else {
+        const profile = await getCurrentUserProfile();
+        fid = profile.response.ok && profile.data.family ? profile.data.family.id : null;
+      }
+      if (!fid) return undefined;
       const res = await getFamilyPackingLists(fid);
       if (res.response.ok) {
-        setAvailableLists(res.data.lists || []);
+        const fetched = res.data.lists || [];
+        setAvailableLists(fetched);
         // Prefer persisted selection from localStorage if present and still valid.
         const persisted = typeof window !== 'undefined' ? localStorage.getItem('activePackingListId') : null;
-        const lists = res.data.lists || [];
+        const lists = fetched;
         const persistedValid = persisted && lists.some((l: any) => l.id === persisted);
         if (persistedValid) {
           setActiveListId(persisted as string);
@@ -41,10 +54,12 @@ export const ActivePackingListProvider: React.FC<React.PropsWithChildren<{}>> = 
             setActiveListId(null);
           }
         }
+        return lists;
       }
     } catch (err) {
       // ignore
     }
+    return undefined;
   };
 
   // Persisted setter wrapper
@@ -60,9 +75,11 @@ export const ActivePackingListProvider: React.FC<React.PropsWithChildren<{}>> = 
     }
   };
 
+  // Refresh lists initially and whenever impersonation changes so the available
+  // lists reflect the impersonated family's lists when active.
   useEffect(() => {
     refreshLists();
-  }, []);
+  }, [impersonatingFamilyId]);
 
   const requestOpenEdit = (listId: string) => setPendingOpenEditId(listId);
   const clearPendingOpenEdit = () => setPendingOpenEditId(null);

@@ -60,8 +60,10 @@ export default function TemplateManager() {
   useEffect(() => {
     async function fetchFamilyIdAndData() {
       // prefer impersonation id if present
-      let fid = impersonatingFamilyId;
-      if (!fid) {
+      let fid = null;
+      if (impersonatingFamilyId) {
+        fid = impersonatingFamilyId;
+      } else {
         const profileRes = await getCurrentUserProfile();
         if (profileRes.response.ok && profileRes.data.family) {
           fid = profileRes.data.family.id;
