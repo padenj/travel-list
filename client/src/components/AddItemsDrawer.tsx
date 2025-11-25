@@ -138,14 +138,10 @@ export default function AddItemsDrawer({ opened, onClose, familyId, excludedItem
                   <Text c="dimmed">No available items</Text>
                 ) : (
                   (() => {
-                    // Use computed `visibleItems` which apply fuzzy filtering and sorting
                     const visible = visibleItems;
 
-                    if (visible.length === 0) {
-                      return <Text c="dimmed">No available items</Text>;
-                    }
+                    if (visible.length === 0) return <Text c="dimmed">No available items</Text>;
 
-                    // Group items by category name (use 'Uncategorized' when none)
                     const groups: Record<string, any[]> = {};
                     for (const it of visible) {
                       const cats = itemCategoriesMap[it.id] || [];
@@ -157,25 +153,15 @@ export default function AddItemsDrawer({ opened, onClose, familyId, excludedItem
                     const sortedGroupNames = Object.keys(groups).sort((a, b) => a.localeCompare(b));
 
                     return sortedGroupNames.map((groupName, gi) => {
-                      const items = groups[groupName].slice().sort((a: any, b: any) => (a.name || '').localeCompare(b.name || ''));
+                      const items = (groups[groupName] || []).slice().sort((a: any, b: any) => (a.name || '').localeCompare(b.name || ''));
                       return (
                         <div key={groupName} style={{ padding: '6px 0' }}>
                           {gi !== 0 && <Divider my="xs" />}
-                          {/* grouping header */}
                           <Text fw={600} size="sm" style={{ margin: '8px 0' }}>{groupName}</Text>
                           {items.map(it => {
                             const cats = itemCategoriesMap[it.id] || [];
-                            const catName = (cats.length > 0 && cats[0] && cats[0].name) ? cats[0].name : 'Uncategorized';
-                            if (!groups[catName]) groups[catName] = [];
-                            groups[catName].push(it);
-                          }
-
-                          // Grouping computed (debug logging removed).
-
-                          const sortedGroupNames = Object.keys(groups).sort((a, b) => a.localeCompare(b));
-
-                          return sortedGroupNames.map((groupName, gi) => {
-                            const items = groups[groupName].slice().sort((a: any, b: any) => (a.name || '').localeCompare(b.name || ''));
+                            const assignedCategory = cats.length > 0 ? cats[0] : null;
+                            const assignedOther = assignedCategory && targetCategoryId && assignedCategory.id !== targetCategoryId;
                             return (
                               <div key={it.id} style={{ display: 'flex', flexDirection: 'column', padding: '6px 0' }}>
                                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -190,8 +176,12 @@ export default function AddItemsDrawer({ opened, onClose, familyId, excludedItem
                                         <Text c="dimmed" size="sm" style={{ marginLeft: 6 }}>- {assignedCategory.name}</Text>
                                       )}
                                     </div>
-                                  );
-                                })}
+                                  </div>
+                                  <div />
+                                </div>
+                                {selectedToAdd.includes(it.id) && assignedOther && (
+                                  <Text color="red" size="sm" style={{ marginLeft: 36, marginTop: 4 }}>This item will be moved from it's current category to this category</Text>
+                                )}
                               </div>
                             );
                           })}
