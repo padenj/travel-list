@@ -31,6 +31,8 @@ export default function Dashboard(): React.ReactElement {
   const [showEditListDrawer, setShowEditListDrawer] = useState(false);
   const [editListNameState, setEditListNameState] = useState<string>('');
   const [excludedItemIds, setExcludedItemIds] = useState<string[]>([]);
+  // Track recent local check updates to avoid reacting to our own SSEs
+  const recentLocalChecksRef = React.useRef<Map<string, number>>(new Map());
 
   // Increment counter whenever activeListId changes to force refresh
   useEffect(() => {
@@ -46,6 +48,20 @@ export default function Dashboard(): React.ReactElement {
         const event = ev.detail || ev;
         if (!event || event.type !== 'packing_list_changed') return;
         if (!activeListId) return;
+        // If this is a check event and we recently issued a local change
+        // for the same packing-list-item, ignore the event to avoid a
+        // spurious refresh that reverts the optimistic UI. Give it a
+        // short grace period (5s) to allow the server state to settle.
+        try {
+          const data = (event && event.data) || {};
+          if (data.change === 'check' && data && data.itemId) {
+            const when = recentLocalChecksRef.current.get(data.itemId);
+            if (when && (Date.now() - when) < 5000) {
+              // skip refresh for this locally-initiated check
+              return;
+            }
+          }
+        } catch (e) {}
         if (event.listId === activeListId) {
           console.log('[Dashboard] Received server event for active list, refreshing');
           setListSelectionCount(prev => prev + 1);
@@ -276,8 +292,14 @@ export default function Dashboard(): React.ReactElement {
       });
     }
 
-    // Try to send to server
+    // Try to send to server (record recent local check so SSEs don't immediately
+    // overwrite our optimistic update if they arrive quickly).
     try {
+      try {
+        recentLocalChecksRef.current.set(itemId, Date.now());
+        // Clean up old entries periodically
+        setTimeout(() => { recentLocalChecksRef.current.delete(itemId); }, 6000);
+      } catch (e) {}
       const result = await togglePackingListItemCheck(activeListId, itemId, userId, checked);
       if (result.response.ok) {
         // Server accepted it

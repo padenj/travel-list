@@ -13,7 +13,8 @@ RUN npm ci --no-audit --no-fund
 # `npm --prefix client run build` keeps the intent explicit and lets Node
 # resolve modules from the parent `node_modules`.
 COPY client/ ./client/
-RUN npm --prefix client run build
+RUN npm --prefix client ci --no-audit --no-fund && \
+	npm --prefix client run build
 
 # Stage: build server (install dev deps, compile)
 FROM node:22-slim AS server-build
