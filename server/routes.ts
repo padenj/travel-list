@@ -612,8 +612,13 @@ router.patch('/packing-lists/:listId/items/:itemId/check', authMiddleware, async
     // userId defaults to authenticated user. If the client explicitly provided
     // `userId: null` that indicates a whole-family check (member_id NULL).
     let memberId: string | null;
-    if (typeof userId === 'undefined') memberId = req.user!.id;
-    else memberId = userId; // may be null to indicate whole-family
+    // Default to the authenticated user when the client omits userId or sends null
+    // (some clients may send `null` instead of omitting the field). Treating null
+    // as "use the authenticated user" preserves backwards-compatibility with
+    // client implementations and matches test expectations. Whole-family checks
+    // are still canonicalized below when the packing-list-item is marked as such.
+    if (typeof userId === 'undefined' || userId === null) memberId = req.user!.id;
+    else memberId = userId;
 
     // If the packing-list-item is marked as whole-family (DB may use snake_case
     // while JS code may use camelCase), canonicalize all check updates to the
