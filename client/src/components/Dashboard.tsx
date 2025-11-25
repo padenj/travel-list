@@ -28,6 +28,7 @@ export default function Dashboard(): React.ReactElement {
   const [itemDrawerDefaultMember, setItemDrawerDefaultMember] = useState<string | null>(null);
   const [showAddItemsDrawer, setShowAddItemsDrawer] = useState(false);
   const [familyMembersState, setFamilyMembersState] = useState<any[]>([]);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [showEditListDrawer, setShowEditListDrawer] = useState(false);
   const [editListNameState, setEditListNameState] = useState<string>('');
   const [excludedItemIds, setExcludedItemIds] = useState<string[]>([]);
@@ -81,12 +82,12 @@ export default function Dashboard(): React.ReactElement {
         // prefer impersonation when present
         let fid = impersonatingFamilyId || null;
         let membersFromProfile: any[] = [];
-        let currentUserId: string | null = null;
+        let profileUserId: string | null = null;
         if (!fid) {
           const profile = await getCurrentUserProfile();
           fid = profile.response.ok && profile.data.family ? profile.data.family.id : null;
           membersFromProfile = profile.response.ok && profile.data.family ? profile.data.family.members || [] : [];
-          currentUserId = profile.response.ok && profile.data.user ? profile.data.user.id : null;
+          profileUserId = profile.response.ok && profile.data.user ? profile.data.user.id : null;
         } else {
           // If impersonating, fetch the family so we have its members for user columns
           try {
@@ -240,6 +241,7 @@ export default function Dashboard(): React.ReactElement {
     setWholeFamilyItems(wholeItems);
     setFamilyId(fid);
     setFamilyMembersState(effectiveMembers || []);
+    setCurrentUserId(profileUserId);
     // compute excluded master ids for AddItemsDrawer so it hides items already present
     const excludedMasterIds: string[] = [];
     for (const pli of listItems || []) {
@@ -474,6 +476,7 @@ export default function Dashboard(): React.ReactElement {
               activeListId={activeListId}
               familyId={familyId}
               onRefresh={() => setListSelectionCount(prev => prev + 1)}
+              currentUserId={currentUserId}
             />
           )}
           <ItemEditDrawer

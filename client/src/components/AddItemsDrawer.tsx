@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
-import { Drawer, Button, Group, Text, Checkbox, Loader, Divider } from '@mantine/core';
+import { useEffect, useState, useMemo } from 'react';
+import { Drawer, Button, Group, Text, Checkbox, Loader, Divider, TextInput } from '@mantine/core';
+import Fuse from 'fuse.js';
 import { IconPlus } from '@tabler/icons-react';
 import ItemEditDrawer from './ItemEditDrawer';
 import { getItems, getCategories } from '../api';
@@ -27,6 +28,7 @@ interface Props {
 
 export default function AddItemsDrawer({ opened, onClose, familyId, excludedItemIds = [], onApply, title = 'Add Items', showIsOneOffCheckbox = true, autoApplyOnCreate = false, initialMembers, initialWhole, targetCategoryId = null, promoteContext = null }: Props) {
   const [allItems, setAllItems] = useState<any[]>([]);
+  const [query, setQuery] = useState<string>('');
   const [selectedToAdd, setSelectedToAdd] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [showEditItemDrawer, setShowEditItemDrawer] = useState(false);
@@ -69,6 +71,32 @@ export default function AddItemsDrawer({ opened, onClose, familyId, excludedItem
     if (opened) loadItems();
   }, [opened, familyId, excludedItemIds.join(',')]);
 
+  const fuse = useMemo(() => {
+    if (!allItems || allItems.length === 0) return null;
+    try {
+      return new Fuse(allItems, {
+        keys: ['name', 'description'],
+        threshold: 0.3,
+        distance: 32,
+        minMatchCharLength: 1,
+        ignoreLocation: true,
+      });
+    } catch (e) {
+      return null;
+    }
+  }, [allItems]);
+
+  const visibleItems = useMemo(() => {
+    if (!query) return (allItems || []).slice().sort((a: any, b: any) => (a.name || '').localeCompare(b.name || ''));
+    if (!fuse) return [];
+    try {
+      const raw = fuse.search(query, { limit: 500 });
+      return raw.map(r => r.item);
+    } catch (e) {
+      return [];
+    }
+  }, [query, fuse, allItems]);
+
   const apply = async () => {
     if (selectedToAdd.length === 0) {
       onClose();
@@ -102,81 +130,69 @@ export default function AddItemsDrawer({ opened, onClose, familyId, excludedItem
           <div style={{ overflow: 'auto', flex: '1 1 auto', paddingTop: 8 }}>
             {loading ? <Loader /> : (
               <div>
+                <div style={{ marginBottom: 8 }}>
+                  <TextInput placeholder="Search items" value={query} onChange={(e) => setQuery(e.currentTarget.value)} size="sm" />
+                </div>
                 {/* previously there was an optional toggle to hide items assigned to other categories; that feature was removed */}
                 {allItems.length === 0 ? (
                   <Text c="dimmed">No available items</Text>
                 ) : (
                   (() => {
-                    // if showAssignedItemsToggle prop exists on props, we need to read it from the component args
-                    // because props were destructured in the function signature, we can re-access via arguments.callee not available;
-                    // instead, rely on target props passed via a local variable by reading from the DOM — simpler approach:
-                    // We'll check for the presence of targetCategoryId on the props by reading the default param values above.
-                    return (
-                      <div>
-                        {/* If the caller expects the assigned-items toggle, show it */}
-                        {typeof ("" as any) /* dummy */ === 'undefined' ? null : null}
-                        {/* Build visible list based on showAssigned and fetched category map */}
-                        {(() => {
-                          // show all items (the assigned-items toggle was removed). Keep alphabetical ordering.
-                          const visible = allItems.slice().sort((a: any, b: any) => (a.name || '').localeCompare(b.name || ''));
+                    // Use computed `visibleItems` which apply fuzzy filtering and sorting
+                    const visible = visibleItems;
 
-                          if (visible.length === 0) {
-                            return <Text c="dimmed">No available items</Text>;
-                          }
+                    if (visible.length === 0) {
+                      return <Text c="dimmed">No available items</Text>;
+                    }
 
-                          // Group items by category name (use 'Uncategorized' when none)
-                          const groups: Record<string, any[]> = {};
-                          for (const it of visible) {
+                    // Group items by category name (use 'Uncategorized' when none)
+                    const groups: Record<string, any[]> = {};
+                    for (const it of visible) {
+                      const cats = itemCategoriesMap[it.id] || [];
+                      const catName = (cats.length > 0 && cats[0] && cats[0].name) ? cats[0].name : 'Uncategorized';
+                      if (!groups[catName]) groups[catName] = [];
+                      groups[catName].push(it);
+                    }
+
+                    const sortedGroupNames = Object.keys(groups).sort((a, b) => a.localeCompare(b));
+
+                    return sortedGroupNames.map((groupName, gi) => {
+                      const items = groups[groupName].slice().sort((a: any, b: any) => (a.name || '').localeCompare(b.name || ''));
+                      return (
+                        <div key={groupName} style={{ padding: '6px 0' }}>
+                          {gi !== 0 && <Divider my="xs" />}
+                          {/* grouping header */}
+                          <Text fw={600} size="sm" style={{ margin: '8px 0' }}>{groupName}</Text>
+                          {items.map(it => {
                             const cats = itemCategoriesMap[it.id] || [];
-                            const catName = (cats.length > 0 && cats[0] && cats[0].name) ? cats[0].name : 'Uncategorized';
-                            if (!groups[catName]) groups[catName] = [];
-                            groups[catName].push(it);
-                          }
-
-                          // Grouping computed (debug logging removed).
-
-                          const sortedGroupNames = Object.keys(groups).sort((a, b) => a.localeCompare(b));
-
-                          return sortedGroupNames.map((groupName, gi) => {
-                            const items = groups[groupName].slice().sort((a: any, b: any) => (a.name || '').localeCompare(b.name || ''));
+                            const assignedCategory = cats.length > 0 ? cats[0] : null;
+                            const assignedOther = assignedCategory && targetCategoryId && assignedCategory.id !== targetCategoryId;
                             return (
-                              <div key={groupName} style={{ padding: '6px 0' }}>
-                                {gi !== 0 && <Divider my="xs" />}
-                                {/* grouping header */}
-                                <Text fw={600} size="sm" style={{ margin: '8px 0' }}>{groupName}</Text>
-                                {items.map(it => {
-                                  const cats = itemCategoriesMap[it.id] || [];
-                                  const assignedCategory = cats.length > 0 ? cats[0] : null;
-                                  const assignedOther = assignedCategory && targetCategoryId && assignedCategory.id !== targetCategoryId;
-                                  return (
-                                    <div key={it.id} style={{ display: 'flex', flexDirection: 'column', padding: '6px 0' }}>
-                                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                                        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                                          <Checkbox checked={selectedToAdd.includes(it.id)} onChange={(e) => {
-                                            const checked = e.currentTarget.checked;
-                                            setSelectedToAdd(prev => checked ? [...prev, it.id] : prev.filter(x => x !== it.id));
-                                          }} />
-                                          <div style={{ display: 'flex', gap: 6, alignItems: 'baseline' }}>
-                                            <Text style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{it.name}</Text>
-                                            {assignedCategory && (
-                                              <Text c="dimmed" size="sm" style={{ marginLeft: 6 }}>- {assignedCategory.name}</Text>
-                                            )}
-                                          </div>
-                                        </div>
-                                        <div />
-                                      </div>
-                                      {selectedToAdd.includes(it.id) && assignedOther && (
-                                        <Text color="red" size="sm" style={{ marginLeft: 36, marginTop: 4 }}>This item will be moved from it's current category to this category</Text>
+                              <div key={it.id} style={{ display: 'flex', flexDirection: 'column', padding: '6px 0' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                                    <Checkbox checked={selectedToAdd.includes(it.id)} onChange={(e) => {
+                                      const checked = e.currentTarget.checked;
+                                      setSelectedToAdd(prev => checked ? [...prev, it.id] : prev.filter(x => x !== it.id));
+                                    }} />
+                                    <div style={{ display: 'flex', gap: 6, alignItems: 'baseline' }}>
+                                      <Text style={{ whiteSpace: 'normal', wordBreak: 'break-word' }}>{it.name}</Text>
+                                      {assignedCategory && (
+                                        <Text c="dimmed" size="sm" style={{ marginLeft: 6 }}>- {assignedCategory.name}</Text>
                                       )}
                                     </div>
-                                  );
-                                })}
+                                  </div>
+                                  <div />
+                                </div>
+                                {selectedToAdd.includes(it.id) && assignedOther && (
+                                  <Text color="red" size="sm" style={{ marginLeft: 36, marginTop: 4 }}>This item will be moved from it's current category to this category</Text>
+                                )}
                               </div>
                             );
-                          });
-                        })()}
-                      </div>
-                    );
+                          })}
+                        </div>
+                      );
+                    });
                   })()
                 )}
               </div>
