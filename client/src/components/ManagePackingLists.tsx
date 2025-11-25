@@ -470,7 +470,7 @@ export default function ManagePackingLists() {
         familyId={familyId}
         // Exclude items already on the current packing list
         excludedItemIds={(editItems || []).map(i => i.itemId).filter(Boolean)}
-        onApply={async (ids: string[]) => {
+        onApply={async (ids: string[], keepOpen?: boolean) => {
           if (!editListId) return;
           try {
             for (const id of ids) {

@@ -10,6 +10,7 @@ import AddItemsDrawer from './AddItemsDrawer';
 import EditPackingListDrawer from './EditPackingListDrawer';
 import { useActivePackingList } from '../contexts/ActivePackingListContext';
 import { useListEditDrawer } from '../contexts/ListEditDrawerContext';
+import { useImpersonation } from '../contexts/ImpersonationContext';
 import { getCurrentUserProfile, getItems, getPackingList, togglePackingListItemCheck, addItemToPackingList, setPackingListItemNotNeeded, setPackingListItemNotNeededForMember } from '../api';
 
 export default function Dashboard(): React.ReactElement {
@@ -419,7 +420,7 @@ export default function Dashboard(): React.ReactElement {
 
       <div style={{ marginTop: 16 }}>
         <Stack>
-          <Group position="left" spacing="sm">
+          <Group justify="flex-start" gap="sm">
             <ActivePackingListSelector onChange={(_id) => { /* optionally notify parent */ }} />
             <Button size="xs" onClick={() => {
               if (!activeListId) {

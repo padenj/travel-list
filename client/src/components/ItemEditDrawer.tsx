@@ -48,17 +48,15 @@ export interface ItemEditDrawerProps {
 export default function ItemEditDrawer({ opened, onClose, masterItemId, initialName, familyId, defaultAssignedMemberId, onSaved, promoteContext, showIsOneOffCheckbox = false, zIndex, initialCategoryId, initialMembers: initialMembersProp, initialWhole: initialWholeProp, hideAddActionWhenNoList = false }: ItemEditDrawerProps) {
   // Log incoming props for debugging when the component mounts / props change
   const _incomingProps = { opened, onClose, masterItemId, initialName, familyId, defaultAssignedMemberId, onSaved, promoteContext, showIsOneOffCheckbox, zIndex, initialCategoryId, initialMembersProp, initialWholeProp, hideAddActionWhenNoList };
-  console.log('[ItemEditDrawer] props', _incomingProps);
+  // Removed verbose prop logging to reduce console noise in the UI.
 
   useEffect(() => {
-    if (opened) {
-      console.log('[ItemEditDrawer] opened with props', _incomingProps);
-    }
+    // no-op: removed verbose open logs
   }, [opened, masterItemId, initialName, familyId, defaultAssignedMemberId, promoteContext, showIsOneOffCheckbox, zIndex, initialCategoryId, initialMembersProp, initialWholeProp]);
 
   // Mount-only log to guarantee at least one visible log entry in some UIs
   useEffect(() => {
-    console.log('[ItemEditDrawer] mounted props', _incomingProps);
+    // mount log removed
   }, []);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -212,10 +210,8 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
           const res = await getItemEditData(masterItemId, familyId || undefined);
           if (!res.response.ok) throw new Error('Failed to load item edit data');
           const payload = res.data || {};
-          console.log('[ItemEditDrawer] master payload received', { masterItemId, payload });
-          // Simplified one-off detection: use item.isOneOff flag
+          // master payload received (verbose log removed)
           const masterOneOffFlag = !!(payload.item?.isOneOff);
-          console.log('[ItemEditDrawer] master is one-off:', masterOneOffFlag);
           setIsMasterOneOff(masterOneOffFlag);
           // Seed the editable name from the payload if available; fall back to prop initialName
           setName(payload.item?.name || payload.name || initialName || '');
@@ -236,7 +232,7 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
           const currentCat = typeof initialCategoryId !== 'undefined' && initialCategoryId !== null
             ? initialCategoryId
             : (itemCats && itemCats.length > 0 ? itemCats[0].id : null);
-          console.debug('[ItemEditDrawer] existing item computed currentCat', { currentCat, initialCategoryId, itemCats });
+          // existing item currentCat computation (debug log removed)
           setInitialCategory(currentCat);
           setSelectedCategory(currentCat);
           // If the selected category id isn't present in the categories list,
@@ -291,7 +287,7 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
 
             // New item initial selection: prefer caller-provided initialCategoryId and initialMembers/initialWhole, otherwise empty
             const preselect = typeof initialCategoryId !== 'undefined' ? initialCategoryId : null;
-            console.debug('[ItemEditDrawer] new item preselect category', { preselect, initialCategoryId });
+            // new-item preselect debug removed
             setInitialCategory(preselect);
             setSelectedCategory(preselect);
             if (preselect) {
@@ -364,19 +360,16 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
 
   const save = async () => {
     setSaving(true);
-  console.log('[ItemEditDrawer] save() called', { masterItemId, name, selectedCategory, selectedMembers, selectedWhole, alsoAddForFutureTrips, isCreatingOneOff, isMasterOneOff, isOneOff });
     try {
       const trimmedName = (name || '').trim();
       // Validation: name must be non-empty after trimming
       if (!trimmedName) {
-  console.log('[ItemEditDrawer] validation failed - empty name');
         showNotification({ title: 'Validation', message: 'Item name cannot be empty.', color: 'red' });
         setSaving(false);
         return;
       }
     // Validation: category must be selected unless this is a one-off (create or master one-off)
     if (!isOneOff && !selectedCategory) {
-  console.log('[ItemEditDrawer] validation failed - category required', { isOneOff, isCreatingOneOff, isMasterOneOff, selectedCategory });
         showNotification({ title: 'Validation', message: 'Select a category before saving.', color: 'red' });
         setSaving(false);
         return;
@@ -385,10 +378,9 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
       let updatedName: string | undefined;
   const effectiveSelected = selectedCategory ? [selectedCategory] : [];
       if (!masterItemId) {
-  console.log('[ItemEditDrawer] creating new master item', { familyId, trimmedName, isOneOffValue: showIsOneOffCheckbox ? (alsoAddForFutureTrips ? 0 : 1) : 0, selectedWhole, selectedMembers });
         // Validation: when creating a new item, require either Whole Family or at least one member selected
         if (!selectedWhole && (!selectedMembers || selectedMembers.length === 0)) {
-          console.log('[ItemEditDrawer] validation failed - assignments required', { selectedWhole, selectedMembers });
+          // assignments validation failed (log removed)
           showNotification({ title: 'Validation', message: 'Select at least one member or assign to the whole family before saving.', color: 'red' });
           setSaving(false);
           return;
@@ -399,7 +391,6 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
         // When checkbox is hidden (management page), isOneOff should always be 0
         const isOneOffValue = showIsOneOffCheckbox ? (alsoAddForFutureTrips ? 0 : 1) : 0;
   const createRes = await createItem(familyId, trimmedName || 'New Item', isOneOffValue);
-  console.log('[ItemEditDrawer] createItem response', createRes);
         if (!createRes.response.ok) throw new Error('Failed to create item');
         createdId = createRes.data?.item?.id;
   updatedName = createRes.data?.item?.name || trimmedName;
@@ -421,7 +412,7 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
 
       // Existing item update
       if (!masterItemId) throw new Error('masterItemId missing');
-      console.log('[ItemEditDrawer] updating master item', { masterItemId, trimmedName, initialName, isOneOff, isConvertingOneOffToRegular, promoteContext });
+      // update item called (verbose log removed)
       
       // Update the master item name (and isOneOff flag if converting)
       const nameChanged = trimmedName && initialName?.trim() !== trimmedName;
@@ -429,7 +420,6 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
         // When converting one-off to regular, set isOneOff to 0
         const newIsOneOff = isConvertingOneOffToRegular ? 0 : undefined;
         const uRes = await updateItem(masterItemId, trimmedName, newIsOneOff);
-        console.log('[ItemEditDrawer] updateItem response', uRes);
         if (uRes.response.ok) updatedName = uRes.data?.item?.name || trimmedName;
       }
 
@@ -547,8 +537,16 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
                       <Button size="xs" onClick={async () => {
                         try {
                           if (promoteContext && promoteContext.listId) {
-                            await addItemToPackingList(promoteContext.listId, it.id);
-                            showNotification({ title: 'Added', message: 'Item added to packing list', color: 'green' });
+                            const res = await addItemToPackingList(promoteContext.listId, it.id);
+                            if (res && res.response && res.response.ok) {
+                              showNotification({ title: 'Added', message: 'Item added to packing list', color: 'green' });
+                              try {
+                                // Notify window listeners (same shape as SSE events) so UI can refresh immediately
+                                window.dispatchEvent(new CustomEvent('server-event', { detail: { type: 'packing_list_changed', listId: promoteContext.listId } }));
+                              } catch (e) { /* ignore */ }
+                            } else {
+                              showNotification({ title: 'Error', message: 'Failed to add item to packing list', color: 'red' });
+                            }
                             onClose();
                             return;
                           }

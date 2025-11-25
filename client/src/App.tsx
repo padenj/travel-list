@@ -47,7 +47,7 @@ function App(): React.ReactElement {
         };
 
         const sendTokenToSW = (sw?: ServiceWorker | null) => {
-          const token = (window as any).getAuthToken ? (window as any).getAuthToken() : null;
+          const token = typeof getAuthToken === 'function' ? getAuthToken() : null;
           const clientId = getOrCreateClientId();
           try {
             if (!token) {
@@ -109,8 +109,8 @@ function App(): React.ReactElement {
             window.dispatchEvent(new CustomEvent('server-event', { detail: msg.event }));
             return;
           }
-          if (msg.type === 'swActivated' || msg.type === 'updateAvailable') {
-            // Show non-blocking update banner
+          if (msg.type === 'updateAvailable') {
+            // Show non-blocking update banner when the worker explicitly signals an update
             setUpdateAvailable(true);
             try {
               const registration = await navigator.serviceWorker.getRegistration();
@@ -154,6 +154,23 @@ function App(): React.ReactElement {
       if (stopped || connecting || connected) return;
       connecting = true;
       const token = getAuthToken();
+      // If we have a token in the window context, also send it to the service worker
+      // in case registration-time messaging missed it.
+      if (token && 'serviceWorker' in navigator) {
+        try {
+          if (navigator.serviceWorker.controller) {
+            try { navigator.serviceWorker.controller.postMessage({ type: 'setToken', token }); } catch (e) { /* ignore */ }
+          }
+          // Also try sending via any registration workers
+          try {
+            const reg = await navigator.serviceWorker.getRegistration();
+            const target = reg && (reg.active || reg.waiting || reg.installing);
+            if (target) {
+              try { target.postMessage({ type: 'setToken', token }); } catch (e) { /* ignore */ }
+            }
+          } catch (e) { /* ignore */ }
+        } catch (e) { /* ignore */ }
+      }
       const headers: any = {};
       // Ensure each browser tab/window has a stable per-tab id so the server
       // can differentiate multiple simultaneous windows (regular + incognito).

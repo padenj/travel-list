@@ -6,6 +6,7 @@ import { useActivePackingList } from '../contexts/ActivePackingListContext';
 import { getPackingList, updatePackingList, deletePackingListItem, getItems, getTemplates, addItemToPackingList, getCurrentUserProfile } from '../api';
 import { showNotification } from '@mantine/notifications';
 import ItemEditDrawer from './ItemEditDrawer';
+import AddItemsDrawer from './AddItemsDrawer';
 
 export default function GlobalListEditDrawer() {
   const { isOpen, listId, listName, close, renderFn, openForList } = useListEditDrawer();
@@ -19,9 +20,7 @@ export default function GlobalListEditDrawer() {
   const [removalConfirm, setRemovalConfirm] = useState<{ open: boolean; templateId?: string; templateName?: string; newTemplateIds?: string[] }>(() => ({ open: false }));
   const [removalLoading, setRemovalLoading] = useState(false);
   const [showAddPane, setShowAddPane] = useState(false);
-  const [allItems, setAllItems] = useState<any[]>([]);
-  const [selectedToAdd, setSelectedToAdd] = useState<string[]>([]);
-  const [addingLoading, setAddingLoading] = useState(false);
+  const [addPaneFamilyId, setAddPaneFamilyId] = useState<string | null>(null);
   const [isMobile, setIsMobile] = useState<boolean>(false);
   const [showEditItemDrawer, setShowEditItemDrawer] = useState(false);
   const [editTargetItem, setEditTargetItem] = useState<any | null>(null);
@@ -161,45 +160,36 @@ export default function GlobalListEditDrawer() {
   }, []);
 
   const openAddItemsPane = async () => {
-    // load family items and show the add pane
     try {
-      // try to get family id from profile
       const profile = await getCurrentUserProfile();
       const fid = profile.response.ok && profile.data.family ? profile.data.family.id : null;
       if (!fid) return;
+      setAddPaneFamilyId(fid);
       setShowAddPane(true);
-      const res = await getItems(fid);
-      if (!res.response.ok) return;
-      const items = res.data.items || [];
-      const existingMasterIds = new Set(editItems.map(e => e.itemId).filter(Boolean));
-      const available = items.filter((it: any) => !existingMasterIds.has(it.id));
-      setAllItems(available);
-      setSelectedToAdd([]);
     } catch (err) {
-      console.error('Failed to load items', err);
+      console.error('Failed to open Add Items pane', err);
     }
   };
 
-  const applyAddItems = async () => {
-    if (!listId) return;
-    if (selectedToAdd.length === 0) {
-      setShowAddPane(false);
+  const handleAddItemsFromDrawer = async (ids: string[], keepOpen?: boolean) => {
+    if (!listId || !ids || ids.length === 0) {
+      if (!keepOpen) setShowAddPane(false);
       return;
     }
-    setAddingLoading(true);
     try {
-      await Promise.all(selectedToAdd.map(id => addItemToPackingList(listId, id)));
+      // add each item to the packing list
+      await Promise.all(ids.map(id => addItemToPackingList(listId, id)));
       showNotification({ title: 'Added', message: 'Items added to list', color: 'green' });
-      // refresh items
+      // refresh canonical list from server
       const r = await getPackingList(listId);
       if (r.response.ok) setEditItems((r.data.items || []).map((it: any) => ({ ...it, itemId: it.item_id, oneOff: !!it.master_is_one_off })));
-      setShowAddPane(false);
-      setSelectedToAdd([]);
+      if (!keepOpen) {
+        setShowAddPane(false);
+      }
     } catch (err) {
-      console.error(err);
+      console.error('Failed to add items from AddItemsDrawer', err);
       showNotification({ title: 'Error', message: String(err), color: 'red' });
-    } finally {
-      setAddingLoading(false);
+      if (!keepOpen) setShowAddPane(false);
     }
   };
 
@@ -340,45 +330,22 @@ export default function GlobalListEditDrawer() {
     </Drawer>
     {/* Template assignments are now shown inline below as a checklist. */}
 
-    {/* Nested Drawer / Pane for Add Items */}
-    <Drawer opened={showAddPane} onClose={() => setShowAddPane(false)} position="right" size={isMobile ? '80%' : 420} padding="md" zIndex={2100}>
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-          <Text fw={700}>Add Items</Text>
-          <Group>
-            <Button variant="default" size="xs" onClick={() => setShowAddPane(false)}>Cancel</Button>
-            <Button size="xs" onClick={() => {
-              setEditTargetItem({ itemId: null, name: '' });
-              setItemDrawerDefaultMember(undefined);
-              setShowEditItemDrawer(true);
-            }}>New Item</Button>
-            <Button size="xs" onClick={applyAddItems} loading={addingLoading}>Apply</Button>
-          </Group>
-        </div>
-        <div style={{ overflow: 'auto' }}>
-          {allItems.length === 0 ? (
-            <Text c="dimmed">No additional items available</Text>
-          ) : (
-            <div>
-              {allItems.map(it => (
-                <div key={it.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 0' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <Checkbox checked={selectedToAdd.includes(it.id)} onChange={(e) => {
-                      const checked = e.currentTarget.checked;
-                      setSelectedToAdd(prev => checked ? [...prev, it.id] : prev.filter(x => x !== it.id));
-                    }} />
-                    <div>
-                      <Text style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{it.name}</Text>
-                      <Text size="xs" c="dimmed">{it.description || ''}</Text>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    </Drawer>
+    {/* Use shared AddItemsDrawer for adding items to this list */}
+    <AddItemsDrawer
+      opened={showAddPane}
+      onClose={() => { setShowAddPane(false); setAddPaneFamilyId(null); }}
+      familyId={addPaneFamilyId}
+      excludedItemIds={editItems.map(e => e.itemId).filter(Boolean)}
+      onApply={async (ids: string[], keepOpen?: boolean) => {
+        await handleAddItemsFromDrawer(ids, keepOpen);
+      }}
+      title="Add Items"
+      showIsOneOffCheckbox={true}
+      initialMembers={undefined}
+      initialWhole={false}
+      targetCategoryId={undefined}
+      promoteContext={listId ? { listId: listId, packingListItemId: undefined } : null}
+    />
 
     <ItemEditDrawer
       opened={showEditItemDrawer}
@@ -394,17 +361,10 @@ export default function GlobalListEditDrawer() {
       onSaved={async (payload) => {
         try {
           if (payload && (payload as any).id && showAddPane && listId) {
-            try { await addItemToPackingList(listId, (payload as any).id); showNotification({ title: 'Added', message: 'New item added to the packing list', color: 'green' }); } catch (addErr) { console.error('Failed to auto-add created item', addErr); }
-          }
-          if (showAddPane) {
             try {
-              const profile = await getCurrentUserProfile();
-              const fid = profile.response.ok && profile.data.family ? profile.data.family.id : null;
-              if (fid) {
-                const res = await getItems(fid);
-                if (res.response.ok) setAllItems((res.data.items || []).filter((it: any) => !new Set(editItems.map(e => e.itemId).filter(Boolean)).has(it.id)));
-              }
-            } catch (e) {}
+              await handleAddItemsFromDrawer([(payload as any).id], true);
+              showNotification({ title: 'Added', message: 'New item added to the packing list', color: 'green' });
+            } catch (addErr) { console.error('Failed to auto-add created item', addErr); }
           }
           // refresh main list items
           if (listId) {
