@@ -524,9 +524,25 @@ router.put('/packing-lists/:id', authMiddleware, async (req: Request, res: Respo
     // If templateIds provided, persist assignments. Optionally remove associated items for removed templates.
     if (Array.isArray(updates.templateIds)) {
       const removeItemsFlag = !!updates.removeItemsForRemovedTemplates;
+      console.log('[PUT /packing-lists/:id] Template update for list', id, '- templateIds:', updates.templateIds, 'removeItemsFlag:', removeItemsFlag);
+      
+      // Get previous template assignments to determine what changed
+      const previousTemplateIds = await packingListRepo.getTemplatesForPackingList(id);
       await packingListRepo.setTemplatesForPackingList(id, updates.templateIds, removeItemsFlag);
-      // enqueue propagation for each assigned template
+      
+      // Reconcile items for newly added templates (synchronously so UI gets updated items)
+      const addedTemplates = updates.templateIds.filter((tid: string) => !previousTemplateIds.includes(tid));
+      for (const tid of addedTemplates) {
+        try {
+          await packingListRepo.reconcilePackingListAgainstTemplate(id, tid);
+        } catch (err) {
+          console.error('Error reconciling newly assigned template', { listId: id, templateId: tid, err });
+        }
+      }
+      
+      // Enqueue background propagation for any other lists using these templates
       for (const tid of updates.templateIds) propagateTemplateToAssignedLists(tid);
+      
       // remove template-related flags from updates passed to generic update
       delete updates.templateIds;
       delete updates.removeItemsForRemovedTemplates;

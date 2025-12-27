@@ -20,7 +20,7 @@ import { useActivePackingList } from '../contexts/ActivePackingListContext';
 import { useListEditDrawer } from '../contexts/ListEditDrawerContext';
 import ItemEditDrawer from './ItemEditDrawer';
 import AddItemsDrawer from './AddItemsDrawer';
-import EditPackingListDrawer from './EditPackingListDrawer';
+
 export default function ManagePackingLists() {
   const [familyId, setFamilyId] = useState<string | null>(null);
   const { impersonatingFamilyId } = useImpersonation();

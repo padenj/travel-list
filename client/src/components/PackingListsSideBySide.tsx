@@ -18,23 +18,14 @@ export interface PackingListProps {
   familyId?: string | null;
   onRefresh?: () => void;
   currentUserId?: string | null;
-  currentUserId?: string | null;
 }
 
 const ItemLabel: React.FC<{ text: string; checked?: boolean }> = ({ text, checked }) => {
   const theme = useMantineTheme();
-  const checkedColor = theme.colorScheme === 'dark' ? theme.colors.dark[2] : theme.colors.gray[6];
+  const checkedColor = theme.colors.gray[6];
   return (
     <span style={{ fontSize: 13, lineHeight: '1.2', display: 'block', whiteSpace: 'normal', wordBreak: 'break-word', flex: 1, minWidth: 0, color: checked ? checkedColor : undefined }}>{text}</span>
-    <span style={{ fontSize: 13, lineHeight: '1.2', display: 'block', whiteSpace: 'normal', wordBreak: 'break-word', flex: 1, minWidth: 0, color: checked ? checkedColor : undefined }}>{text}</span>
   );
-};
-
-// Helper: sort items alphabetically using display_name when present, otherwise name
-const sortByName = (a: any, b: any) => {
-  const an = (a && (a.display_name || a.name)) || '';
-  const bn = (b && (b.display_name || b.name)) || '';
-  return String(an).localeCompare(String(bn));
 };
 
 // Helper: sort items alphabetically using display_name when present, otherwise name
@@ -47,7 +38,6 @@ const sortByName = (a: any, b: any) => {
 const ItemRow: React.FC<{ checked: boolean; onChange: (checked: boolean) => void; label: string; disabled?: boolean; onToggleNotNeeded?: () => void; onEdit?: () => void }> = React.memo(({ checked, onChange, label, disabled, onToggleNotNeeded, onEdit }) => {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0', minWidth: 0 }}>
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0', minWidth: 0 }}>
       <Checkbox
         checked={checked}
         onChange={(e) => onChange(e.target.checked)}
@@ -55,9 +45,6 @@ const ItemRow: React.FC<{ checked: boolean; onChange: (checked: boolean) => void
         aria-label={label}
         disabled={disabled}
       />
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0 }}>
-        <ItemLabel text={label} checked={checked} />
-      </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0 }}>
         <ItemLabel text={label} checked={checked} />
       </div>
@@ -78,7 +65,6 @@ const ItemRow: React.FC<{ checked: boolean; onChange: (checked: boolean) => void
 // Fixed column width (px) used for all columns so they render equal widths
 const COLUMN_WIDTH = 203;
 
-export function PackingListsSideBySide({ userLists, wholeFamilyItems, onCheckItem, notNeededByUser = {}, notNeededWhole = [], onToggleNotNeeded, onOpenAddDrawer, showWhole = true, activeListId, familyId, onRefresh, currentUserId }: PackingListProps) {
 export function PackingListsSideBySide({ userLists, wholeFamilyItems, onCheckItem, notNeededByUser = {}, notNeededWhole = [], onToggleNotNeeded, onOpenAddDrawer, showWhole = true, activeListId, familyId, onRefresh, currentUserId }: PackingListProps) {
 
   // Measure available viewport height from the top of this component down to

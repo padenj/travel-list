@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { Drawer, Group, Text, ActionIcon, Button, Tooltip, Checkbox, Modal } from '@mantine/core';
+import { Drawer, Group, Text, ActionIcon, Button, Tooltip, Checkbox, Modal, Badge } from '@mantine/core';
 import { IconEdit, IconLayersOff, IconCheck } from '@tabler/icons-react';
 import { useListEditDrawer } from '../contexts/ListEditDrawerContext';
 import { useActivePackingList } from '../contexts/ActivePackingListContext';
@@ -30,6 +30,7 @@ export default function GlobalListEditDrawer() {
   const [editTargetItem, setEditTargetItem] = useState<any | null>(null);
   const [removalConfirmOpen, setRemovalConfirmOpen] = useState(false);
   const [removalLoading, setRemovalLoading] = useState(false);
+  const [pendingRemovalTemplateIds, setPendingRemovalTemplateIds] = useState<string[] | null>(null);
 
   useEffect(() => {
     if (!isOpen || !listId) return;
@@ -191,11 +192,11 @@ export default function GlobalListEditDrawer() {
                                 <Text component="span" size="xs" c="dimmed">{` - ${it.whole_family ? 'Whole Family' : (it.members && it.members.length ? it.members.map((m: any) => m.name || m.username).join(', ') : 'Unassigned')}`}</Text>
                               </Text>
                             </div>
-                            {it.oneOff ? <div style={{ padding: '2px 6px', background: '#eee', borderRadius: 4, fontSize: 12 }}>One-off</div> : null}
+                            {it.oneOff ? <Badge color="gray" size="xs">One-off</Badge> : null}
                             {Array.isArray(it.template_ids) && it.template_ids.length > 0 ? (
-                              <Tooltip label="From item group" withArrow>
-                                <ActionIcon size="xs" variant="transparent"><IconLayersOff size={14} /></ActionIcon>
-                              </Tooltip>
+                              <Badge color="blue" size="xs" variant="light">
+                                {it.template_ids.map((tid: string) => templates.find((t: any) => t.id === tid)?.name || 'Item group').join(', ')}
+                              </Badge>
                             ) : null}
                           </div>
                           <div style={{ flex: '0 0 auto', marginLeft: 12 }}>
@@ -227,14 +228,20 @@ export default function GlobalListEditDrawer() {
                         <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0' }}>
                           <Checkbox checked={checked} onChange={async (e) => {
                             const on = e.currentTarget.checked;
-                            setEditAssignedTemplates(prev => on ? [...prev, t.id] : prev.filter(x => x !== t.id));
+                            const newTemplateIds = on ? Array.from(new Set([...(editAssignedTemplates || []), t.id])) : (editAssignedTemplates || []).filter(x => x !== t.id);
+                            
+                            if (!on) {
+                              // User is unchecking - ask about item removal
+                              setPendingRemovalTemplateIds(newTemplateIds);
+                              setEditAssignedTemplates(newTemplateIds); // Optimistic update
+                              setRemovalConfirmOpen(true);
+                              return;
+                            }
+                            
+                            // User is checking - add template immediately
+                            setEditAssignedTemplates(newTemplateIds); // Optimistic update
                             try {
-                              const newTemplateIds = on ? Array.from(new Set([...(editAssignedTemplates || []), t.id])) : (editAssignedTemplates || []).filter(x => x !== t.id);
                               const payload: any = { templateIds: newTemplateIds };
-                              if (!on) {
-                                setRemovalConfirmOpen(true);
-                                return;
-                              }
                               const res = await updatePackingList(listId || '', payload);
                               if (res.response.ok) {
                                 showNotification({ title: 'Saved', message: 'Item group assignments updated', color: 'green' });
@@ -242,10 +249,14 @@ export default function GlobalListEditDrawer() {
                                 if (r.response.ok) setEditItems((r.data.items || []).map((it: any) => ({ ...it, itemId: it.item_id, oneOff: !!it.master_is_one_off, whole_family: !!it.whole_family })));
                               } else {
                                 showNotification({ title: 'Failed', message: 'Could not update assignments', color: 'red' });
+                                // Revert on failure
+                                setEditAssignedTemplates(prev => prev.filter(x => x !== t.id));
                               }
                             } catch (err) {
                               console.error('Failed to update template assignment', err);
                               showNotification({ title: 'Failed', message: 'Could not update assignments', color: 'red' });
+                              // Revert on failure
+                              setEditAssignedTemplates(prev => prev.filter(x => x !== t.id));
                             }
                           }} />
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -341,12 +352,72 @@ export default function GlobalListEditDrawer() {
         promoteContext={editTargetItem && !editTargetItem.itemId ? { listId: listId || '', packingListItemId: editTargetItem.id } : null}
       />
 
-      <Modal opened={removalConfirmOpen} onClose={() => setRemovalConfirmOpen(false)} title={'Remove items?'}>
+      <Modal opened={removalConfirmOpen} onClose={() => {
+        // User closed without choosing - revert template removal
+        setRemovalConfirmOpen(false);
+        setEditAssignedTemplates(prev => {
+          if (!listId) return prev;
+          // Revert to server state
+          return prev; // Keep current state since we don't have easy access to server state here
+        });
+        setPendingRemovalTemplateIds(null);
+      }} title={'Remove items?'}>
         <div>
           <Text size="sm">Do you also want to remove items that were added solely because of this item group?</Text>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
-            <Button variant="default" onClick={() => setRemovalConfirmOpen(false)} disabled={removalLoading}>Keep Items</Button>
-            <Button color="red" onClick={async () => { setRemovalConfirmOpen(false); }} loading={removalLoading}>Remove Items</Button>
+            <Button variant="default" onClick={async () => {
+              // Keep items - just update template assignment
+              setRemovalLoading(true);
+              try {
+                const payload: any = { templateIds: pendingRemovalTemplateIds || [] };
+                const res = await updatePackingList(listId || '', payload);
+                if (res.response.ok) {
+                  showNotification({ title: 'Saved', message: 'Item group removed, items kept', color: 'green' });
+                  const r = await getPackingList(listId || '');
+                  if (r.response.ok) {
+                    setEditItems((r.data.items || []).map((it: any) => ({ ...it, itemId: it.item_id, oneOff: !!it.master_is_one_off, whole_family: !!it.whole_family })));
+                    setEditAssignedTemplates(Array.isArray(r.data.template_ids) ? r.data.template_ids : []);
+                  }
+                } else {
+                  showNotification({ title: 'Failed', message: 'Could not update assignments', color: 'red' });
+                }
+              } catch (err) {
+                console.error('Failed to update template assignment', err);
+                showNotification({ title: 'Failed', message: 'Could not update assignments', color: 'red' });
+              } finally {
+                setRemovalLoading(false);
+                setRemovalConfirmOpen(false);
+                setPendingRemovalTemplateIds(null);
+              }
+            }} disabled={removalLoading}>Keep Items</Button>
+            <Button color="red" onClick={async () => {
+              // Remove items - update template assignment with removeItemsForRemovedTemplates flag
+              setRemovalLoading(true);
+              try {
+                const payload: any = { 
+                  templateIds: pendingRemovalTemplateIds || [],
+                  removeItemsForRemovedTemplates: true
+                };
+                const res = await updatePackingList(listId || '', payload);
+                if (res.response.ok) {
+                  showNotification({ title: 'Saved', message: 'Item group and associated items removed', color: 'green' });
+                  const r = await getPackingList(listId || '');
+                  if (r.response.ok) {
+                    setEditItems((r.data.items || []).map((it: any) => ({ ...it, itemId: it.item_id, oneOff: !!it.master_is_one_off, whole_family: !!it.whole_family })));
+                    setEditAssignedTemplates(Array.isArray(r.data.template_ids) ? r.data.template_ids : []);
+                  }
+                } else {
+                  showNotification({ title: 'Failed', message: 'Could not update assignments', color: 'red' });
+                }
+              } catch (err) {
+                console.error('Failed to update template assignment', err);
+                showNotification({ title: 'Failed', message: 'Could not update assignments', color: 'red' });
+              } finally {
+                setRemovalLoading(false);
+                setRemovalConfirmOpen(false);
+                setPendingRemovalTemplateIds(null);
+              }
+            }} loading={removalLoading}>Remove Items</Button>
           </div>
         </div>
       </Modal>

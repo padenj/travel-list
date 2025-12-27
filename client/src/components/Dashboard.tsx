@@ -7,7 +7,6 @@ import { IconPlus } from '@tabler/icons-react';
 import { PackingListsSideBySide } from './PackingListsSideBySide';
 import ItemEditDrawer from './ItemEditDrawer';
 import AddItemsDrawer from './AddItemsDrawer';
-import EditPackingListDrawer from './EditPackingListDrawer';
 import { useActivePackingList } from '../contexts/ActivePackingListContext';
 import { useListEditDrawer } from '../contexts/ListEditDrawerContext';
 import { useImpersonation } from '../contexts/ImpersonationContext';
