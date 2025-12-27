@@ -282,10 +282,28 @@ export class ItemRepository {
     return cat ? [cat] : [];
   }
 
-  async getItemsForCategory(category_id: string): Promise<Item[]> {
+  async getItemsForCategory(category_id: string): Promise<any[]> {
     const db = await getDb();
     // Select items whose categoryId matches
-    return db.all(`SELECT * FROM items WHERE categoryId = ? AND deleted_at IS NULL`, [category_id]);
+    const items: Item[] = await db.all(`SELECT * FROM items WHERE categoryId = ? AND deleted_at IS NULL`, [category_id]);
+    // For each item, fetch member IDs and whole family assignment
+    const result = [];
+    for (const item of items) {
+      // Check if assigned to whole family
+      const wholeRow = await db.get(`SELECT 1 FROM item_whole_family WHERE item_id = ?`, [item.id]);
+      let memberIds: string[] = [];
+      if (!wholeRow) {
+        // Only fetch member assignments if not assigned to whole family
+        const memberRows = await db.all(`SELECT member_id FROM item_members WHERE item_id = ?`, [item.id]);
+        memberIds = memberRows.map((r: any) => r.member_id).filter(Boolean);
+      }
+      result.push({
+        ...item,
+        memberIds,
+        wholeFamily: !!wholeRow,
+      });
+    }
+    return result;
   }
 
   async getMembersForItem(item_id: string): Promise<User[]> {
@@ -467,6 +485,47 @@ export class ItemRepository {
     async findAll(family_id: string): Promise<PackingList[]> {
       const db = await getDb();
       return db.all(`SELECT * FROM packing_lists WHERE family_id = ? AND deleted_at IS NULL ORDER BY created_at DESC`, [family_id]);
+    }
+
+    // Get member IDs that are selected for a packing list (lightweight)
+    async getMemberIdsForPackingList(packing_list_id: string): Promise<string[]> {
+      const db = await getDb();
+      const rows: any[] = await db.all(`SELECT member_id FROM packing_list_members WHERE packing_list_id = ?`, [packing_list_id]);
+      return rows.map(r => r.member_id).filter(Boolean);
+    }
+
+    // Set the selected member IDs for a packing list. Validates members belong to the list's family.
+    async setMemberIdsForPackingList(packing_list_id: string, memberIds: string[]): Promise<void> {
+      const db = await getDb();
+      // Validate packing list exists and get family_id
+      const pl: any = await db.get(`SELECT family_id FROM packing_lists WHERE id = ? AND deleted_at IS NULL`, [packing_list_id]);
+      if (!pl) throw new Error('Packing list not found');
+      const familyId = pl.family_id;
+
+      // Validate that all memberIds belong to the same family
+      if (Array.isArray(memberIds) && memberIds.length > 0) {
+        const placeholders = memberIds.map(() => '?').join(',');
+        const rows: any[] = await db.all(`SELECT id FROM users WHERE id IN (${placeholders}) AND familyId = ? AND deleted_at IS NULL`, [...memberIds, familyId]);
+        const foundIds = new Set(rows.map(r => r.id));
+        const invalid = memberIds.filter(m => !foundIds.has(m));
+        if (invalid.length > 0) throw new Error('One or more memberIds are invalid for this family');
+      }
+
+      // Perform replace inside a transaction
+      try {
+        await db.run('BEGIN TRANSACTION');
+        // Delete existing rows
+        await db.run(`DELETE FROM packing_list_members WHERE packing_list_id = ?`, [packing_list_id]);
+        if (Array.isArray(memberIds) && memberIds.length > 0) {
+          for (const m of memberIds) {
+            await db.run(`INSERT OR IGNORE INTO packing_list_members (packing_list_id, member_id) VALUES (?, ?)`, [packing_list_id, m]);
+          }
+        }
+        await db.run('COMMIT');
+      } catch (err) {
+        try { await db.run('ROLLBACK'); } catch (e) {}
+        throw err;
+      }
     }
 
     async update(id: string, updates: Partial<PackingList>): Promise<PackingList | undefined> {

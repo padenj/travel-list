@@ -383,6 +383,7 @@ router.get('/categories/:categoryId/items', authMiddleware, async (req: Request,
   const { categoryId } = req.params;
   try {
     const items = await itemRepo.getItemsForCategory(categoryId);
+    // For each item, if wholeFamily is true, memberIds should be empty (already handled in repo)
     return res.json({ items });
   } catch (error) {
     console.error('Error fetching category items:', error);
@@ -422,7 +423,13 @@ router.get('/families/:familyId/packing-lists', authMiddleware, familyAccessMidd
   const { familyId } = req.params;
   try {
     const lists = await packingListRepo.findAll(familyId);
-    return res.json({ lists });
+    // Attach member_ids for each list to keep responses lightweight
+    const listsWithMembers = [] as any[];
+    for (const l of lists) {
+      const memberIds = await packingListRepo.getMemberIdsForPackingList(l.id);
+      listsWithMembers.push({ ...l, member_ids: memberIds });
+    }
+    return res.json({ lists: listsWithMembers });
   } catch (error) {
     console.error('Error fetching packing lists:', error);
     return res.status(500).json({ error: 'Failed to fetch packing lists' });
@@ -432,10 +439,21 @@ router.get('/families/:familyId/packing-lists', authMiddleware, familyAccessMidd
 // Create a new packing list for a family (optionally populate from template)
 router.post('/families/:familyId/packing-lists', authMiddleware, familyAccessMiddleware('familyId'), async (req: Request, res: Response) => {
   const { familyId } = req.params;
-  const { name, templateId, includeTemplateAssignments = true } = req.body;
+  const { name, templateId, includeTemplateAssignments = true, memberIds } = req.body;
   if (!name || name.trim() === '') return res.status(400).json({ error: 'Name is required' });
   try {
     const newList = await packingListRepo.create({ id: uuidv4(), family_id: familyId, name: name.trim(), created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
+    // Persist member selection: if not provided, default to all current family members
+    if (!Array.isArray(memberIds) || memberIds.length === 0) {
+      // fetch current family members
+      const familyMembers = await userRepo.findByFamilyId(familyId);
+      const ids = familyMembers.map(m => m.id);
+      await packingListRepo.setMemberIdsForPackingList(newList.id, ids);
+      newList.member_ids = ids;
+    } else {
+      await packingListRepo.setMemberIdsForPackingList(newList.id, memberIds);
+      newList.member_ids = memberIds;
+    }
     if (templateId) {
       // record assignment and reconcile immediately for newly created list
       await packingListRepo.setTemplatesForPackingList(newList.id, [templateId]);
@@ -466,6 +484,9 @@ router.get('/packing-lists/:id', authMiddleware, async (req: Request, res: Respo
     // Intentionally not logging list contents to avoid noisy server logs in production
   // Also include any template assignments for this packing list so the UI can display them
   const templateIds = await packingListRepo.getTemplatesForPackingList(id);
+  // Attach member_ids to the returned list for client consumption
+  const memberIds = await packingListRepo.getMemberIdsForPackingList(id);
+  (list as any).member_ids = memberIds;
   return res.json({ list, items: sanitizedItems, checks, not_needed_rows: notNeededRows, template_ids: templateIds });
   } catch (error) {
     console.error('Error fetching packing list:', error);
@@ -503,12 +524,38 @@ router.put('/packing-lists/:id', authMiddleware, async (req: Request, res: Respo
     // If templateIds provided, persist assignments. Optionally remove associated items for removed templates.
     if (Array.isArray(updates.templateIds)) {
       const removeItemsFlag = !!updates.removeItemsForRemovedTemplates;
+      console.log('[PUT /packing-lists/:id] Template update for list', id, '- templateIds:', updates.templateIds, 'removeItemsFlag:', removeItemsFlag);
+      
+      // Get previous template assignments to determine what changed
+      const previousTemplateIds = await packingListRepo.getTemplatesForPackingList(id);
       await packingListRepo.setTemplatesForPackingList(id, updates.templateIds, removeItemsFlag);
-      // enqueue propagation for each assigned template
+      
+      // Reconcile items for newly added templates (synchronously so UI gets updated items)
+      const addedTemplates = updates.templateIds.filter((tid: string) => !previousTemplateIds.includes(tid));
+      for (const tid of addedTemplates) {
+        try {
+          await packingListRepo.reconcilePackingListAgainstTemplate(id, tid);
+        } catch (err) {
+          console.error('Error reconciling newly assigned template', { listId: id, templateId: tid, err });
+        }
+      }
+      
+      // Enqueue background propagation for any other lists using these templates
       for (const tid of updates.templateIds) propagateTemplateToAssignedLists(tid);
+      
       // remove template-related flags from updates passed to generic update
       delete updates.templateIds;
       delete updates.removeItemsForRemovedTemplates;
+    }
+    // Persist memberIds if provided
+    if (Array.isArray(updates.memberIds)) {
+      try {
+        await packingListRepo.setMemberIdsForPackingList(id, updates.memberIds);
+      } catch (e) {
+        return res.status(400).json({ error: 'Invalid memberIds for this packing list' });
+      }
+      // reflect member_ids on returned list
+      delete updates.memberIds;
     }
     const updated = await packingListRepo.update(id, updates);
     return res.json({ list: updated });
@@ -1145,7 +1192,15 @@ if (!isTestEnv) {
         itemRepo.isAssignedToWholeFamily(itemId),
       ]);
 
-      return res.json({ item, categories, itemCategories, members, itemMembers, wholeAssigned });
+      // Compute memberIds and wholeFamily for compatibility with category item list
+      let memberIds: string[] = [];
+      if (!wholeAssigned) {
+        // Only fetch member assignments if not assigned to whole family
+        memberIds = Array.isArray(itemMembers) ? itemMembers.map((m: any) => m.id) : [];
+      }
+      const wholeFamily = !!wholeAssigned;
+
+      return res.json({ item, categories, itemCategories, members, itemMembers, wholeAssigned, memberIds, wholeFamily });
     } catch (error) {
       console.error('Error fetching edit-data for item:', error);
       return res.status(500).json({ error: 'Failed to fetch item edit data' });
@@ -1509,8 +1564,25 @@ router.delete('/users/:id', authMiddleware, async (req: Request, res: Response):
     return res.status(403).json({ error: 'Forbidden' });
   }
   const { id } = req.params;
-  await userRepo.softDelete(id);
-  return res.json({ message: 'User deleted successfully' });
+  try {
+    const db = await (await import('./db')).getDb();
+    // Check dependent joins that would be affected by deleting this user
+    const itemMembersRow: any = await db.get(`SELECT COUNT(1) as cnt FROM item_members WHERE member_id = ?`, [id]);
+    const packingListMembersRow: any = await db.get(`SELECT COUNT(1) as cnt FROM packing_list_members WHERE member_id = ?`, [id]);
+    const checksRow: any = await db.get(`SELECT COUNT(1) as cnt FROM packing_list_item_checks WHERE member_id = ?`, [id]);
+    const deps = [] as string[];
+    if ((itemMembersRow && (itemMembersRow.cnt || itemMembersRow['COUNT(1)'] || 0) > 0)) deps.push('item assignments');
+    if ((packingListMembersRow && (packingListMembersRow.cnt || packingListMembersRow['COUNT(1)'] || 0) > 0)) deps.push('packing list memberships');
+    if ((checksRow && (checksRow.cnt || checksRow['COUNT(1)'] || 0) > 0)) deps.push('item check records');
+    if (deps.length > 0) {
+      return res.status(409).json({ error: 'User has dependent data', message: `User cannot be deleted because of related: ${deps.join(', ')}.` });
+    }
+    await userRepo.softDelete(id);
+    return res.json({ message: 'User deleted successfully' });
+  } catch (err) {
+    console.error('Error deleting user:', err);
+    return res.status(500).json({ error: 'Failed to delete user' });
+  }
 });
 
 // Get all families (SystemAdmin only)

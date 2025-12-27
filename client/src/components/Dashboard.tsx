@@ -7,7 +7,6 @@ import { IconPlus } from '@tabler/icons-react';
 import { PackingListsSideBySide } from './PackingListsSideBySide';
 import ItemEditDrawer from './ItemEditDrawer';
 import AddItemsDrawer from './AddItemsDrawer';
-import EditPackingListDrawer from './EditPackingListDrawer';
 import { useActivePackingList } from '../contexts/ActivePackingListContext';
 import { useListEditDrawer } from '../contexts/ListEditDrawerContext';
 import { useImpersonation } from '../contexts/ImpersonationContext';
@@ -123,6 +122,9 @@ export default function Dashboard(): React.ReactElement {
   const listItems = listRes.data.items || [];
         const checks = listRes.data.checks || [];
 
+        // Extract per-list member selection (if present) and apply it to effectiveMembers
+        const listMemberIds: string[] = Array.isArray(listRes.data.list?.member_ids) ? listRes.data.list.member_ids : (Array.isArray(listRes.data.member_ids) ? listRes.data.member_ids : []);
+
         // If we couldn't obtain members via the profile/family fetch (possible race or missing data
         // when impersonating), derive a member list from the packing-list rows themselves so
         // the member columns can still render. This makes the dashboard resilient to cases
@@ -138,6 +140,12 @@ export default function Dashboard(): React.ReactElement {
           effectiveMembers = Array.from(found.values());
         }
 
+        // If the list has an explicit per-list member selection, filter effectiveMembers to only those selected.
+        if (Array.isArray(listMemberIds) && listMemberIds.length > 0) {
+          const selectedSet = new Set(listMemberIds);
+          effectiveMembers = (effectiveMembers || []).filter(m => selectedSet.has(m.id));
+        }
+
         // Debug: log member data and list items when impersonating to trace missing member assignments
         if (impersonatingFamilyId) {
           try {
@@ -151,9 +159,9 @@ export default function Dashboard(): React.ReactElement {
         for (const member of effectiveMembers) {
           const memberItems: any[] = [];
           for (const pli of listItems) {
-            // if master item and assigned to this member
+            // if master item and assigned to this member (and NOT assigned to whole family)
             const assignedIds = (pli.members || []).map((m: any) => m.id);
-            if (assignedIds.includes(member.id)) {
+            if (assignedIds.includes(member.id) && !pli.whole_family) {
               const master = pli.item_id ? items.find((it: any) => it.id === pli.item_id) : null;
               // Prefer the master_name returned alongside the packing-list row (covers one-off masters
               // that are not present in the master items list), then fall back to the master lookup.

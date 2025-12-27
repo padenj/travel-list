@@ -7,10 +7,11 @@ import {
   deleteCategory,
   getItems,
   getItemsForCategory,
-  getMembersForItem,
   assignItemToCategory,
   removeItemFromCategory,
   deleteItem,
+  getFamily,
+  getCurrentUserProfile,
 } from '../api';
 import { useImpersonation } from '../contexts/ImpersonationContext';
 import { useRefresh } from '../contexts/RefreshContext';
@@ -90,6 +91,8 @@ export default function CategoryManagementPage(): React.ReactElement {
   const [items, setItems] = useState<{ id: string; name: string }[]>([]);
   const [categoryItems, setCategoryItems] = useState<{ [categoryId: string]: { id: string; name: string }[] }>({});
   const [itemMembers, setItemMembers] = useState<{ [itemId: string]: { id: string; name: string }[] }>({});
+  const [itemWholeFamily, setItemWholeFamily] = useState<{ [itemId: string]: boolean }>({});
+  const [familyMembers, setFamilyMembers] = useState<{ id: string; name: string }[]>([]);
   const [itemsInAllCategories, setItemsInAllCategories] = useState<Set<string>>(new Set());
   const [selectedTab, setSelectedTab] = useState<string | null>(null);
   const changeSelectedTab = (tab: string | null) => {
@@ -117,31 +120,36 @@ export default function CategoryManagementPage(): React.ReactElement {
   useEffect(() => {
     async function fetchData() {
       setLoading(true);
-      // prefer impersonation family id (set by SystemAdmin) otherwise load from profile
       let fid: string | null = null;
+      let members: { id: string; name: string }[] = [];
       if (impersonatingFamilyId) {
         fid = impersonatingFamilyId;
+        const famRes = await getFamily(fid);
+        if (famRes.response.ok && famRes.data.family && Array.isArray(famRes.data.family.members)) {
+          members = famRes.data.family.members;
+        }
       } else {
-        const profileRes = await import('../api').then(m => m.getCurrentUserProfile());
+        const profileRes = await getCurrentUserProfile();
         if (profileRes.response.ok && profileRes.data.family) {
           fid = profileRes.data.family.id;
+          if (Array.isArray(profileRes.data.family.members)) {
+            members = profileRes.data.family.members;
+          }
         }
       }
       if (fid) {
         setFamilyId(fid);
+        setFamilyMembers(members);
         const catRes = await getCategories(fid);
         if (catRes.response.ok) {
           setCategories(catRes.data.categories || []);
           if (catRes.data.categories?.length > 0) {
-            // default selected tab is first; allow query param to override
             let initial = catRes.data.categories[0].id;
             try {
               const params = new URLSearchParams(location.search);
               const open = params.get('open');
               if (open) initial = open;
-            } catch (e) {
-              // ignore
-            }
+            } catch (e) {}
             changeSelectedTab(initial);
           }
         }
@@ -155,28 +163,28 @@ export default function CategoryManagementPage(): React.ReactElement {
 
   const fetchCategoryItems = async () => {
     if (!categories.length) return;
-    const result: { [categoryId: string]: { id: string; name: string }[] } = {};
+    const result: { [categoryId: string]: { id: string; name: string; memberIds?: string[] }[] } = {};
     for (const cat of categories) {
       const res = await getItemsForCategory(cat.id);
       result[cat.id] = res.response.ok ? res.data.items || [] : [];
     }
     setCategoryItems(result);
-    // fetch members for all items found across categories
-    const ids = new Set<string>();
-    for (const catId of Object.keys(result)) {
-      for (const item of result[catId] || []) ids.add(item.id);
-    }
+    // Map item IDs to member objects using familyMembers and memberIds (robust for multiple members)
     const membersMap: { [itemId: string]: { id: string; name: string }[] } = {};
-    await Promise.all(Array.from(ids).map(async (itemId) => {
-      try {
-        const mres = await getMembersForItem(itemId);
-        if (mres.response.ok) membersMap[itemId] = Array.isArray(mres.data) ? mres.data : [];
-        else membersMap[itemId] = [];
-      } catch (e) {
-        membersMap[itemId] = [];
+    const wholeFamilyMap: { [itemId: string]: boolean } = {};
+    for (const catId of Object.keys(result)) {
+      for (const item of result[catId] || []) {
+        wholeFamilyMap[item.id] = !!(item as any).wholeFamily;
+        const ids: string[] = Array.isArray(item.memberIds) ? item.memberIds.filter(Boolean) : [];
+        if (ids.length > 0 && familyMembers.length > 0) {
+          membersMap[item.id] = familyMembers.filter(m => ids.includes(m.id));
+        } else {
+          membersMap[item.id] = [];
+        }
       }
-    }));
+    }
     setItemMembers(membersMap);
+    setItemWholeFamily(wholeFamilyMap);
     // compute items that appear in every category (treat these as virtual 'All' items)
     const counts: Record<string, number> = {};
     const categoryCount = categories.length;
@@ -434,9 +442,11 @@ export default function CategoryManagementPage(): React.ReactElement {
                                 )}
                                 <div>
                                   <Text>{item.name}</Text>
-                                  {itemMembers[item.id] && itemMembers[item.id].length > 0 && (
+                                  {itemWholeFamily[item.id] ? (
+                                    <Text c="dimmed" size="sm">Whole family</Text>
+                                  ) : Array.isArray(itemMembers[item.id]) && itemMembers[item.id].length > 0 ? (
                                     <Text c="dimmed" size="sm">{itemMembers[item.id].map((m: any) => m.name).join(', ')}</Text>
-                                  )}
+                                  ) : null}
                                 </div>
                               </div>
                               <div className="tl-item-right">

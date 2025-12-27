@@ -22,7 +22,7 @@ export interface PackingListProps {
 
 const ItemLabel: React.FC<{ text: string; checked?: boolean }> = ({ text, checked }) => {
   const theme = useMantineTheme();
-  const checkedColor = theme.colorScheme === 'dark' ? theme.colors.dark[2] : theme.colors.gray[6];
+  const checkedColor = theme.colors.gray[6];
   return (
     <span style={{ fontSize: 13, lineHeight: '1.2', display: 'block', whiteSpace: 'normal', wordBreak: 'break-word', flex: 1, minWidth: 0, color: checked ? checkedColor : undefined }}>{text}</span>
   );
@@ -83,6 +83,9 @@ export function PackingListsSideBySide({ userLists, wholeFamilyItems, onCheckIte
   const [categories, setCategories] = useState<any[]>([]);
   const [collapsedColumns, setCollapsedColumns] = useState<Record<string, boolean>>({});
 
+  // Defensive: ensure we always operate on an array even if caller passes undefined
+  const safeUserLists = Array.isArray(userLists) ? userLists : [];
+
   const toggleCollapse = (key: string) => {
     setCollapsedColumns(prev => ({ ...prev, [key]: !prev[key] }));
   };
@@ -109,7 +112,7 @@ export function PackingListsSideBySide({ userLists, wholeFamilyItems, onCheckIte
     // Consider only columns that are rendered (whole if showWhole)
     const keys: string[] = [];
     if (showWhole) keys.push('whole');
-    for (const l of userLists) keys.push(l.userId);
+    for (const l of safeUserLists) keys.push(l.userId);
     return keys.length > 0 && keys.every(k => !!collapsedColumns[k]);
   }, [collapsedColumns, userLists, showWhole]);
 
@@ -130,6 +133,7 @@ export function PackingListsSideBySide({ userLists, wholeFamilyItems, onCheckIte
     const pad = 12;
     return Math.max(28, Math.ceil(maxW + pad));
   }, [userLists, showWhole]);
+
 
   // Load family categories so we can render lists grouped by the configured category order
   useEffect(() => {
@@ -399,10 +403,10 @@ export function PackingListsSideBySide({ userLists, wholeFamilyItems, onCheckIte
 
   // Reorder user lists: put currentUserId first (if present), then Whole Family, then remaining users in provided order
   const orderedUserLists = (() => {
-    if (!currentUserId) return userLists || [];
-    const idx = (userLists || []).findIndex(l => l.userId === currentUserId);
-    if (idx === -1) return userLists || [];
-    const copy = (userLists || []).slice();
+    if (!currentUserId) return safeUserLists;
+    const idx = safeUserLists.findIndex(l => l.userId === currentUserId);
+    if (idx === -1) return safeUserLists;
+    const copy = safeUserLists.slice();
     const me = copy.splice(idx, 1)[0];
     return [me, ...copy];
   })();

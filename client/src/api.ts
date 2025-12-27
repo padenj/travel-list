@@ -159,10 +159,13 @@ export const setChecked = async (itemId: string, checked: boolean): Promise<ApiR
     return authenticatedApiCall(`/families/${familyId}/packing-lists`);
   };
 
-  export const createPackingList = async (familyId: string, name: string, templateId?: string): Promise<ApiResponse> => {
+  export const createPackingList = async (familyId: string, name: string, templateId?: string, memberIds?: string[]): Promise<ApiResponse> => {
+    const body: any = { name };
+    if (templateId) body.templateId = templateId;
+    if (Array.isArray(memberIds) && memberIds.length > 0) body.memberIds = memberIds;
     return authenticatedApiCall(`/families/${familyId}/packing-lists`, {
       method: 'POST',
-      body: JSON.stringify({ name, templateId })
+      body: JSON.stringify(body)
     });
   };
 

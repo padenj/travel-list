@@ -20,7 +20,7 @@ import { useActivePackingList } from '../contexts/ActivePackingListContext';
 import { useListEditDrawer } from '../contexts/ListEditDrawerContext';
 import ItemEditDrawer from './ItemEditDrawer';
 import AddItemsDrawer from './AddItemsDrawer';
-import EditPackingListDrawer from './EditPackingListDrawer';
+
 export default function ManagePackingLists() {
   const [familyId, setFamilyId] = useState<string | null>(null);
   const { impersonatingFamilyId } = useImpersonation();
@@ -215,7 +215,9 @@ export default function ManagePackingLists() {
 
     setCopyLoading(true);
     try {
-      const createdRes = await createPackingList(familyId, copyName.trim());
+      // Preserve per-list member selection if available on the source
+      const sourceMemberIds: string[] | undefined = Array.isArray(copySourceList?.member_ids) ? copySourceList.member_ids : undefined;
+      const createdRes = await createPackingList(familyId, copyName.trim(), undefined, sourceMemberIds);
       if (!createdRes.response.ok || !createdRes.data || !createdRes.data.list) {
         showNotification({ title: 'Error', message: 'Failed to create list', color: 'red' });
         return;
