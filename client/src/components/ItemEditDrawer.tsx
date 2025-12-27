@@ -246,13 +246,20 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
             });
           }
           setFamilyMembers(payload.members || []);
-          const itemMems = Array.isArray(payload.itemMembers) ? payload.itemMembers : (payload.itemMembers || []);
-          const assignedFromPayload = itemMems.map((m: any) => m.id);
+          // Use memberIds and wholeFamily from API if present, fallback to previous logic
+          let assigned: string[] = [];
+          if (Array.isArray(payload.memberIds)) {
+            assigned = payload.memberIds;
+          } else {
+            const itemMems = Array.isArray(payload.itemMembers) ? payload.itemMembers : (payload.itemMembers || []);
+            assigned = itemMems.map((m: any) => m.id);
+          }
           // Prefer caller-provided initialMembers when present
-          const assigned = Array.isArray(initialMembersProp) && initialMembersProp.length > 0 ? initialMembersProp : assignedFromPayload;
-          setInitialMembers(assigned);
-          setSelectedMembers(assigned.slice());
-          const wholeAssigned = typeof initialWholeProp !== 'undefined' ? !!initialWholeProp : !!payload.wholeAssigned;
+          const finalAssigned = Array.isArray(initialMembersProp) && initialMembersProp.length > 0 ? initialMembersProp : assigned;
+          setInitialMembers(finalAssigned);
+          setSelectedMembers(finalAssigned.slice());
+          // Always use wholeFamily from API for edit mode
+          const wholeAssigned = typeof payload.wholeFamily !== 'undefined' ? !!payload.wholeFamily : (typeof payload.wholeAssigned !== 'undefined' ? !!payload.wholeAssigned : false);
           setInitialWhole(wholeAssigned);
           setSelectedWhole(wholeAssigned);
         } else {

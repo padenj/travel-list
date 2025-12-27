@@ -23,6 +23,8 @@ export default function EditPackingListDrawer({ opened, onClose, listId, initial
   const [showTemplateAssignDrawer, setShowTemplateAssignDrawer] = useState(false);
   const [templates, setTemplates] = useState<any[]>([]);
   const [editAssignedTemplates, setEditAssignedTemplates] = useState<string[]>([]);
+  const [familyMembers, setFamilyMembers] = useState<any[]>([]);
+  const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
 
   // Item edit drawer state
   const [showEditItemDrawer, setShowEditItemDrawer] = useState(false);
@@ -48,10 +50,13 @@ export default function EditPackingListDrawer({ opened, onClose, listId, initial
           return;
         }
         const listItems = res.data.items || [];
-        const normalized = (listItems || []).map((it: any) => ({ ...it, itemId: it.item_id, oneOff: !!it.master_is_one_off }));
+        const normalized = (listItems || []).map((it: any) => ({ ...it, itemId: it.item_id, oneOff: !!it.master_is_one_off, whole_family: !!it.whole_family }));
         setEditItems(normalized);
         const assigned = Array.isArray(res.data.template_ids) ? res.data.template_ids : (Array.isArray(res.data.templates) ? res.data.templates.map((t: any) => t.id) : []);
         setEditAssignedTemplates(assigned || []);
+        // load selected members for this list (server returns member_ids)
+        const memberIds = Array.isArray(res.data.list?.member_ids) ? res.data.list.member_ids : (Array.isArray(res.data.member_ids) ? res.data.member_ids : []);
+        setSelectedMemberIds(memberIds || []);
       } catch (err) {
         console.error(err);
         setEditItems([]);
@@ -67,6 +72,15 @@ export default function EditPackingListDrawer({ opened, onClose, listId, initial
       try {
         const tRes = await getTemplates(familyId);
         if (tRes.response && tRes.response.ok) setTemplates(tRes.data?.templates || []);
+        // load family members for checkbox UI
+        try {
+          const profile = await (await import('../api')).getCurrentUserProfile();
+          if (profile.response.ok && profile.data.family && Array.isArray(profile.data.family.members)) {
+            setFamilyMembers(profile.data.family.members || []);
+          } else {
+            setFamilyMembers([]);
+          }
+        } catch (e) { setFamilyMembers([]); }
       } catch (e) {
         setTemplates([]);
       }
@@ -110,7 +124,7 @@ export default function EditPackingListDrawer({ opened, onClose, listId, initial
         const res = await getPackingList(editListId);
         if (res.response.ok) {
           const listItems = res.data.items || [];
-          const normalized = (listItems || []).map((it: any) => ({ ...it, itemId: it.item_id, oneOff: !!it.master_is_one_off }));
+          const normalized = (listItems || []).map((it: any) => ({ ...it, itemId: it.item_id, oneOff: !!it.master_is_one_off, whole_family: !!it.whole_family }));
           setEditItems(normalized);
           try {
             // Notify other UI that the packing list changed
@@ -141,7 +155,7 @@ export default function EditPackingListDrawer({ opened, onClose, listId, initial
               const r = await getPackingList(editListId);
               if (r.response && r.response.ok) {
                 const listItems = r.data.items || [];
-                const normalized = (listItems || []).map((it: any) => ({ ...it, itemId: it.item_id, oneOff: !!it.master_is_one_off }));
+                const normalized = (listItems || []).map((it: any) => ({ ...it, itemId: it.item_id, oneOff: !!it.master_is_one_off, whole_family: !!it.whole_family }));
                 setEditItems(normalized);
               }
             } catch (e) { /* ignore */ }
@@ -181,7 +195,7 @@ export default function EditPackingListDrawer({ opened, onClose, listId, initial
           const r = await getPackingList(editListId);
           if (r.response && r.response.ok) {
             const listItems = r.data.items || [];
-            const normalized = (listItems || []).map((it: any) => ({ ...it, itemId: it.item_id, oneOff: !!it.master_is_one_off }));
+            const normalized = (listItems || []).map((it: any) => ({ ...it, itemId: it.item_id, oneOff: !!it.master_is_one_off, whole_family: !!it.whole_family }));
             setEditItems(normalized);
             
           }
@@ -194,7 +208,10 @@ export default function EditPackingListDrawer({ opened, onClose, listId, initial
         showNotification({ title: 'Error', message: 'Failed to remove item', color: 'red' });
         try {
           const r = await getPackingList(editListId);
-          if (r.response && r.response.ok) setEditItems(r.data.items || []);
+          if (r.response && r.response.ok) {
+            const normalized = (r.data.items || []).map((it: any) => ({ ...it, itemId: it.item_id, oneOff: !!it.master_is_one_off, whole_family: !!it.whole_family }));
+            setEditItems(normalized);
+          }
         } catch (e) {
           // swallow
         }
@@ -205,7 +222,10 @@ export default function EditPackingListDrawer({ opened, onClose, listId, initial
       // attempt to re-sync
       try {
         const r = await getPackingList(editListId);
-        if (r.response && r.response.ok) setEditItems(r.data.items || []);
+        if (r.response && r.response.ok) {
+          const normalized = (r.data.items || []).map((it: any) => ({ ...it, itemId: it.item_id, oneOff: !!it.master_is_one_off, whole_family: !!it.whole_family }));
+          setEditItems(normalized);
+        }
       } catch (e) {
         // swallow
       }
@@ -229,8 +249,37 @@ export default function EditPackingListDrawer({ opened, onClose, listId, initial
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, justifyContent: 'center' }}>
             <Button onClick={() => { setEditAssignedTemplates(editAssignedTemplates ? [...editAssignedTemplates] : []); setShowTemplateAssignDrawer(true); }} size="xs">Manage Item Group Assignments</Button>
             <Button onClick={() => setShowAddPane(true)} disabled={editLoading} size="xs">Add Items</Button>
+            <Button onClick={async () => {
+              if (!editListId) return;
+              try {
+                const res = await (await import('../api')).updatePackingList(editListId, { memberIds: selectedMemberIds });
+                if (res.response.ok) showNotification({ title: 'Saved', message: 'Member selection saved', color: 'green' });
+                else showNotification({ title: 'Failed', message: 'Could not save member selection', color: 'red' });
+              } catch (e) {
+                showNotification({ title: 'Failed', message: 'Could not save member selection', color: 'red' });
+              }
+            }} size="xs">Save Members</Button>
           </div>
           <div />
+        </div>
+
+        {/* Member selection checkboxes */}
+        <div style={{ marginBottom: 12 }}>
+          <Text mb="xs">List Members</Text>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {familyMembers.length === 0 ? <Text c="dimmed">No family members</Text> : familyMembers.map(m => {
+              const checked = selectedMemberIds.includes(m.id);
+              return (
+                <label key={m.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  <input type="checkbox" checked={checked} onChange={(e) => {
+                    const next = e.currentTarget.checked ? [...selectedMemberIds, m.id] : selectedMemberIds.filter(id => id !== m.id);
+                    setSelectedMemberIds(next);
+                  }} />
+                  <span>{m.name || m.username}</span>
+                </label>
+              );
+            })}
+          </div>
         </div>
 
         {editAssignedTemplates.length > 0 && (
@@ -243,12 +292,23 @@ export default function EditPackingListDrawer({ opened, onClose, listId, initial
         )}
 
         <div style={{ flex: 1, overflow: 'auto' }}>
-          {editItems.length === 0 ? (
+          { (editItems || []).length === 0 ? (
             <Text c="dimmed">No items in this list</Text>
           ) : (
             (() => {
+              // Filter items: if an item has members and all of them are deselected in the packing list,
+              // hide that item. Always keep whole-family items.
+              const selectedSet = new Set(selectedMemberIds || []);
+              const visibleItems = (editItems || []).filter((it: any) => {
+                if (it.whole_family) return true;
+                const memberIds = (it.members || []).map((m: any) => m.id).filter(Boolean);
+                if (memberIds.length === 0) return true; // unassigned items remain visible
+                // If any assigned member is selected for this list, show the item
+                return memberIds.some((mid: string) => selectedSet.has(mid));
+              });
+
               const groups: Record<string, any[]> = {};
-              for (const it of editItems) {
+              for (const it of visibleItems) {
                 const catName = it.category && it.category.name ? it.category.name : 'Uncategorized';
                 const isOneOff = (() => {
                   if (typeof it.master_is_one_off !== 'undefined') return !!it.master_is_one_off;
@@ -278,7 +338,9 @@ export default function EditPackingListDrawer({ opened, onClose, listId, initial
                           </div>
                           {it.oneOff ? <Badge color="gray" size="xs">One-off</Badge> : null}
                           {Array.isArray(it.template_ids) && it.template_ids.length > 0 ? (
-                            <ActionIcon size="xs" variant="transparent"><IconLayersOff size={14} /></ActionIcon>
+                            <Badge color="blue" size="xs" variant="light">
+                              {it.template_ids.map((tid: string) => templates.find((t: any) => t.id === tid)?.name || 'Item group').join(', ')}
+                            </Badge>
                           ) : null}
                         </div>
                         <div style={{ flex: '0 0 auto', marginLeft: 12 }}>
@@ -362,7 +424,13 @@ export default function EditPackingListDrawer({ opened, onClose, listId, initial
                   if (onRefresh) onRefresh();
                   if (editListId) {
                     const r = await getPackingList(editListId);
-                    if (r.response.ok) setEditItems(r.data.items || []);
+                    if (r.response.ok) {
+                      const normalized = (r.data.items || []).map((it: any) => ({ ...it, itemId: it.item_id, oneOff: !!it.master_is_one_off, whole_family: !!it.whole_family }));
+                      setEditItems(normalized);
+                      // Also update editAssignedTemplates to reflect the saved state
+                      const updatedTemplateIds = Array.isArray(r.data.template_ids) ? r.data.template_ids : [];
+                      setEditAssignedTemplates(updatedTemplateIds);
+                    }
                   }
                   setShowTemplateAssignDrawer(false);
                 } else {

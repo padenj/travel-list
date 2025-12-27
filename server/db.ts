@@ -59,6 +59,14 @@ const SCHEMAS = {
       FOREIGN KEY (family_id) REFERENCES families(id)
     );
 
+    CREATE TABLE IF NOT EXISTS packing_list_members (
+      packing_list_id TEXT NOT NULL,
+      member_id TEXT NOT NULL,
+      PRIMARY KEY (packing_list_id, member_id),
+      FOREIGN KEY (packing_list_id) REFERENCES packing_lists(id) ON DELETE CASCADE,
+      FOREIGN KEY (member_id) REFERENCES users(id)
+    );
+
       CREATE TABLE IF NOT EXISTS templates (
         id TEXT PRIMARY KEY,
         family_id TEXT NOT NULL,

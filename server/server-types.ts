@@ -93,6 +93,7 @@ export interface PackingList {
   created_at: string;
   updated_at: string;
   deleted_at?: string | null;
+  member_ids?: string[];
 }
 
 // Packing List Item interface
