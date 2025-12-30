@@ -30,10 +30,10 @@ import {
   Modal,
   Checkbox,
 } from '@mantine/core';
-import AddItemsDrawer from './AddItemsDrawer';
-import ItemEditDrawer from './ItemEditDrawer';
-import ConfirmDelete from './ConfirmDelete';
-import BulkEditDrawer from './BulkEditDrawer';
+import AddItemsDrawer from '../components/AddItemsDrawer';
+import ItemEditDrawer from '../components/ItemEditDrawer';
+import ConfirmDelete from '../components/ConfirmDelete';
+import BulkEditDrawer from '../components/BulkEditDrawer';
 import { IconTrash, IconEdit, IconPlus, IconX } from '@tabler/icons-react';
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { arrayMove, SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';

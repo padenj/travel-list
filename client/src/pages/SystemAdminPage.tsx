@@ -19,7 +19,7 @@ import { notifications } from '@mantine/notifications';
 import { IconTrash, IconPlus, IconAlertCircle } from '@tabler/icons-react';
 import { getFamilies, getUsers, createFamily, deleteFamily, deleteUser, createFamilyMember, editFamilyMember, resetFamilyMemberPassword } from '../api';
 import { getCurrentUserProfile } from '../api';
-import FamilyMembersTable from './FamilyMembersTable';
+import FamilyMembersTable from '../components/FamilyMembersTable';
 import { useNavigate } from 'react-router-dom';
 import { useImpersonation } from '../contexts/ImpersonationContext';
 

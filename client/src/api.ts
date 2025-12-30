@@ -485,6 +485,18 @@ export const apiCall = async (endpoint: string, options: ApiCallOptions = {}): P
   return { response, data };
 };
 
+// Build info helper
+export const getBuildInfo = async (): Promise<ApiResponse> => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/build-info`);
+    const data = await response.json();
+    return { response, data };
+  } catch (e) {
+    // Normalize to a Response-like object for callers
+    return { response: { ok: false, status: 500, statusText: 'Network Error' } as any, data: null };
+  }
+};
+
 export const login = async (username: string, password: string): Promise<ApiResponse> => {
   return apiCall('/login', {
     method: 'POST',

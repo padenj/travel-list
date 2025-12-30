@@ -26,5 +26,10 @@ tests/
 
 - 001-remove-assigned-toggle: Added
 
+<!-- Documentation guideline: keep API/component usage docs current -->
+- **Documentation maintenance:** When adding new components or new API request helpers, update the following files to keep usage maps current:
+	- `client/src/APIUsage.md` — map new API helpers to files that import them.
+	- `client/src/components/ComponentUsage.md` — record where new components are used and mark unused components for follow-up.
+
 <!-- MANUAL ADDITIONS START -->
 <!-- MANUAL ADDITIONS END -->
