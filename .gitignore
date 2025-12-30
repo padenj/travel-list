@@ -38,6 +38,9 @@ docker-compose.override.yml
 *.sqlite
 *.sqlite3
 *.sqlite.*
+
+# Core dumps
+core.*
 *.db
 *.db3
 *.bak

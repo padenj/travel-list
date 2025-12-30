@@ -5,14 +5,14 @@ import { setAuthToken, clearAuthToken, getAuthToken } from './api';
 import LoginPage from './LoginPage';
 import PasswordChangePage from './PasswordChangePage';
 import Dashboard from './components/Dashboard';
-import SystemAdminPage from './components/SystemAdminPage';
-import FamilyAdminPage from './components/FamilyAdminPage';
+import SystemAdminPage from './pages/SystemAdminPage';
+import FamilyAdminPage from './pages/FamilyAdminPage';
 import SettingsProfile from './components/SettingsProfile';
 import SettingsSecurity from './components/SettingsSecurity';
 import SplitRailLayout from './components/SplitRailLayout';
-import PackingListPage from './components/PackingListPage';
-import CategoryManagementPage from './components/CategoryManagementPage';
-import TemplateManagerPage from './components/TemplateManagerPage';
+import PackingListPage from './pages/PackingListPage';
+import CategoryManagementPage from './pages/CategoryManagementPage';
+import TemplateManager from './components/TemplateManager';
 
 interface User {
   username?: string;
@@ -171,7 +171,7 @@ export default function AppRoutes(): React.ReactElement {
         {/* Item management removed - handled via categories */}
           <Route 
             path="/templates" 
-            element={<TemplateManagerPage />} 
+            element={<TemplateManager />} 
           />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

@@ -12,6 +12,17 @@ type SseClient = {
   lastWriteAt?: number;
 };
 
+
+// Enable verbose SSE logging via environment variable
+const VERBOSE_SSE_LOGGING = process.env.VERBOSE_SSE_LOGGING === '1' || process.env.VERBOSE_SSE_LOGGING === 'true';
+
+function sseLog(...args: any[]) {
+  if (VERBOSE_SSE_LOGGING) {
+    // eslint-disable-next-line no-console
+    console.log(...args);
+  }
+}
+
 const clients: SseClient[] = [];
 
 const MAX_CONNECTIONS_PER_KEY = 1; // allow up to N connections per (user | ip | ua) key
@@ -31,7 +42,7 @@ function dumpClientSummary() {
       const ip = c.ip || 'unknown';
       byIp[ip] = (byIp[ip] || 0) + 1;
     }
-    console.log('[SSE] clients summary count=', clients.length, 'byIp=', byIp);
+    sseLog('[SSE] clients summary count=', clients.length, 'byIp=', byIp);
   } catch (e) {}
 }
 
@@ -66,7 +77,7 @@ export function addClient(res: Response, req?: Request) {
     const hdrClientId = req && req.headers && (req.headers['x-client-id'] as string | undefined);
     if (hdrClientId) (client as any).clientId = hdrClientId;
     const key = `${(client as any).userId || 'anon'}|${client.ip || 'unknown'}|${(client as any).clientId || ((client.ua || '').slice(0,200))}`;
-    console.log('[SSE] checking dedupe for key:', key.slice(0, 100) + '...');
+    sseLog('[SSE] checking dedupe for key:', key.slice(0, 100) + '...');
     // find existing clients with same key
     const matches = clients.filter(c => {
       const cid = (c as any).userId || 'anon';
@@ -75,15 +86,15 @@ export function addClient(res: Response, req?: Request) {
       const cua = cclient ? cclient : (c.ua || '');
       return `${cid}|${cip}|${(cua || '').slice(0,200)}` === key;
     });
-    console.log('[SSE] found', matches.length, 'existing clients with same key');
+    sseLog('[SSE] found', matches.length, 'existing clients with same key');
     if (matches.length >= MAX_CONNECTIONS_PER_KEY) {
       // remove the oldest matches until below limit
       const sorted = matches.sort((a, b) => (a.connectedAt - b.connectedAt));
       const numToRemove = matches.length - (MAX_CONNECTIONS_PER_KEY - 1);
-      console.log('[SSE] removing', numToRemove, 'oldest connections for key:', key.slice(0, 50) + '...');
+      sseLog('[SSE] removing', numToRemove, 'oldest connections for key:', key.slice(0, 50) + '...');
       for (let i = 0; i < numToRemove; i++) {
         try { 
-          console.log('[SSE] removing old client id:', sorted[i].id);
+          sseLog('[SSE] removing old client id:', sorted[i].id);
           removeClient(sorted[i].res); 
         } catch (e) {}
       }
@@ -93,7 +104,7 @@ export function addClient(res: Response, req?: Request) {
   }
   
   clients.push(client);
-  try { console.log('[SSE] client added id=', id, 'ip=', client.ip, 'port=', (client as any).remotePort, 'user=', (client as any).userId, 'ua=', (client.ua || '').slice(0,80), 'total=', clients.length); } catch (e) {}
+  try { sseLog('[SSE] client added id=', id, 'ip=', client.ip, 'port=', (client as any).remotePort, 'user=', (client as any).userId, 'ua=', (client.ua || '').slice(0,80), 'total=', clients.length); } catch (e) {}
   dumpClientSummary();
   return id;
 }
@@ -102,7 +113,7 @@ export function removeClient(res: Response) {
   const idx = clients.findIndex(c => c.res === res);
   if (idx >= 0) {
     const removed = clients.splice(idx, 1)[0];
-    try { console.log('[SSE] client removed id=', removed.id, 'ip=', removed.ip, 'total=', clients.length); } catch (e) {}
+    try { sseLog('[SSE] client removed id=', removed.id, 'ip=', removed.ip, 'total=', clients.length); } catch (e) {}
     try {
       // Attempt to end the response so the socket is closed on the client
       if (removed.res && typeof removed.res.end === 'function') {
@@ -110,7 +121,7 @@ export function removeClient(res: Response) {
       }
     } catch (e) {}
   } else {
-    try { console.log('[SSE] removeClient called but response not found, total=', clients.length); } catch (e) {}
+    try { sseLog('[SSE] removeClient called but response not found, total=', clients.length); } catch (e) {}
   }
   dumpClientSummary();
 }
@@ -121,7 +132,7 @@ export function getClients() {
 
 export function broadcastEvent(ev: EventPayload) {
   const payload = `data: ${JSON.stringify(ev)}\n\n`;
-  try { console.log('[SSE] broadcasting event to', clients.length, 'clients', ev); } catch (e) {}
+  try { sseLog('[SSE] broadcasting event to', clients.length, 'clients', ev); } catch (e) {}
   // Use setImmediate for each write so a slow client cannot block the event loop
   for (const client of clients.slice()) {
     try {
