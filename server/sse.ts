@@ -16,7 +16,7 @@ type SseClient = {
 // Enable verbose SSE logging via environment variable
 const VERBOSE_SSE_LOGGING = process.env.VERBOSE_SSE_LOGGING === '1' || process.env.VERBOSE_SSE_LOGGING === 'true';
 
-function sseLog(...args: any[]) {
+export function sseLog(...args: any[]) {
   if (VERBOSE_SSE_LOGGING) {
     // eslint-disable-next-line no-console
     console.log(...args);

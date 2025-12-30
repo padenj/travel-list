@@ -33,7 +33,7 @@ import { seedTemplatesForFamily } from './seed-templates';
 const templateRepo = new TemplateRepository();
 import { PackingListRepository } from './repositories';
 const packingListRepo = new PackingListRepository();
-import { addClient, removeClient, broadcastEvent, getClients } from './sse';
+import { addClient, removeClient, broadcastEvent, getClients, sseLog } from './sse';
 
 // Async propagation helper: when a template changes, update all packing lists assigned to it
 function propagateTemplateToAssignedLists(templateId: string) {
@@ -816,7 +816,7 @@ router.get('/events', authMiddleware, (req: Request, res: Response) => {
   res.write('\n');
   const clientId = addClient(res, req);
   req.on('close', () => {
-    try { console.log('[SSE] connection closed for client id=', clientId); } catch (e) {}
+    try { sseLog('[SSE] connection closed for client id=', clientId); } catch (e) {}
     removeClient(res);
   });
 });
