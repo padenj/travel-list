@@ -39,9 +39,10 @@ export const getItems = async (familyId: string): Promise<ApiResponse> => {
   return authenticatedApiCall(`/items/${familyId}`);
 };
 
-export const createItem = async (familyId: string, name: string, isOneOff?: number): Promise<ApiResponse> => {
+export const createItem = async (familyId: string, name: string, isOneOff?: number, categoryId?: string | null): Promise<ApiResponse> => {
   const body: any = { familyId, name };
   if (typeof isOneOff !== 'undefined') body.isOneOff = isOneOff;
+  if (typeof categoryId !== 'undefined') body.categoryId = categoryId;
   return authenticatedApiCall('/items', {
     method: 'POST',
     body: JSON.stringify(body),
@@ -154,6 +155,18 @@ export const setChecked = async (itemId: string, checked: boolean): Promise<ApiR
     return authenticatedApiCall(`/templates/${familyId}`);
   };
 
+  // Item-group aliases (incremental migration)
+  export const getItemGroups = async (familyId: string): Promise<ApiResponse> => {
+    return authenticatedApiCall(`/item-groups/${familyId}`);
+  };
+
+  export const createItemGroup = async (familyId: string, name: string, description?: string): Promise<ApiResponse> => {
+    return authenticatedApiCall('/item-groups', {
+      method: 'POST',
+      body: JSON.stringify({ family_id: familyId, name, description }),
+    });
+  };
+
   // Packing list APIs
   export const getFamilyPackingLists = async (familyId: string): Promise<ApiResponse> => {
     return authenticatedApiCall(`/families/${familyId}/packing-lists`);
@@ -252,8 +265,19 @@ export const setChecked = async (itemId: string, checked: boolean): Promise<ApiR
     return authenticatedApiCall(`/template/${id}`);
   };
 
+  export const getItemGroup = async (id: string): Promise<ApiResponse> => {
+    return authenticatedApiCall(`/item-group/${id}`);
+  };
+
   export const updateTemplate = async (id: string, updates: any): Promise<ApiResponse> => {
     return authenticatedApiCall(`/template/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(updates),
+    });
+  };
+
+  export const updateItemGroup = async (id: string, updates: any): Promise<ApiResponse> => {
+    return authenticatedApiCall(`/item-group/${id}`, {
       method: 'PUT',
       body: JSON.stringify(updates),
     });
@@ -265,8 +289,20 @@ export const setChecked = async (itemId: string, checked: boolean): Promise<ApiR
     });
   };
 
+  export const deleteItemGroup = async (id: string): Promise<ApiResponse> => {
+    return authenticatedApiCall(`/item-group/${id}`, {
+      method: 'DELETE',
+    });
+  };
+
   export const assignCategoryToTemplate = async (templateId: string, categoryId: string): Promise<ApiResponse> => {
     return authenticatedApiCall(`/template/${templateId}/categories/${categoryId}`, {
+      method: 'POST',
+    });
+  };
+
+  export const assignCategoryToItemGroup = async (itemGroupId: string, categoryId: string): Promise<ApiResponse> => {
+    return authenticatedApiCall(`/item-group/${itemGroupId}/categories/${categoryId}`, {
       method: 'POST',
     });
   };
@@ -277,8 +313,20 @@ export const setChecked = async (itemId: string, checked: boolean): Promise<ApiR
     });
   };
 
+  export const removeCategoryFromItemGroup = async (itemGroupId: string, categoryId: string): Promise<ApiResponse> => {
+    return authenticatedApiCall(`/item-group/${itemGroupId}/categories/${categoryId}`, {
+      method: 'DELETE',
+    });
+  };
+
   export const assignItemToTemplate = async (templateId: string, itemId: string): Promise<ApiResponse> => {
     return authenticatedApiCall(`/template/${templateId}/items/${itemId}`, {
+      method: 'POST',
+    });
+  };
+
+  export const assignItemToItemGroup = async (itemGroupId: string, itemId: string): Promise<ApiResponse> => {
+    return authenticatedApiCall(`/item-group/${itemGroupId}/items/${itemId}`, {
       method: 'POST',
     });
   };
@@ -289,20 +337,45 @@ export const setChecked = async (itemId: string, checked: boolean): Promise<ApiR
     });
   };
 
+  export const removeItemFromItemGroup = async (itemGroupId: string, itemId: string): Promise<ApiResponse> => {
+    return authenticatedApiCall(`/item-group/${itemGroupId}/items/${itemId}`, {
+      method: 'DELETE',
+    });
+  };
+
   export const getExpandedItemsForTemplate = async (templateId: string): Promise<ApiResponse> => {
     return authenticatedApiCall(`/template/${templateId}/expanded-items`);
+  };
+
+  export const getExpandedItemsForItemGroup = async (itemGroupId: string): Promise<ApiResponse> => {
+    return authenticatedApiCall(`/item-group/${itemGroupId}/expanded-items`);
   };
 
   export const getCategoriesForTemplate = async (templateId: string): Promise<ApiResponse> => {
     return authenticatedApiCall(`/template/${templateId}/categories`);
   };
 
+  export const getCategoriesForItemGroup = async (itemGroupId: string): Promise<ApiResponse> => {
+    return authenticatedApiCall(`/item-group/${itemGroupId}/categories`);
+  };
+
   export const getItemsForTemplate = async (templateId: string): Promise<ApiResponse> => {
     return authenticatedApiCall(`/template/${templateId}/items`);
   };
 
+  export const getItemsForItemGroup = async (itemGroupId: string): Promise<ApiResponse> => {
+    return authenticatedApiCall(`/item-group/${itemGroupId}/items`);
+  };
+
   export const syncTemplateItems = async (templateId: string, itemIds: string[]): Promise<ApiResponse> => {
     return authenticatedApiCall(`/template/${templateId}/sync-items`, {
+      method: 'POST',
+      body: JSON.stringify({ itemIds }),
+    });
+  };
+
+  export const syncItemGroupItems = async (itemGroupId: string, itemIds: string[]): Promise<ApiResponse> => {
+    return authenticatedApiCall(`/item-group/${itemGroupId}/sync-items`, {
       method: 'POST',
       body: JSON.stringify({ itemIds }),
     });

@@ -13,6 +13,7 @@ import SplitRailLayout from './components/SplitRailLayout';
 import PackingListPage from './pages/PackingListPage';
 import CategoryManagementPage from './pages/CategoryManagementPage';
 import TemplateManager from './components/TemplateManager';
+import UserDocsPage from './pages/UserDocsPage';
 
 interface User {
   username?: string;
@@ -173,6 +174,10 @@ export default function AppRoutes(): React.ReactElement {
             path="/templates" 
             element={<TemplateManager />} 
           />
+        <Route 
+          path="/help" 
+          element={<UserDocsPage />} 
+        />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </SplitRailLayout>

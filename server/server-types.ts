@@ -44,6 +44,7 @@ export interface Item {
   id: string;
   familyId: string;
   name: string;
+  categoryId?: string | null;
   isOneOff?: boolean;
   created_at: string;
   updated_at: string;

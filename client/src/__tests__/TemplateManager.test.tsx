@@ -104,6 +104,7 @@ if (!hasTestingLibs) {
     beforeEach(() => {
       (api.getCurrentUserProfile as any).mockResolvedValue({ response: { ok: true }, data: { family: { id: 'f1' } } });
       (api.getTemplates as any).mockResolvedValue({ response: { ok: true }, data: { templates: mockTemplates } });
+      (api.getItemGroups as any).mockResolvedValue({ response: { ok: true }, data: { itemGroups: mockTemplates } });
       (api.getCategories as any).mockResolvedValue({ response: { ok: true }, data: { categories: [] } });
       (api.getItems as any).mockResolvedValue({ response: { ok: true }, data: { items: [] } });
       (api.getCategoriesForTemplate as any).mockResolvedValue({ response: { ok: true }, data: { categories: [] } });
@@ -123,7 +124,7 @@ if (!hasTestingLibs) {
         </MemoryRouter>
       );
 
-  await waitFor(() => expect(api.getTemplates).toHaveBeenCalled());
+  await waitFor(() => expect(api.getItemGroups).toHaveBeenCalled());
   // Tabs may render the same label in multiple places (tab and heading). Use getAllByText.
   expect(screen.getAllByText('Weekend').length).toBeGreaterThan(0);
   expect(screen.getAllByText('Business').length).toBeGreaterThan(0);
@@ -162,7 +163,7 @@ if (!hasTestingLibs) {
       await waitFor(() => expect(api.createTemplate).toHaveBeenCalled());
       // Component may trigger multiple template refreshes (initial load + explicit refresh).
       // Accept >= 2 calls rather than an exact number to avoid brittle timing failures.
-      await waitFor(() => expect((api.getTemplates as any).mock.calls.length).toBeGreaterThanOrEqual(2));
+      await waitFor(() => expect((api.getItemGroups as any).mock.calls.length).toBeGreaterThanOrEqual(2));
       // Multiple elements may contain the label 'New' (tab label + heading). Ensure at least one exists.
       expect(screen.getAllByText('New').length).toBeGreaterThan(0);
     });
@@ -194,14 +195,14 @@ if (!hasTestingLibs) {
       );
 
       // Wait for the initial load
-      await waitFor(() => expect(api.getTemplates).toHaveBeenCalled());
+      await waitFor(() => expect(api.getItemGroups).toHaveBeenCalled());
 
       const user = await userEventLib.setup();
       // Trigger the refresh which should cause TemplateManager to re-fetch templates
       await user.click(screen.getByText(/Trigger Refresh/i));
 
       // Expect at least a second call to getTemplates and the new template label to appear
-      await waitFor(() => expect((api.getTemplates as any).mock.calls.length).toBeGreaterThanOrEqual(2));
+      await waitFor(() => expect((api.getItemGroups as any).mock.calls.length).toBeGreaterThanOrEqual(2));
       expect(screen.getAllByText('Family').length).toBeGreaterThan(0);
     });
   });

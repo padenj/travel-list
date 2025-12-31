@@ -170,6 +170,133 @@ router.post('/template/:id/categories/:categoryId', authMiddleware, async (req: 
   }
 });
 
+// Item-group alias: assign/remove categories
+router.post('/item-group/:id/categories/:categoryId', authMiddleware, async (req: Request, res: Response) => {
+  const { id, categoryId } = req.params;
+  try {
+    const existing = await templateRepo.findById(id);
+    if (!existing) return res.status(404).json({ error: 'Item group not found' });
+    if (req.user?.role !== 'SystemAdmin') {
+      if (req.user?.familyId !== existing.family_id || req.user.role !== 'FamilyAdmin') {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+    }
+    await templateRepo.assignCategory(id, categoryId);
+    return res.json({ message: 'Category assigned to item group' });
+  } catch (error) {
+    console.error('Error assigning category to item group:', error);
+    return res.status(500).json({ error: 'Failed to assign category to item group' });
+  }
+});
+
+router.delete('/item-group/:id/categories/:categoryId', authMiddleware, async (req: Request, res: Response) => {
+  const { id, categoryId } = req.params;
+  try {
+    const existing = await templateRepo.findById(id);
+    if (!existing) return res.status(404).json({ error: 'Item group not found' });
+    if (req.user?.role !== 'SystemAdmin') {
+      if (req.user?.familyId !== existing.family_id || req.user.role !== 'FamilyAdmin') {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+    }
+    await templateRepo.removeCategory(id, categoryId);
+    return res.json({ message: 'Category removed from item group' });
+  } catch (error) {
+    console.error('Error removing category from item group:', error);
+    return res.status(500).json({ error: 'Failed to remove category from item group' });
+  }
+});
+
+// Aliases: Item-groups endpoints (backwards-compatible wrappers around templates)
+router.post('/item-groups', authMiddleware, async (req: Request, res: Response) => {
+  // Delegate to existing template creation handler logic
+  const { family_id, name, description } = req.body;
+  if (!family_id || !name || name.trim() === '') {
+    return res.status(400).json({ error: 'Family ID and item group name are required' });
+  }
+  try {
+    if (req.user?.role !== 'SystemAdmin') {
+      const user = req.user;
+      if (!user || user.familyId !== family_id || user.role !== 'FamilyAdmin') {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+    }
+    const template = await templateRepo.create({
+      id: uuidv4(),
+      family_id,
+      name: name.trim(),
+      description: description || '',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+    return res.json({ itemGroup: template });
+  } catch (error) {
+    console.error('Error creating item group:', error);
+    return res.status(500).json({ error: 'Failed to create item group' });
+  }
+});
+
+router.get('/item-groups/:familyId', authMiddleware, familyAccessMiddleware('familyId'), async (req: Request, res: Response) => {
+  const { familyId } = req.params;
+  try {
+    const templates = await templateRepo.findAll(familyId);
+    return res.json({ itemGroups: templates });
+  } catch (error) {
+    console.error('Error fetching item groups:', error);
+    return res.status(500).json({ error: 'Failed to fetch item groups' });
+  }
+});
+
+router.get('/item-group/:id', authMiddleware, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  try {
+    const template = await templateRepo.findById(id);
+    if (!template) return res.status(404).json({ error: 'Item group not found' });
+    return res.json({ itemGroup: template });
+  } catch (error) {
+    console.error('Error fetching item group:', error);
+    return res.status(500).json({ error: 'Failed to fetch item group' });
+  }
+});
+
+router.put('/item-group/:id', authMiddleware, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const updates = req.body;
+  try {
+    const existing = await templateRepo.findById(id);
+    if (!existing) return res.status(404).json({ error: 'Item group not found' });
+    if (req.user?.role !== 'SystemAdmin') {
+      if (req.user?.familyId !== existing.family_id || req.user.role !== 'FamilyAdmin') {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+    }
+    const updated = await templateRepo.update(id, updates);
+    propagateTemplateToAssignedLists(id);
+    return res.json({ itemGroup: updated });
+  } catch (error) {
+    console.error('Error updating item group:', error);
+    return res.status(500).json({ error: 'Failed to update item group' });
+  }
+});
+
+router.delete('/item-group/:id', authMiddleware, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  try {
+    const existing = await templateRepo.findById(id);
+    if (!existing) return res.status(404).json({ error: 'Item group not found' });
+    if (req.user?.role !== 'SystemAdmin') {
+      if (req.user?.familyId !== existing.family_id || req.user.role !== 'FamilyAdmin') {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+    }
+    await templateRepo.softDelete(id);
+    return res.json({ message: 'Item group deleted' });
+  } catch (error) {
+    console.error('Error deleting item group:', error);
+    return res.status(500).json({ error: 'Failed to delete item group' });
+  }
+});
+
 router.delete('/template/:id/categories/:categoryId', authMiddleware, async (req: Request, res: Response) => {
   const { id, categoryId } = req.params;
   try {
@@ -199,7 +326,7 @@ router.post('/template/:id/items/:itemId', authMiddleware, async (req: Request, 
         return res.status(403).json({ error: 'Forbidden' });
       }
     }
-    await templateRepo.assignItem(id, itemId);
+      await templateRepo.assignItem(id, itemId);
   // Propagate changes to assigned lists synchronously to ensure consistency in tests
   try {
     const lists = await packingListRepo.getPackingListsForTemplate(id);
@@ -213,6 +340,59 @@ router.post('/template/:id/items/:itemId', authMiddleware, async (req: Request, 
   } catch (error) {
     console.error('Error assigning item:', error);
     return res.status(500).json({ error: 'Failed to assign item' });
+  }
+});
+
+// Item-group alias: assign/remove items
+router.post('/item-group/:id/items/:itemId', authMiddleware, async (req: Request, res: Response) => {
+  const { id, itemId } = req.params;
+  try {
+    const existing = await templateRepo.findById(id);
+    if (!existing) return res.status(404).json({ error: 'Item group not found' });
+    if (req.user?.role !== 'SystemAdmin') {
+      if (req.user?.familyId !== existing.family_id || req.user.role !== 'FamilyAdmin') {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+    }
+    await templateRepo.assignItem(id, itemId);
+    try {
+      const lists = await packingListRepo.getPackingListsForTemplate(id);
+      for (const l of lists) {
+        await packingListRepo.reconcilePackingListAgainstTemplate(l.id, id);
+      }
+    } catch (err) {
+      console.error('Error propagating item group changes synchronously', { itemGroupId: id, err });
+    }
+    return res.json({ message: 'Item assigned to item group' });
+  } catch (error) {
+    console.error('Error assigning item to item group:', error);
+    return res.status(500).json({ error: 'Failed to assign item to item group' });
+  }
+});
+
+router.delete('/item-group/:id/items/:itemId', authMiddleware, async (req: Request, res: Response) => {
+  const { id, itemId } = req.params;
+  try {
+    const existing = await templateRepo.findById(id);
+    if (!existing) return res.status(404).json({ error: 'Item group not found' });
+    if (req.user?.role !== 'SystemAdmin') {
+      if (req.user?.familyId !== existing.family_id || req.user.role !== 'FamilyAdmin') {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+    }
+    await templateRepo.removeItem(id, itemId);
+    try {
+      const lists = await packingListRepo.getPackingListsForTemplate(id);
+      for (const l of lists) {
+        await packingListRepo.reconcilePackingListAgainstTemplate(l.id, id);
+      }
+    } catch (err) {
+      console.error('Error propagating item group changes synchronously', { itemGroupId: id, err });
+    }
+    return res.json({ message: 'Item removed from item group' });
+  } catch (error) {
+    console.error('Error removing item from item group:', error);
+    return res.status(500).json({ error: 'Failed to remove item from item group' });
   }
 });
 
@@ -286,6 +466,36 @@ router.post('/template/:id/sync-items', authMiddleware, async (req: Request, res
   }
 });
 
+// Item-group alias: sync items
+router.post('/item-group/:id/sync-items', authMiddleware, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { itemIds } = req.body as { itemIds?: string[] };
+  if (!Array.isArray(itemIds)) {
+    return res.status(400).json({ error: 'itemIds array is required' });
+  }
+  try {
+    const existing = await templateRepo.findById(id);
+    if (!existing) return res.status(404).json({ error: 'Item group not found' });
+    if (req.user?.role !== 'SystemAdmin') {
+      if (req.user?.familyId !== existing.family_id || req.user.role !== 'FamilyAdmin') {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+    }
+    const currentRows = await templateRepo.getItems(id);
+    const currentIds = currentRows.map((r: any) => r.item_id);
+    const toAdd = itemIds.filter(i => !currentIds.includes(i));
+    const toRemove = currentIds.filter(i => !itemIds.includes(i));
+    for (const itemId of toAdd) await templateRepo.assignItem(id, itemId);
+    for (const itemId of toRemove) await templateRepo.removeItem(id, itemId);
+    const updatedItems = await templateRepo.getItemsForTemplate(id);
+    propagateTemplateToAssignedLists(id);
+    return res.json({ itemGroupId: id, items: updatedItems });
+  } catch (error) {
+    console.error('Error syncing item group items:', error);
+    return res.status(500).json({ error: 'Failed to sync item group items' });
+  }
+});
+
 // Get categories assigned to a template
 router.get('/template/:id/categories', authMiddleware, async (req: Request, res: Response) => {
   const { id } = req.params;
@@ -295,6 +505,18 @@ router.get('/template/:id/categories', authMiddleware, async (req: Request, res:
   } catch (error) {
     console.error('Error fetching template categories:', error);
     return res.status(500).json({ error: 'Failed to fetch template categories' });
+  }
+});
+
+// Item-group alias: get categories
+router.get('/item-group/:id/categories', authMiddleware, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  try {
+    const categories = await templateRepo.getCategoriesForTemplate(id);
+    return res.json({ categories });
+  } catch (error) {
+    console.error('Error fetching item group categories:', error);
+    return res.status(500).json({ error: 'Failed to fetch item group categories' });
   }
 });
 
@@ -310,6 +532,18 @@ router.get('/template/:id/items', authMiddleware, async (req: Request, res: Resp
   }
 });
 
+// Item-group alias: get items
+router.get('/item-group/:id/items', authMiddleware, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  try {
+    const items = await templateRepo.getItemsForTemplate(id);
+    return res.json({ items });
+  } catch (error) {
+    console.error('Error fetching item group items:', error);
+    return res.status(500).json({ error: 'Failed to fetch item group items' });
+  }
+});
+
 // Get expanded items for a template (categories + items)
 router.get('/template/:id/expanded-items', authMiddleware, async (req: Request, res: Response) => {
   const { id } = req.params;
@@ -318,6 +552,18 @@ router.get('/template/:id/expanded-items', authMiddleware, async (req: Request, 
     return res.json({ items });
   } catch (error) {
     console.error('Error fetching expanded items:', error);
+    return res.status(500).json({ error: 'Failed to fetch expanded items' });
+  }
+});
+
+// Item-group alias: expanded items
+router.get('/item-group/:id/expanded-items', authMiddleware, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  try {
+    const items = await templateRepo.getExpandedItems(id);
+    return res.json({ items });
+  } catch (error) {
+    console.error('Error fetching expanded item group items:', error);
     return res.status(500).json({ error: 'Failed to fetch expanded items' });
   }
 });
@@ -604,6 +850,10 @@ router.post('/packing-lists/:id/items', authMiddleware, async (req: Request, res
         // Accept optional memberIds to assign the newly created master one-off to members
         // Also accept optional categoryId to persist category on the master item
         const categoryId = (oneOff && (oneOff.categoryId || oneOff.category_id)) || undefined;
+        // Enforce categoryId presence for one-off creation to maintain data integrity
+        if (!categoryId) {
+          return res.status(400).json({ error: 'oneOff.categoryId is required when creating a one-off item' });
+        }
         const wholeFamily = (oneOff && (oneOff.wholeFamily || oneOff.whole_family)) || undefined;
         created = await packingListRepo.addOneOffItem(id, oneOff.name, true, Array.isArray(memberIds) ? memberIds : undefined, categoryId, wholeFamily);
       } catch (err: any) {
@@ -877,9 +1127,12 @@ router.delete('/categories/:id', authMiddleware, async (req: Request, res: Respo
 
 // Item CRUD endpoints
 router.post('/items', authMiddleware, async (req: Request, res: Response) => {
-  const { familyId, name } = req.body;
+  const { familyId, name, categoryId } = req.body;
   if (!familyId || !name || name.trim() === '') {
     return res.status(400).json({ error: 'Family ID and item name are required' });
+  }
+  if (!categoryId || (typeof categoryId === 'string' && categoryId.trim() === '')) {
+    return res.status(400).json({ error: 'categoryId is required for new items' });
   }
   try {
     const isOneOff = typeof req.body.isOneOff !== 'undefined' ? (!!req.body.isOneOff) : false;
@@ -888,6 +1141,7 @@ router.post('/items', authMiddleware, async (req: Request, res: Response) => {
       familyId,
       name: name.trim(),
       isOneOff: isOneOff,
+      categoryId: categoryId || null,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     });
@@ -983,15 +1237,8 @@ router.post('/items/:itemId/categories/:categoryId', authMiddleware, async (req:
 router.delete('/items/:itemId/categories/:categoryId', authMiddleware, async (req: Request, res: Response) => {
   const { itemId, categoryId } = req.params;
   try {
-    await itemRepo.removeFromCategory(itemId, categoryId);
-    // templates referencing this category may now exclude this item; propagate those templates
-    try {
-      const templateIds = await templateRepo.getTemplatesReferencingCategory(categoryId);
-      for (const tid of templateIds) propagateTemplateToAssignedLists(tid);
-    } catch (e) {
-      console.error('Error enqueuing propagation after item->category remove', e);
-    }
-    return res.json({ message: 'Item removed from category' });
+    // Forbid removing a category from an item to ensure items always belong to a category.
+    return res.status(400).json({ error: 'Cannot remove category: items must always belong to a category. Reassign the item to another category instead.' });
   } catch (error) {
     console.error('Error removing item from category:', error);
     return res.status(500).json({ error: 'Failed to remove item from category' });
@@ -1183,13 +1430,17 @@ if (!isTestEnv) {
       let fid = familyId;
       if (!fid && req.user && req.user.familyId) fid = req.user.familyId;
 
-      const [item, categories, itemCategories, members, itemMembers, wholeAssigned] = await Promise.all([
+      const [item, categories, itemCategories, members, itemMembers, wholeAssigned, templateIds, templates] = await Promise.all([
         itemRepo.findById(itemId),
         fid ? categoryRepo.findAll(fid) : Promise.resolve([]),
         itemRepo.getCategoriesForItem(itemId),
         fid ? userRepo.findByFamilyId(fid) : Promise.resolve([]),
         itemRepo.getMembersForItem(itemId),
         itemRepo.isAssignedToWholeFamily(itemId),
+        // templates that reference this item (ids)
+        templateRepo.getTemplatesReferencingItem(itemId),
+        // all templates for the family (used as item groups)
+        fid ? templateRepo.findAll(fid) : Promise.resolve([]),
       ]);
 
       // Compute memberIds and wholeFamily for compatibility with category item list
@@ -1200,7 +1451,8 @@ if (!isTestEnv) {
       }
       const wholeFamily = !!wholeAssigned;
 
-      return res.json({ item, categories, itemCategories, members, itemMembers, wholeAssigned, memberIds, wholeFamily });
+      // Expose templates as "itemGroups" and referencing template ids as "itemGroupIds"
+      return res.json({ item, categories, itemCategories, members, itemMembers, wholeAssigned, memberIds, wholeFamily, itemGroups: templates, itemGroupIds: templateIds });
     } catch (error) {
       console.error('Error fetching edit-data for item:', error);
       return res.status(500).json({ error: 'Failed to fetch item edit data' });

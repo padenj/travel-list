@@ -26,6 +26,7 @@ import {
   IconUser,
   IconUsers,
   IconShield,
+  IconHelp,
 } from '@tabler/icons-react';
 import { useImpersonation } from '../contexts/ImpersonationContext';
 import VersionText from './VersionText';
@@ -292,6 +293,9 @@ export default function SplitRailLayout({ children, user, onLogout }: SplitRailL
                     <Text fw={600}>{user.username}</Text>
                   </Menu.Label>
                   <Divider />
+                  <Menu.Item component={Link} to="/help" leftSection={<IconHelp size={16} />}>
+                    Help
+                  </Menu.Item>
                   {canAccessFamilyAdmin && (
                     <Menu.Item component={Link} to="/settings/profile">Settings</Menu.Item>
                   )}
@@ -405,6 +409,9 @@ export default function SplitRailLayout({ children, user, onLogout }: SplitRailL
                   <Text fw={600}>{user.username}</Text>
                 </Menu.Label>
                 <Divider />
+                <Menu.Item component={Link} to="/help" leftSection={<IconHelp size={16} />}>
+                  Help
+                </Menu.Item>
                 {canAccessFamilyAdmin && (
                   <Menu.Item component={Link} to="/settings/profile">Settings</Menu.Item>
                 )}
