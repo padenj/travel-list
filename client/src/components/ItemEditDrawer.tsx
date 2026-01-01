@@ -82,18 +82,18 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
   // Checkbox state: when checked => this trip only (one-off) => isOneOff = 1
   // Default to false so OFF = add for future trips (master item)
   const [alsoAddForFutureTrips, setAlsoAddForFutureTrips] = useState<boolean>(false);
+  const [thisTripOnly, setThisTripOnly] = useState<boolean>(false);
   const [promotionConfirm, setPromotionConfirm] = useState<{ open: boolean; reason?: string }>(() => ({ open: false }));
 
   // Creating a one-off: new item, the "Also add for future trips" checkbox is shown
   // and the user left it unchecked => this should create a packing-list one-off master
   // and category selection should be disabled/optional in that flow.
-  const isCreatingOneOff = !masterItemId && showIsOneOffCheckbox && alsoAddForFutureTrips;
-  // When editing an existing one-off, if the "add to master list" checkbox is checked,
-  // treat it as a regular item (category required). If unchecked, keep one-off behavior.
-  const isConvertingOneOffToRegular = masterItemId && isMasterOneOff && alsoAddForFutureTrips;
+  const isCreatingOneOff = !masterItemId && showIsOneOffCheckbox && thisTripOnly;
+  // When editing an existing one-off, converting to regular occurs when the user turns the switch OFF
+  const isConvertingOneOffToRegular = masterItemId && isMasterOneOff && !thisTripOnly;
   // Effective one-off flag: true when creating a packing-list one-off OR when the
-  // master item is a one-off AND not being converted to regular.
-  const isOneOff = isCreatingOneOff || (isMasterOneOff && !isConvertingOneOffToRegular);
+  // master item is a one-off and the switch remains ON.
+  const isOneOff = (isCreatingOneOff) || (masterItemId ? (isMasterOneOff && thisTripOnly) : false);
 
   useEffect(() => {
     setName(initialName || '');
@@ -201,9 +201,10 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
   }, [rawFuseResults, name, masterItems, masterItemId]);
 
   useEffect(() => {
-    // default checkbox state: unchecked => OFF = add for future trips (master item)
-    // User can toggle ON to mark as "This Trip Only" (one-off)
+    // default switch state: OFF by default for creation; for edit mode the
+    // fetched payload will set `thisTripOnly` appropriately.
     setAlsoAddForFutureTrips(false);
+    setThisTripOnly(false);
   }, [opened, masterItemId, promoteContext]);
 
   useEffect(() => {
@@ -219,6 +220,8 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
           // master payload received (verbose log removed)
           const masterOneOffFlag = !!(payload.item?.isOneOff);
           setIsMasterOneOff(masterOneOffFlag);
+          // Reflect the item's one-off state in the UI switch when editing
+          setThisTripOnly(masterOneOffFlag);
           setItemFamilyId(payload.item?.familyId || familyId || null);
           // Seed the editable name from the payload if available; fall back to prop initialName
           setName(payload.item?.name || payload.name || initialName || '');
@@ -258,6 +261,19 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
           setItemGroups(groups);
           setInitialGroupIds(groupIds);
           setSelectedGroupIds(groupIds.slice());
+          // If the consolidated payload didn't include item groups, try a family-level fetch
+          // so the checkbox list can render during edit mode as well.
+          if ((!groups || groups.length === 0) && familyId) {
+            try {
+              const gres = await getItemGroups(familyId);
+              if (gres && gres.response && gres.response.ok) {
+                const fetched = gres.data?.itemGroups || gres.data?.templates || [];
+                if (Array.isArray(fetched) && fetched.length > 0) setItemGroups(fetched);
+              }
+            } catch (e) {
+              // ignore fallback failure
+            }
+          }
           // Use memberIds and wholeFamily from API if present, fallback to previous logic
           let assigned: string[] = [];
           if (Array.isArray(payload.memberIds)) {
@@ -341,6 +357,8 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
             }
             // initialWhole reflects persisted state; new items start false
             setInitialWhole(false);
+            // ensure create-mode switch defaults to false
+            setThisTripOnly(false);
           }
         }
       } catch (err) {
@@ -429,7 +447,7 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
         if (!familyId) throw new Error('Family not available');
         // Determine isOneOff: when checkbox shown, checked => isOneOff=1 (This Trip Only), unchecked => isOneOff=0 (Add for Future Trips)
         // When checkbox is hidden (management page), isOneOff should always be 0
-        const isOneOffValue = showIsOneOffCheckbox ? (alsoAddForFutureTrips ? 1 : 0) : 0;
+        const isOneOffValue = showIsOneOffCheckbox ? (thisTripOnly ? 1 : 0) : 0;
   const createRes = await createItem(familyId, trimmedName || 'New Item', isOneOffValue, selectedCategory || null);
         if (!createRes.response.ok) throw new Error('Failed to create item');
         createdId = createRes.data?.item?.id;
@@ -632,24 +650,39 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
           <div style={{ marginTop: 8 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <Switch
-                checked={alsoAddForFutureTrips}
+                checked={thisTripOnly}
                 onChange={(e) => {
                   const on = e.currentTarget.checked;
-                  // If turning on for an existing item (promote/convert flow), require confirmation.
-                  // Do NOT show the confirmation when creating a new item (masterItemId is null).
-                  if (on && masterItemId && (promoteContext || isMasterOneOff)) {
-                    setPromotionConfirm({ open: true, reason: promoteContext ? 'promote' : 'convert' });
-                    return;
+                  // If we're editing an existing item:
+                  // - Turning OFF a current one-off should prompt confirmation (convert to regular)
+                  // - Turning ON should NOT be allowed for items that were not previously one-off
+                  if (masterItemId) {
+                    if (on) {
+                      // Only allow turning ON if the item was already a master one-off
+                      if (!isMasterOneOff) return;
+                      // If item already one-off and we're turning ON again, just set state
+                      setThisTripOnly(true);
+                      return;
+                    } else {
+                      // Turning OFF (convert to regular) should require confirmation
+                      if (isMasterOneOff) {
+                        setPromotionConfirm({ open: true, reason: 'convert' });
+                        return;
+                      }
+                      return;
+                    }
                   }
-                  setAlsoAddForFutureTrips(on);
+                  // Creating a new item: toggling controls the one-off creation flag
+                  setThisTripOnly(on);
                 }}
-                aria-label={alsoAddForFutureTrips ? 'This Trip Only' : 'Add to master list'}
+                aria-label={thisTripOnly ? 'This Trip Only' : 'Add to master list'}
+                disabled={!!masterItemId && !isMasterOneOff}
               />
               <Text size="sm">This Trip Only</Text>
             </div>
-            <Text size="xs" c={alsoAddForFutureTrips ? undefined : 'dimmed'} style={{ marginTop: 6, color: alsoAddForFutureTrips ? 'rgba(0,0,0,0.85)' : undefined }}>
+            <Text size="xs" c={thisTripOnly ? undefined : 'dimmed'} style={{ marginTop: 6, color: thisTripOnly ? 'rgba(0,0,0,0.85)' : undefined }}>
               {promoteContext || (masterItemId && isMasterOneOff)
-                ? 'Adding this item only to this list means it will not be available on other lists. Toggle it off to add it to the master list for future trips.'
+                ? 'This item is currently a one-off. Toggle it off to add it to the master list for future trips.'
                 : 'When checked, the item will be created only for this list. When unchecked, it will be added to the master list for future trips.'}
             </Text>
           </div>
@@ -717,61 +750,50 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
               )}
               {/* Item groups are shown on the left under Categories (no duplicate here) */}
             </div>
+            {/* Promotion modal, validation hint, and action buttons moved here into right column */}
+            <Modal opened={promotionConfirm.open} onClose={() => setPromotionConfirm({ open: false })} title={promotionConfirm.reason === 'promote' ? 'Promote this item to the master list?' : 'Convert this one-off to a regular master item?'} zIndex={(zIndex ?? 2000) + 100}>
+              <div>
+                <Text size="sm">This will create/update a master item so the item appears on all lists. Changes may require selecting a category. Proceed?</Text>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
+                  <Button variant="default" onClick={() => setPromotionConfirm({ open: false })}>Cancel</Button>
+                  <Button color="blue" onClick={async () => {
+                    // Confirm conversion: turn OFF the one-off switch so save() will convert the item
+                    setThisTripOnly(false);
+                    setPromotionConfirm({ open: false });
+                  }}>Promote Item</Button>
+                </div>
+              </div>
+            </Modal>
+
+            {(
+              (name && (name || '').trim()) && (
+                (!selectedCategory) || (!masterItemId && !selectedWhole && selectedMembers.length === 0)
+              )
+            ) ? (
+              <div style={{ marginTop: 12, marginBottom: 8 }}>
+                <Text size="sm" color="red">Please select a category and at least one assignment (member or Whole Family) before saving.</Text>
+              </div>
+            ) : null}
+
+            <div style={{ marginTop: 8, display: 'flex', justifyContent: 'flex-end' }}>
+              <Group>
+                {masterItemId ? (
+                  <Button color="red" variant="light" onClick={handleDelete} disabled={saving}>Delete</Button>
+                ) : null}
+                <Button variant="default" onClick={onClose}>Cancel</Button>
+                <Button onClick={save} loading={saving}
+                  disabled={
+                    !( (name || '').trim() ) ||
+                    !selectedCategory ||
+                    (!masterItemId && !selectedWhole && selectedMembers.length === 0)
+                  }
+                >Save</Button>
+              </Group>
+            </div>
           </div>
         </div>
 
-        {/* Buttons below in single column; promote/edit checkbox handled above for create-case */}
-        <div style={{ marginTop: 12 }}>
-          {/* Buttons area - promotion handled by unified switch above */}
-
-          <Modal opened={promotionConfirm.open} onClose={() => setPromotionConfirm({ open: false })} title={promotionConfirm.reason === 'promote' ? 'Promote this item to the master list?' : 'Convert this one-off to a regular master item?'} zIndex={(zIndex ?? 2000) + 100}>
-          <div>
-            <Text size="sm">This will create/update a master item so the item appears on all lists. Changes may require selecting a category. Proceed?</Text>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
-              <Button variant="default" onClick={() => setPromotionConfirm({ open: false })}>Cancel</Button>
-              <Button color="blue" onClick={async () => {
-                // Confirm promotion: enable the flag and close modal
-                setAlsoAddForFutureTrips(true);
-                setPromotionConfirm({ open: false });
-              }}>Promote Item</Button>
-            </div>
-          </div>
-          </Modal>
-
-          {/* Show validation hint when Save is disabled due to missing category or assignments */}
-          {(
-            // Save would be disabled when name empty, no category, or missing assignments on create
-            // We only show the validation hint when the name is present (so the user knows why Save is disabled)
-            (name && (name || '').trim()) && (
-              (!selectedCategory) || (!masterItemId && !selectedWhole && selectedMembers.length === 0)
-            )
-          ) ? (
-            <div style={{ marginBottom: 8 }}>
-              <Text size="sm" color="red">Please select a category and at least one assignment (member or Whole Family) before saving.</Text>
-            </div>
-          ) : null}
-
-          <Group mt="md" style={{ justifyContent: 'space-between' }}>
-            <div />
-            <Group>
-              {/* Delete button shown only when editing an existing master item */}
-              {masterItemId ? (
-                <Button color="red" variant="light" onClick={handleDelete} disabled={saving}>Delete</Button>
-              ) : null}
-              <Button variant="default" onClick={onClose}>Cancel</Button>
-                      <Button onClick={save} loading={saving}
-                        disabled={
-                          // name must be non-empty after trimming
-                          !( (name || '').trim() ) ||
-                          // category must be selected for all items
-                          !selectedCategory ||
-                          // when creating require assignments (whole or members)
-                          (!masterItemId && !selectedWhole && selectedMembers.length === 0)
-                        }
-                      >Save</Button>
-            </Group>
-          </Group>
-        </div>
+        
       </div>
     </Drawer>
   );
