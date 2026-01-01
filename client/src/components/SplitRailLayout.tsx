@@ -27,6 +27,7 @@ import {
   IconUsers,
   IconShield,
   IconHelp,
+  IconLogout,
 } from '@tabler/icons-react';
 import { useImpersonation } from '../contexts/ImpersonationContext';
 import VersionText from './VersionText';
@@ -293,16 +294,22 @@ export default function SplitRailLayout({ children, user, onLogout }: SplitRailL
                     <Text fw={600}>{user.username}</Text>
                   </Menu.Label>
                   <Divider />
+                  {canAccessFamilyAdmin && (
+                    <Menu.Item component={Link} to="/settings/profile" leftSection={<IconSettings size={16} />}>
+                      Settings
+                    </Menu.Item>
+                  )}
+                  {canAccessSystemAdmin && (
+                    <Menu.Item component={Link} to="/admin/system" leftSection={<IconShield size={16} />}>
+                      System Admin
+                    </Menu.Item>
+                  )}
                   <Menu.Item component={Link} to="/help" leftSection={<IconHelp size={16} />}>
                     Help
                   </Menu.Item>
-                  {canAccessFamilyAdmin && (
-                    <Menu.Item component={Link} to="/settings/profile">Settings</Menu.Item>
-                  )}
-                  {canAccessSystemAdmin && (
-                    <Menu.Item component={Link} to="/admin/system">System Admin</Menu.Item>
-                  )}
-                  <Menu.Item color="red" onClick={onLogout}>Logout</Menu.Item>
+                  <Menu.Item color="red" onClick={onLogout} leftSection={<IconLogout size={16} />}>
+                    Logout
+                  </Menu.Item>
                 </Menu.Dropdown>
               </Menu>
             </Group>
@@ -409,16 +416,22 @@ export default function SplitRailLayout({ children, user, onLogout }: SplitRailL
                   <Text fw={600}>{user.username}</Text>
                 </Menu.Label>
                 <Divider />
+                {canAccessFamilyAdmin && (
+                  <Menu.Item component={Link} to="/settings/profile" leftSection={<IconSettings size={16} />}>
+                    Settings
+                  </Menu.Item>
+                )}
+                {canAccessSystemAdmin && (
+                  <Menu.Item component={Link} to="/admin/system" leftSection={<IconShield size={16} />}>
+                    System Admin
+                  </Menu.Item>
+                )}
                 <Menu.Item component={Link} to="/help" leftSection={<IconHelp size={16} />}>
                   Help
                 </Menu.Item>
-                {canAccessFamilyAdmin && (
-                  <Menu.Item component={Link} to="/settings/profile">Settings</Menu.Item>
-                )}
-                {canAccessSystemAdmin && (
-                  <Menu.Item component={Link} to="/admin/system">System Admin</Menu.Item>
-                )}
-                <Menu.Item color="red" onClick={onLogout}>Logout</Menu.Item>
+                <Menu.Item color="red" onClick={onLogout} leftSection={<IconLogout size={16} />}>
+                  Logout
+                </Menu.Item>
               </Menu.Dropdown>
             </Menu>
           </Group>

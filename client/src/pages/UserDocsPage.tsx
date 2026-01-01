@@ -422,20 +422,29 @@ export default function UserDocsPage(): React.ReactElement {
   // Handle scroll to update active section
   useEffect(() => {
     const handleScroll = () => {
-      const scrollPosition = window.scrollY + 100;
+      const scrollPosition = window.scrollY + 150;
       
-      for (const section of docSections) {
+      // Find the section that is currently in view
+      let currentSection = docSections[0].id;
+      
+      for (let i = docSections.length - 1; i >= 0; i--) {
+        const section = docSections[i];
         const element = sectionRefs.current[section.id];
         if (element) {
-          const { offsetTop, offsetHeight } = element;
-          if (scrollPosition >= offsetTop && scrollPosition < offsetTop + offsetHeight) {
-            setActiveSection(section.id);
+          const { offsetTop } = element;
+          if (scrollPosition >= offsetTop) {
+            currentSection = section.id;
             break;
           }
         }
       }
+      
+      setActiveSection(currentSection);
     };
 
+    // Initial call to set active section on mount
+    handleScroll();
+    
     window.addEventListener('scroll', handleScroll);
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
