@@ -5,7 +5,7 @@
 One-off items store their data on the **master item** (in the `items` table):
 - ✅ **Name** - Stored on master item
 - ✅ **Member assignments** - Stored on master item (via `item_members` and `item_whole_family` tables)
-- ❌ **Category** - One-off items don't have categories (always `null`)
+- ✅ **Category** - One-off items require a category (single-category model)
 - ✅ **isOneOff flag** - Stored on master item (`isOneOff = 1`)
 
 The packing list simply references the master item via `item_id`. All data comes from the master.
@@ -14,7 +14,7 @@ The packing list simply references the master item via `item_id`. All data comes
 **For one-off items** (detected by `isOneOff`):
 - ✅ Update master item **name**
 - ✅ Update **member assignments** on master item
-- ❌ Skip category updates (one-offs don't have categories)
+- ✅ Update **category** on master item (one-offs must have a category)
 - � Refresh packing list view after save to show updated name
 
 ## Implementation
@@ -81,7 +81,7 @@ Packing List Item (packing_list_items table):
 ### Correct Behavior (Current)
 1. User opens one-off item "One off Spouse" from packing list
 2. Drawer shows: "One-off items do not have categories. Changes to name and assignments apply to this item only."
-3. Category section is disabled (one-offs don't have categories)
+3. Category selection is enabled and required for one-off items
 4. Assignment section is fully functional:
    - Shows current member assignments
    - User can change assignments (add/remove members, toggle whole family)

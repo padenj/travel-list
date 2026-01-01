@@ -182,10 +182,11 @@ export class ItemRepository {
   }
   async create(item: Item): Promise<Item> {
     const db = await getDb();
+    // Insert including optional categoryId (single-category model)
     await db.run(
-      `INSERT INTO items (id, familyId, name, isOneOff, created_at, updated_at, deleted_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [item.id, item.familyId, item.name, item.isOneOff ? 1 : 0, item.created_at, item.updated_at, null]
+      `INSERT INTO items (id, familyId, name, isOneOff, categoryId, created_at, updated_at, deleted_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [item.id, item.familyId, item.name, item.isOneOff ? 1 : 0, item.categoryId || null, item.created_at, item.updated_at, null]
     );
     return this.findById(item.id) as Promise<Item>;
   }

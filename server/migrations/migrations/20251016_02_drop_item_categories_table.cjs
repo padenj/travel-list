@@ -1,7 +1,6 @@
-export default {
+module.exports = {
   name: '20251016_02_drop_item_categories_table.js',
   up: async ({ db }) => {
-    // After migrating data into items.categoryId, drop the legacy item_categories table and its indexes
     await db.exec('PRAGMA foreign_keys = OFF');
     try {
       try { await db.exec('DROP INDEX IF EXISTS idx_item_categories_item'); } catch (e) {}

@@ -65,7 +65,13 @@ describe('Packing lists routes', () => {
     const addRes = await request(app)
       .post(`/api/packing-lists/${list.id}/items`)
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ oneOff: { name: 'Travel Pillow' } });
+      .send({ oneOff: { name: 'Travel Pillow', categoryId: (await (async () => {
+        // Create a category and return its id
+        const cid = uuidv4();
+        const db = await getDb();
+        await db.run('INSERT INTO categories (id, familyId, name, created_at, updated_at, deleted_at) VALUES (?, ?, ?, ?, ?, ?)', [cid, testFamilyId, 'Uncategorized', new Date().toISOString(), new Date().toISOString(), null]);
+        return cid;
+      })()) } });
 
     expect(addRes.status).toBe(200);
     expect(addRes.body.item).toBeDefined();

@@ -1,5 +1,8 @@
 [
   "20251008_fix_packing_list_item_checks_fk.js",
   "20251016_01_migrate_item_categories_to_items_categoryId.js",
-  "20251016_02_drop_item_categories_table.js"
+  "20251016_02_drop_item_categories_table.js",
+  "20251017_01_assign_uncategorized_items_to_first_category.js",
+  "20251227_add_packing_list_members.js",
+  "20260101_01_rename_templates_to_item_groups.js"
 ]

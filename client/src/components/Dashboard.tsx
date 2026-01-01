@@ -26,6 +26,8 @@ export default function Dashboard(): React.ReactElement {
   const [showItemDrawer, setShowItemDrawer] = useState(false);
   const [itemDrawerDefaultMember, setItemDrawerDefaultMember] = useState<string | null>(null);
   const [showAddItemsDrawer, setShowAddItemsDrawer] = useState(false);
+  const [addItemsDrawerInitialMembers, setAddItemsDrawerInitialMembers] = useState<string[] | undefined>(undefined);
+  const [addItemsDrawerInitialWhole, setAddItemsDrawerInitialWhole] = useState<boolean | undefined>(undefined);
   const [familyMembersState, setFamilyMembersState] = useState<any[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [showEditListDrawer, setShowEditListDrawer] = useState(false);
@@ -381,8 +383,15 @@ export default function Dashboard(): React.ReactElement {
   }, [activeListId, notNeededWhole, notNeededByUser]);
 
   const openAddDrawerFor = useCallback((userId: string | null) => {
-    setItemDrawerDefaultMember(userId);
-    setShowItemDrawer(true);
+    // Open the unified AddItemsDrawer and pre-select the clicked member (or whole-family)
+    if (userId === null) {
+      setAddItemsDrawerInitialMembers(undefined);
+      setAddItemsDrawerInitialWhole(true);
+    } else {
+      setAddItemsDrawerInitialMembers([userId]);
+      setAddItemsDrawerInitialWhole(false);
+    }
+    setShowAddItemsDrawer(true);
   }, []);
 
   const openAddItemsOneOff = () => {
@@ -438,6 +447,27 @@ export default function Dashboard(): React.ReactElement {
       setItemDrawerDefaultMember(null);
     }
   };
+
+  const handleAddItemsApply = useCallback(async (selectedIds: string[], keepOpen?: boolean) => {
+    if (!activeListId) {
+      showNotification({ title: 'No list selected', message: 'Select a list before adding', color: 'yellow' });
+      return;
+    }
+    try {
+      await Promise.all(selectedIds.map(id => addItemToPackingList(activeListId, id)));
+      // Refresh the active list view
+      setListSelectionCount(prev => prev + 1);
+    } catch (err) {
+      console.error('Failed to add items to packing list', err);
+      showNotification({ title: 'Failed', message: 'Failed to add items to packing list', color: 'red' });
+    } finally {
+      if (!keepOpen) {
+        setShowAddItemsDrawer(false);
+        setAddItemsDrawerInitialMembers(undefined);
+        setAddItemsDrawerInitialWhole(undefined);
+      }
+    }
+  }, [activeListId]);
   // Family setup wizard removed: families are created via System Administration
   
 
@@ -496,6 +526,18 @@ export default function Dashboard(): React.ReactElement {
             defaultAssignedMemberId={itemDrawerDefaultMember}
             onSaved={handleItemDrawerSaved}
             showIsOneOffCheckbox={true}
+            promoteContext={activeListId ? { listId: activeListId, packingListItemId: '' } : null}
+          />
+          <AddItemsDrawer
+            opened={showAddItemsDrawer}
+            onClose={() => { setShowAddItemsDrawer(false); setAddItemsDrawerInitialMembers(undefined); setAddItemsDrawerInitialWhole(undefined); }}
+            familyId={familyId}
+            excludedItemIds={excludedItemIds}
+            onApply={handleAddItemsApply}
+            title="Add Items"
+            showIsOneOffCheckbox={true}
+            initialMembers={addItemsDrawerInitialMembers}
+            initialWhole={addItemsDrawerInitialWhole}
             promoteContext={activeListId ? { listId: activeListId, packingListItemId: '' } : null}
           />
         </Stack>

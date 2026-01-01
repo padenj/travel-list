@@ -1,9 +1,9 @@
 import { useEffect, useState, useMemo } from 'react';
 import { Drawer, Button, Group, Text, Checkbox, Loader, Divider, TextInput } from '@mantine/core';
-import Fuse from 'fuse.js';
+import useFuzzySearch from '../utils/useFuzzySearch';
 import { IconPlus } from '@tabler/icons-react';
 import ItemEditDrawer from './ItemEditDrawer';
-import { getItems, getCategories } from '../api';
+import { getItems, getCategories, getMembersForItem } from '../api';
 import { showNotification } from '@mantine/notifications';
 
 interface Props {
@@ -34,6 +34,7 @@ export default function AddItemsDrawer({ opened, onClose, familyId, excludedItem
   const [showEditItemDrawer, setShowEditItemDrawer] = useState(false);
   const [editTargetItem, setEditTargetItem] = useState<any | null>(null);
   const [itemCategoriesMap, setItemCategoriesMap] = useState<Record<string, any[]>>({});
+  const [itemMembersMap, setItemMembersMap] = useState<Record<string, any[]>>({});
 
   const loadItems = async () => {
     if (!familyId) return;
@@ -59,6 +60,25 @@ export default function AddItemsDrawer({ opened, onClose, familyId, excludedItem
           else map[it.id] = [];
         }
         setItemCategoriesMap(map);
+        // Fetch members for each filtered item so we can display assigned members inline
+        try {
+          const membersMap: Record<string, any[]> = {};
+          await Promise.all(filtered.map(async (it: any) => {
+            try {
+              const mr = await getMembersForItem(it.id);
+              if (mr && mr.response && mr.response.ok) {
+                membersMap[it.id] = Array.isArray(mr.data) ? mr.data : (mr.data || []);
+              } else {
+                membersMap[it.id] = [];
+              }
+            } catch (e) {
+              membersMap[it.id] = [];
+            }
+          }));
+          setItemMembersMap(membersMap);
+        } catch (e) {
+          // ignore
+        }
       }
     } catch (e) {
       console.error('Failed to load items for AddItemsDrawer', e);
@@ -71,31 +91,11 @@ export default function AddItemsDrawer({ opened, onClose, familyId, excludedItem
     if (opened) loadItems();
   }, [opened, familyId, excludedItemIds.join(',')]);
 
-  const fuse = useMemo(() => {
-    if (!allItems || allItems.length === 0) return null;
-    try {
-      return new Fuse(allItems, {
-        keys: ['name', 'description'],
-        threshold: 0.3,
-        distance: 32,
-        minMatchCharLength: 1,
-        ignoreLocation: true,
-      });
-    } catch (e) {
-      return null;
-    }
-  }, [allItems]);
-
+  const fuseResults = useFuzzySearch(allItems, query, {}, 500);
   const visibleItems = useMemo(() => {
     if (!query) return (allItems || []).slice().sort((a: any, b: any) => (a.name || '').localeCompare(b.name || ''));
-    if (!fuse) return [];
-    try {
-      const raw = fuse.search(query, { limit: 500 });
-      return raw.map(r => r.item);
-    } catch (e) {
-      return [];
-    }
-  }, [query, fuse, allItems]);
+    return (fuseResults || []).map(r => r.item);
+  }, [query, fuseResults, allItems]);
 
   const apply = async () => {
     if (selectedToAdd.length === 0) {
@@ -119,10 +119,6 @@ export default function AddItemsDrawer({ opened, onClose, familyId, excludedItem
         <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
           <Group style={{ marginBottom: 8 }}>
             <Button variant="default" size="xs" onClick={onClose}>Cancel</Button>
-            <Button size="xs" leftSection={<IconPlus size={16} />} onClick={() => {
-              setEditTargetItem({ itemId: null, name: '' });
-              setShowEditItemDrawer(true);
-            }}>New Item</Button>
             <div style={{ flex: '1 1 auto' }} />
             <Button size="xs" onClick={apply}>Apply</Button>
           </Group>
@@ -139,6 +135,94 @@ export default function AddItemsDrawer({ opened, onClose, familyId, excludedItem
                 ) : (
                   (() => {
                     const visible = visibleItems;
+                    const q = (query || '').trim();
+                    const qLower = q.toLowerCase();
+
+                    // Exact-match policy: hide the Add New option only when the query
+                    // exactly matches an existing item's name (case-insensitive).
+                    const hasExact = q && allItems.some(ai => (ai.name || '').toLowerCase() === qLower);
+
+                    if (!q) {
+                      if (visible.length === 0) return <Text c="dimmed">No available items</Text>;
+                    }
+
+                    // Show Add New when the user typed something and there's no exact match.
+                    if (q && !hasExact) {
+                      const titleCase = (s: string) => s.split(/\s+/).filter(Boolean).map(w => w[0]?.toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+                      return (
+                        <div>
+                          <div style={{ marginBottom: 8 }}>
+                            <Button size="sm" leftSection={<IconPlus size={14} />} onClick={() => {
+                              setEditTargetItem({ itemId: null, name: titleCase(q) });
+                              // If the AddItemsDrawer was opened for whole-family, ensure the nested
+                              // ItemEditDrawer receives `defaultAssignedMemberId={null}` so it pre-selects whole-family.
+                              // Otherwise, pass the first initial member if provided so a member is pre-selected.
+                              setShowEditItemDrawer(true);
+                            }}>Add New Item: "{titleCase(q)}"</Button>
+                          </div>
+                          <div>
+                            {visible.length === 0 ? (
+                              <Text c="dimmed">No matching items. Create a new item with the name above.</Text>
+                            ) : (
+                              (() => {
+                                const groups: Record<string, any[]> = {};
+                                for (const it of visible) {
+                                  const cats = itemCategoriesMap[it.id] || [];
+                                  const catName = (cats.length > 0 && cats[0] && cats[0].name) ? cats[0].name : 'Uncategorized';
+                                  if (!groups[catName]) groups[catName] = [];
+                                  groups[catName].push(it);
+                                }
+
+                                const sortedGroupNames = Object.keys(groups).sort((a, b) => a.localeCompare(b));
+
+                                return sortedGroupNames.map((groupName, gi) => {
+                                  const items = (groups[groupName] || []).slice().sort((a: any, b: any) => (a.name || '').localeCompare(b.name || ''));
+                                  return (
+                                    <div key={groupName} style={{ padding: '6px 0' }}>
+                                      {gi !== 0 && <Divider my="xs" />}
+                                      <Text fw={600} size="sm" style={{ margin: '8px 0' }}>{groupName}</Text>
+                                      {items.map(it => {
+                                        const cats = itemCategoriesMap[it.id] || [];
+                                        const assignedCategory = cats.length > 0 ? cats[0] : null;
+                                        const assignedOther = assignedCategory && targetCategoryId && assignedCategory.id !== targetCategoryId;
+                                        return (
+                                          <div key={it.id} style={{ display: 'flex', flexDirection: 'column', padding: '6px 0' }}>
+                                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                                                <Checkbox checked={selectedToAdd.includes(it.id)} onChange={(e) => {
+                                                  const checked = e.currentTarget.checked;
+                                                  setSelectedToAdd(prev => checked ? [...prev, it.id] : prev.filter(x => x !== it.id));
+                                                }} />
+                                                <div style={{ display: 'flex', gap: 6, alignItems: 'baseline' }}>
+                                                  <Text style={{ whiteSpace: 'normal', wordBreak: 'break-word' }}>{it.name}</Text>
+                                                  {assignedCategory && (
+                                                    <Text c="dimmed" size="sm" style={{ marginLeft: 6 }}>- {assignedCategory.name}</Text>
+                                                  )}
+                                                </div>
+                                              </div>
+                                              <div />
+                                            {/* Inline: render assigned members (if any) */}
+                                            {Array.isArray(itemMembersMap[it.id]) && itemMembersMap[it.id].length > 0 ? (
+                                              <div style={{ marginLeft: 36, marginTop: 6 }}>
+                                                <Text size="xs" c="dimmed">Assigned to: {itemMembersMap[it.id].map(m => m.name || m.display_name || m.username || m.id).join(', ')}</Text>
+                                              </div>
+                                            ) : null}
+                                            </div>
+                                            {selectedToAdd.includes(it.id) && assignedOther && (
+                                              <Text color="red" size="sm" style={{ marginLeft: 36, marginTop: 4 }}>This item will be moved from it's current category to this category</Text>
+                                            )}
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  );
+                                });
+                              })()
+                            )}
+                          </div>
+                        </div>
+                      );
+                    }
 
                     if (visible.length === 0) return <Text c="dimmed">No available items</Text>;
 
@@ -178,6 +262,11 @@ export default function AddItemsDrawer({ opened, onClose, familyId, excludedItem
                                     </div>
                                   </div>
                                   <div />
+                                          {Array.isArray(itemMembersMap[it.id]) && itemMembersMap[it.id].length > 0 ? (
+                                            <div style={{ marginLeft: 36, marginTop: 6 }}>
+                                              <Text size="xs" c="dimmed">Assigned to: {itemMembersMap[it.id].map(m => m.name || m.display_name || m.username || m.id).join(', ')}</Text>
+                                            </div>
+                                          ) : null}
                                 </div>
                                 {selectedToAdd.includes(it.id) && assignedOther && (
                                   <Text color="red" size="sm" style={{ marginLeft: 36, marginTop: 4 }}>This item will be moved from it's current category to this category</Text>
@@ -205,6 +294,7 @@ export default function AddItemsDrawer({ opened, onClose, familyId, excludedItem
         showIsOneOffCheckbox={showIsOneOffCheckbox}
         initialMembers={initialMembers}
         initialWhole={initialWhole}
+        defaultAssignedMemberId={typeof initialWhole !== 'undefined' && initialWhole ? null : (Array.isArray(initialMembers) && initialMembers.length > 0 ? initialMembers[0] : undefined)}
         onSaved={async (payload) => {
           try {
             await loadItems();

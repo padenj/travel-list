@@ -4,7 +4,7 @@ import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
 import { IconTrash, IconPlus } from '@tabler/icons-react';
 import { getCurrentUserProfile, createFamilyMember, deleteUser, getFamily, updateFamilyMemberOrder, editFamilyMember, resetFamilyMemberPassword } from '../api';
-import FamilyMembersTable from './FamilyMembersTable';
+import FamilyMembersTable from '../components/FamilyMembersTable';
 import { useImpersonation } from '../contexts/ImpersonationContext';
 
 interface User {

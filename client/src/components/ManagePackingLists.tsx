@@ -6,6 +6,7 @@ import {
   getCurrentUserProfile,
   getPackingList,
   getTemplates,
+  getItemGroups,
   getItems,
   updatePackingList,
   deletePackingList,
@@ -97,9 +98,9 @@ export default function ManagePackingLists() {
       // Load templates for this family so the assignments drawer can show them
       try {
         if (fid) {
-          const tRes = await getTemplates(fid);
+          const tRes = await getItemGroups(fid);
           if (tRes.response && tRes.response.ok) {
-            setTemplates(tRes.data?.templates || []);
+            setTemplates(tRes.data?.itemGroups || tRes.data?.templates || []);
           } else {
             setTemplates([]);
           }

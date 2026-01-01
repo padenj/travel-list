@@ -3,18 +3,28 @@ import { Button, TextInput, Textarea, Group, Modal, Checkbox, Stack, Tabs, Card,
 import { useNavigate } from 'react-router-dom';
 import {
   getTemplates,
+  getItemGroups,
   createTemplate,
+  createItemGroup,
   updateTemplate,
+  updateItemGroup,
   deleteTemplate,
+  deleteItemGroup,
   assignCategoryToTemplate,
+  assignCategoryToItemGroup,
   assignItemToTemplate,
+  assignItemToItemGroup,
   getCategories,
   getItems,
   getCategoriesForTemplate,
+  getCategoriesForItemGroup,
   getItemsForTemplate,
+  getItemsForItemGroup,
   getItemsForCategory,
   removeItemFromTemplate,
-  removeCategoryFromTemplate
+  removeItemFromItemGroup,
+  removeCategoryFromTemplate,
+  removeCategoryFromItemGroup
 } from '../api';
 import { getMembersForItem } from '../api';
 import { getCurrentUserProfile } from '../api';
@@ -71,8 +81,8 @@ export default function TemplateManager() {
       }
       if (fid) {
         setFamilyId(fid);
-        const templatesRes = await getTemplates(fid);
-        const templates = templatesRes.data?.templates || [];
+          const templatesRes = await getItemGroups(fid);
+          const templates = templatesRes.data?.itemGroups || templatesRes.data?.templates || [];
   setTemplates(templates);
   getCategories(fid).then(res => setCategories((res.data?.categories || []).slice().sort((a: Category, b: Category) => (a.name || '').localeCompare(b.name || ''))));
         getItems(fid).then(res => setItems(res.data?.items || []));
@@ -88,9 +98,9 @@ export default function TemplateManager() {
     for (const template of templateList) {
       try {
         const [catRes, itemRes] = await Promise.all([
-          getCategoriesForTemplate(template.id),
-          getItemsForTemplate(template.id)
-        ]);
+            getCategoriesForItemGroup(template.id),
+            getItemsForItemGroup(template.id)
+          ]);
   const templateCategories = catRes.response.ok && catRes.data ? catRes.data.categories : [];
   // sort categories alphabetically
   const sortedTemplateCategories = (templateCategories || []).slice().sort((a: Category, b: Category) => (a.name || '').localeCompare(b.name || ''));
@@ -162,36 +172,36 @@ export default function TemplateManager() {
     if (!form.name.trim() || !familyId) return;
     let templateId: string;
     if (selectedTemplate) {
-      await updateTemplate(selectedTemplate.id, {
+      await updateItemGroup(selectedTemplate.id, {
         name: form.name,
         description: form.description,
       });
       templateId = selectedTemplate.id;
     } else {
-      const createRes = await createTemplate(familyId, form.name, form.description);
-      templateId = createRes.data?.template?.id;
+      const createRes = await createItemGroup(familyId, form.name, form.description);
+      templateId = createRes.data?.itemGroup?.id || createRes.data?.template?.id;
     }
     // Assign categories/items
-    for (const catId of form.categories) {
-      await assignCategoryToTemplate(templateId, catId);
+      for (const catId of form.categories) {
+      await assignCategoryToItemGroup(templateId, catId);
     }
     for (const itemId of form.items) {
-      await assignItemToTemplate(templateId, itemId);
+      await assignItemToItemGroup(templateId, itemId);
     }
     setModalOpen(false);
     if (familyId) {
-      const templatesRes = await getTemplates(familyId);
-      const updatedTemplates = templatesRes.data?.templates || [];
+      const templatesRes = await getItemGroups(familyId);
+      const updatedTemplates = templatesRes.data?.itemGroups || templatesRes.data?.templates || [];
       setTemplates(updatedTemplates);
       await loadTemplateDetails(updatedTemplates);
     }
   };
 
   const handleDelete = async (id: string) => {
-    await deleteTemplate(id);
+    await deleteItemGroup(id);
     if (familyId) {
-      const templatesRes = await getTemplates(familyId);
-      const updatedTemplates = templatesRes.data?.templates || [];
+      const templatesRes = await getItemGroups(familyId);
+      const updatedTemplates = templatesRes.data?.itemGroups || templatesRes.data?.templates || [];
       setTemplates(updatedTemplates);
       await loadTemplateDetails(updatedTemplates);
     }
@@ -280,7 +290,7 @@ export default function TemplateManager() {
                               <div>
                                 <Group style={{ justifyContent: 'space-between', alignItems: 'center' }}>
                                   <Title order={4} mb="sm">Individual Items</Title>
-                                  <Button size="xs" leftSection={<IconPlus size={16} />} onClick={() => handleAddIndividualItem(template.id)}>Add Item</Button>
+                                                        <Button size="xs" leftSection={<IconPlus size={16} />} onClick={() => handleAddIndividualItem(template.id)}>Add Item</Button>
                                 </Group>
                                 <List mb="md">
                                         {details.items && details.items.length > 0 ? (
@@ -294,7 +304,7 @@ export default function TemplateManager() {
                                               <IconEdit size={16} />
                                             </ActionIcon>
                                             <ActionIcon color="red" variant="light" onClick={async () => {
-                                              await removeItemFromTemplate(template.id, item.id);
+                                              await removeItemFromItemGroup(template.id, item.id);
                                               setTemplateDetails(prev => ({
                                                 ...prev,
                                                 [template.id]: {

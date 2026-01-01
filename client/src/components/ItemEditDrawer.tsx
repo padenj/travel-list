@@ -5,6 +5,8 @@ import {
   getItemEditData,
   assignItemToCategory,
   removeItemFromCategory,
+  assignItemToTemplate,
+  removeItemFromTemplate,
   assignToMember,
   removeFromMember,
   assignToWholeFamily,
@@ -19,8 +21,9 @@ import {
   getItems,
   addItemToPackingList,
   getCategoriesForItem,
+  getItemGroups,
 } from '../api';
-import Fuse from 'fuse.js';
+import useFuzzySearch from '../utils/useFuzzySearch';
 
 type OnSavedPayload = { id?: string; name?: string; members?: string[]; whole?: boolean } | undefined;
 
@@ -66,25 +69,31 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
   const [initialCategory, setInitialCategory] = useState<string | null>(null);
   const [isMasterOneOff, setIsMasterOneOff] = useState<boolean>(false);
   const [familyMembers, setFamilyMembers] = useState<any[]>([]);
+  const [itemFamilyId, setItemFamilyId] = useState<string | null>(familyId || null);
+  const [itemGroups, setItemGroups] = useState<any[]>([]);
+  const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([]);
+  const [initialGroupIds, setInitialGroupIds] = useState<string[]>([]);
   const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
   const [initialMembers, setInitialMembers] = useState<string[]>([]);
   const [selectedWhole, setSelectedWhole] = useState<boolean>(false);
   const [initialWhole, setInitialWhole] = useState<boolean>(false);
   const [name, setName] = useState(initialName || '');
   // Checkbox state: when checked => also add for future trips => isOneOff = 0
+  // Checkbox state: when checked => this trip only (one-off) => isOneOff = 1
+  // Default to false so OFF = add for future trips (master item)
   const [alsoAddForFutureTrips, setAlsoAddForFutureTrips] = useState<boolean>(false);
+  const [thisTripOnly, setThisTripOnly] = useState<boolean>(false);
   const [promotionConfirm, setPromotionConfirm] = useState<{ open: boolean; reason?: string }>(() => ({ open: false }));
 
   // Creating a one-off: new item, the "Also add for future trips" checkbox is shown
   // and the user left it unchecked => this should create a packing-list one-off master
   // and category selection should be disabled/optional in that flow.
-  const isCreatingOneOff = !masterItemId && showIsOneOffCheckbox && !alsoAddForFutureTrips;
-  // When editing an existing one-off, if the "add to master list" checkbox is checked,
-  // treat it as a regular item (category required). If unchecked, keep one-off behavior.
-  const isConvertingOneOffToRegular = masterItemId && isMasterOneOff && alsoAddForFutureTrips;
+  const isCreatingOneOff = !masterItemId && showIsOneOffCheckbox && thisTripOnly;
+  // When editing an existing one-off, converting to regular occurs when the user turns the switch OFF
+  const isConvertingOneOffToRegular = masterItemId && isMasterOneOff && !thisTripOnly;
   // Effective one-off flag: true when creating a packing-list one-off OR when the
-  // master item is a one-off AND not being converted to regular.
-  const isOneOff = isCreatingOneOff || (isMasterOneOff && !isConvertingOneOffToRegular);
+  // master item is a one-off and the switch remains ON.
+  const isOneOff = (isCreatingOneOff) || (masterItemId ? (isMasterOneOff && thisTripOnly) : false);
 
   useEffect(() => {
     setName(initialName || '');
@@ -95,6 +104,9 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
   const [similarResults, setSimilarResults] = useState<any[]>([]);
   const [existingMasterIds, setExistingMasterIds] = useState<Set<string>>(new Set());
   const [itemCategoriesMap, setItemCategoriesMap] = useState<Record<string, any[]>>({});
+
+  // Prepare fuzzy search results using shared hook (no debouncing here)
+  const rawFuseResults = useFuzzySearch(masterItems, (name || '').trim(), { threshold: 0.25, distance: 32, minMatchCharLength: 2, ignoreLocation: true }, 10);
 
   // Load master items for similarity lookup when creating a new item
   useEffect(() => {
@@ -148,7 +160,7 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
     return () => { cancelled = true; };
   }, [opened, promoteContext]);
 
-  // Compute similar results as the name changes (debounced) using Fuse.js for fuzzy matching
+  // Compute similar results as the name changes (debounced) using shared fuzzy hook
   useEffect(() => {
     if (masterItemId) return; // only for new item
     const trimmed = (name || '').trim();
@@ -160,21 +172,13 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
     const timer = setTimeout(async () => {
       if (!active) return;
       try {
-        const fuse = new Fuse(masterItems, {
-          keys: ['name', 'description'],
-          threshold: 0.25,
-          distance: 32,
-          minMatchCharLength: 2,
-          ignoreLocation: true,
-        });
-        const raw = fuse.search(trimmed, { limit: 10 });
-        // fuse score: lower is better. filter out high-score (poor) matches.
-        const filtered = raw.filter(r => typeof r.score === 'number' ? r.score <= 0.45 : true).slice(0, 5).map(r => r.item);
+        const raw = rawFuseResults || [];
+        const scored = raw.filter(r => typeof r.score === 'number' ? r.score <= 0.45 : true).slice(0, 5).map(r => r.item);
         if (!active) return;
-        setSimilarResults(filtered);
+        setSimilarResults(scored);
 
         // fetch categories for the filtered items if we don't already have them
-        const missing = filtered.filter(it => !itemCategoriesMap[it.id]).map(it => it.id);
+        const missing = scored.filter(it => !itemCategoriesMap[it.id]).map(it => it.id);
         if (missing.length > 0) {
           const mapCopy: Record<string, any[]> = { ...itemCategoriesMap };
           await Promise.all(missing.map(async (iid) => {
@@ -194,11 +198,13 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
       }
     }, 200);
     return () => { active = false; clearTimeout(timer); };
-  }, [name, masterItems, masterItemId]);
+  }, [rawFuseResults, name, masterItems, masterItemId]);
 
   useEffect(() => {
-    // default checkbox state: unchecked (isOneOff = 1) when creating from dashboard/edit packing list drawer
+    // default switch state: OFF by default for creation; for edit mode the
+    // fetched payload will set `thisTripOnly` appropriately.
     setAlsoAddForFutureTrips(false);
+    setThisTripOnly(false);
   }, [opened, masterItemId, promoteContext]);
 
   useEffect(() => {
@@ -214,6 +220,9 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
           // master payload received (verbose log removed)
           const masterOneOffFlag = !!(payload.item?.isOneOff);
           setIsMasterOneOff(masterOneOffFlag);
+          // Reflect the item's one-off state in the UI switch when editing
+          setThisTripOnly(masterOneOffFlag);
+          setItemFamilyId(payload.item?.familyId || familyId || null);
           // Seed the editable name from the payload if available; fall back to prop initialName
           setName(payload.item?.name || payload.name || initialName || '');
           setCategories(payload.categories || []);
@@ -246,6 +255,25 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
             });
           }
           setFamilyMembers(payload.members || []);
+          // Item groups (templates) support: payload may include itemGroups and itemGroupIds
+          const groups = Array.isArray(payload.itemGroups) ? payload.itemGroups : [];
+          const groupIds = Array.isArray(payload.itemGroupIds) ? payload.itemGroupIds : [];
+          setItemGroups(groups);
+          setInitialGroupIds(groupIds);
+          setSelectedGroupIds(groupIds.slice());
+          // If the consolidated payload didn't include item groups, try a family-level fetch
+          // so the checkbox list can render during edit mode as well.
+          if ((!groups || groups.length === 0) && familyId) {
+            try {
+              const gres = await getItemGroups(familyId);
+              if (gres && gres.response && gres.response.ok) {
+                const fetched = gres.data?.itemGroups || gres.data?.templates || [];
+                if (Array.isArray(fetched) && fetched.length > 0) setItemGroups(fetched);
+              }
+            } catch (e) {
+              // ignore fallback failure
+            }
+          }
           // Use memberIds and wholeFamily from API if present, fallback to previous logic
           let assigned: string[] = [];
           if (Array.isArray(payload.memberIds)) {
@@ -265,6 +293,7 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
         } else {
           // New item: load family-level categories and members
           if (familyId) {
+            setItemFamilyId(familyId || null);
             let familyMembersFromProfile: any[] = [];
             try {
               const cats = await getCategories(familyId);
@@ -328,6 +357,8 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
             }
             // initialWhole reflects persisted state; new items start false
             setInitialWhole(false);
+            // ensure create-mode switch defaults to false
+            setThisTripOnly(false);
           }
         }
       } catch (err) {
@@ -345,8 +376,8 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
   useEffect(() => {
     if (!opened) return;
     if (masterItemId) return; // only for create mode
-    // Clear the name input for a fresh create
-    setName('');
+    // Seed the name input: prefer provided initialName when opening from another UI, otherwise clear
+    setName(initialName || '');
     // Seed selected members/whole from initial props
     const assigned = Array.isArray(initialMembersProp) ? initialMembersProp.slice() : [];
     setSelectedMembers(assigned);
@@ -365,6 +396,25 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
       return initialMembersProp.slice();
     });
   }, [familyMembers, initialMembersProp, opened, masterItemId]);
+
+  // Load item groups when opening the drawer in create mode so the new-item UI shows groups
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!opened) return;
+      if (masterItemId) return; // only for create mode
+      if (!familyId) return;
+      try {
+        const res = await getItemGroups(familyId);
+        if (!cancelled && res.response && res.response.ok) {
+          setItemGroups(res.data?.itemGroups || res.data?.templates || []);
+        }
+      } catch (e) {
+        if (!cancelled) setItemGroups([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [opened, masterItemId, familyId]);
 
   const save = async () => {
     setSaving(true);
@@ -395,10 +445,10 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
         }
         // Create a new master item
         if (!familyId) throw new Error('Family not available');
-        // Determine isOneOff: when checkbox shown, unchecked => isOneOff=1, checked => isOneOff=0
+        // Determine isOneOff: when checkbox shown, checked => isOneOff=1 (This Trip Only), unchecked => isOneOff=0 (Add for Future Trips)
         // When checkbox is hidden (management page), isOneOff should always be 0
-        const isOneOffValue = showIsOneOffCheckbox ? (alsoAddForFutureTrips ? 0 : 1) : 0;
-  const createRes = await createItem(familyId, trimmedName || 'New Item', isOneOffValue);
+        const isOneOffValue = showIsOneOffCheckbox ? (thisTripOnly ? 1 : 0) : 0;
+  const createRes = await createItem(familyId, trimmedName || 'New Item', isOneOffValue, selectedCategory || null);
         if (!createRes.response.ok) throw new Error('Failed to create item');
         createdId = createRes.data?.item?.id;
   updatedName = createRes.data?.item?.name || trimmedName;
@@ -407,11 +457,22 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
   // Assign a single category (if present) and members
   const ops: Promise<any>[] = [];
   if (effectiveSelected.length > 0) ops.push(assignItemToCategory(createdId, effectiveSelected[0]));
-        if (selectedWhole && familyId) ops.push(assignToWholeFamily(createdId, familyId));
+        const assignFamilyId = familyId || itemFamilyId;
+        if (selectedWhole && assignFamilyId) ops.push(assignToWholeFamily(createdId, assignFamilyId));
         if (!selectedWhole) {
           for (const mid of selectedMembers) ops.push(assignToMember(createdId, mid));
         }
         await Promise.all(ops);
+        // Assign item to selected item groups (templates)
+        try {
+          const groupOps: Promise<any>[] = [];
+          for (const gid of selectedGroupIds || []) {
+            groupOps.push(assignItemToTemplate(gid, createdId));
+          }
+          await Promise.all(groupOps);
+        } catch (e) {
+          console.error('Failed to assign item to groups', e);
+        }
         showNotification({ title: 'Saved', message: 'Item created.', color: 'green' });
         if (onSaved) await onSaved(createdId ? { id: createdId, name: updatedName, members: selectedMembers.slice(), whole: !!selectedWhole } : undefined);
         onClose();
@@ -434,19 +495,18 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
       // Update category and member assignments
       const ops: Promise<any>[] = [];
       
-      // For one-off items, skip category updates (they don't have categories)
-      if (!isOneOff) {
-        const effectiveInitial = initialCategory ? [initialCategory] : [];
-        const toAddCats = effectiveSelected.filter((c: string) => !effectiveInitial.includes(c));
-        const toRemoveCats = effectiveInitial.filter((c: string) => !effectiveSelected.includes(c));
-        // Since single-category, we'll add the new category (if any) and remove the old one
-        for (const cid of toAddCats) ops.push(assignItemToCategory(masterItemId, cid));
-        for (const cid of toRemoveCats) ops.push(removeItemFromCategory(masterItemId, cid));
-      }
+      // Always update the single category assignment for the item
+      const effectiveInitial = initialCategory ? [initialCategory] : [];
+      const toAddCats = effectiveSelected.filter((c: string) => !effectiveInitial.includes(c));
+      const toRemoveCats = effectiveInitial.filter((c: string) => !effectiveSelected.includes(c));
+      // Since single-category, we'll add the new category (if any) and remove the old one
+      for (const cid of toAddCats) ops.push(assignItemToCategory(masterItemId, cid));
+      for (const cid of toRemoveCats) ops.push(removeItemFromCategory(masterItemId, cid));
 
       // Update member assignments (for both one-off and regular items)
+      const assignFamilyId = familyId || itemFamilyId;
       if (selectedWhole && !initialWhole) {
-        if (familyId) ops.push(assignToWholeFamily(masterItemId, familyId));
+        if (assignFamilyId) ops.push(assignToWholeFamily(masterItemId, assignFamilyId));
       } else if (!selectedWhole && initialWhole) {
         ops.push(removeFromWholeFamily(masterItemId));
       }
@@ -459,6 +519,17 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
       }
 
       await Promise.all(ops);
+      // Update item group assignments: add/remove as necessary
+      try {
+        const toAdd = selectedGroupIds.filter(g => !initialGroupIds.includes(g));
+        const toRemove = initialGroupIds.filter(g => !selectedGroupIds.includes(g));
+        const groupOps: Promise<any>[] = [];
+        for (const gid of toAdd) groupOps.push(assignItemToTemplate(gid, masterItemId));
+        for (const gid of toRemove) groupOps.push(removeItemFromTemplate(gid, masterItemId));
+        await Promise.all(groupOps);
+      } catch (e) {
+        console.error('Failed to sync item group assignments', e);
+      }
       const message = isOneOff ? 'One-off item updated.' : 'Item updated (applies to all lists).';
       showNotification({ title: 'Saved', message, color: 'green' });
       if (onSaved) await onSaved(updatedName ? { name: updatedName } : undefined);
@@ -498,15 +569,13 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
     <Drawer opened={opened} onClose={onClose} title={masterItemId ? 'Edit Item' : 'New Item'} position="right" size={720} padding="md" zIndex={zIndex}>
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
         <Text size="sm" c="dimmed">
-          {isOneOff 
-            ? 'Note: One-off items do not have categories. Changes to name and assignments apply to this item only.'
-            : 'Note: changing categories or assignments here updates the master item and will apply to all lists.'}
+          {'Note: changes here will apply according to whether this is a one-off or a master item. All items require a category and assignment.'}
         </Text>
         {loading ? (<div style={{ padding: 16 }}>Loading item details...</div>) : null}
 
         {/* Name - full width row */}
         <div style={{ marginTop: 12 }}>
-          <TextInput label="Name" value={name} onChange={(e) => setName(e.currentTarget.value)} />
+          <TextInput label="Item" value={name} onChange={(e) => setName(e.currentTarget.value)} />
         </div>
 
         {/* Similar existing items lookup */}
@@ -579,27 +648,42 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
         {/* Unified toggle: creation and promote/edit flows use the same switch */}
         {(showIsOneOffCheckbox && !masterItemId) || promoteContext || (masterItemId && isMasterOneOff) ? (
           <div style={{ marginTop: 8 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <Text size="sm" style={{ fontWeight: alsoAddForFutureTrips ? 400 : 700 }}>This Trip Only</Text>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <Switch
-                checked={alsoAddForFutureTrips}
+                checked={thisTripOnly}
                 onChange={(e) => {
                   const on = e.currentTarget.checked;
-                  // If turning on for an existing item (promote flow), require confirmation
-                  if (on && (promoteContext || (masterItemId && isMasterOneOff))) {
-                    setPromotionConfirm({ open: true, reason: promoteContext ? 'promote' : 'convert' });
-                    return;
+                  // If we're editing an existing item:
+                  // - Turning OFF a current one-off should prompt confirmation (convert to regular)
+                  // - Turning ON should NOT be allowed for items that were not previously one-off
+                  if (masterItemId) {
+                    if (on) {
+                      // Only allow turning ON if the item was already a master one-off
+                      if (!isMasterOneOff) return;
+                      // If item already one-off and we're turning ON again, just set state
+                      setThisTripOnly(true);
+                      return;
+                    } else {
+                      // Turning OFF (convert to regular) should require confirmation
+                      if (isMasterOneOff) {
+                        setPromotionConfirm({ open: true, reason: 'convert' });
+                        return;
+                      }
+                      return;
+                    }
                   }
-                  setAlsoAddForFutureTrips(on);
+                  // Creating a new item: toggling controls the one-off creation flag
+                  setThisTripOnly(on);
                 }}
-                aria-label={alsoAddForFutureTrips ? 'Add Item For Future Trips' : 'This Trip Only'}
+                aria-label={thisTripOnly ? 'This Trip Only' : 'Add to master list'}
+                disabled={!!masterItemId && !isMasterOneOff}
               />
-              <Text size="sm" style={{ fontWeight: alsoAddForFutureTrips ? 700 : 400 }}>Add Item For Future Trips</Text>
+              <Text size="sm">This Trip Only</Text>
             </div>
-            <Text size="xs" c="dimmed" style={{ marginTop: 6 }}>
+            <Text size="xs" c={thisTripOnly ? undefined : 'dimmed'} style={{ marginTop: 6, color: thisTripOnly ? 'rgba(0,0,0,0.85)' : undefined }}>
               {promoteContext || (masterItemId && isMasterOneOff)
-                ? 'Converting this one-off to a master item will apply changes to all lists and may require a category.'
-                : 'If set to "Add Item For Future Trips", the item will be added to the master list so it appears on future lists as well.'}
+                ? 'This item is currently a one-off. Toggle it off to add it to the master list for future trips.'
+                : 'When checked, the item will be created only for this list. When unchecked, it will be added to the master list for future trips.'}
             </Text>
           </div>
         ) : null}
@@ -612,21 +696,36 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
               <Text c="dimmed">No categories</Text>
             ) : (
               <div>
-                {/* Single-select using radio buttons; disabled/grayed when one-off */}
+                {/* Single-select using radio buttons; category is required for all items now */}
                 {categories.map((c: any) => (
                   <div key={c.id} style={{ padding: '6px 0' }}>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: isOneOff ? '#999' : undefined }}>
-                      <input type="radio" name="category" value={c.id} checked={selectedCategory === c.id} onChange={() => setSelectedCategory(c.id)} disabled={isOneOff} />
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <input type="radio" name="category" value={c.id} checked={selectedCategory === c.id} onChange={() => setSelectedCategory(c.id)} />
                       <span>{c.name}</span>
                     </label>
                   </div>
                 ))}
-                {/* When one-off, show helper text that category is optional and disabled */}
-                {isOneOff ? (
-                  <Text size="xs" c="dimmed">Category selection is disabled for one-off items.</Text>
-                ) : null}
               </div>
             )}
+            {/* Item Groups (Templates) moved here under categories */}
+            <div style={{ marginTop: 12 }}>
+              <Text size="sm" fw={700}>Item Groups</Text>
+              {itemGroups.length === 0 ? (
+                <Text c="dimmed">No item groups</Text>
+              ) : (
+                itemGroups.map((g: any) => (
+                  <div key={g.id} style={{ padding: '6px 0' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: (isCreatingOneOff ? 'rgba(0,0,0,0.4)' : undefined) }}>
+                      <input type="checkbox" value={g.id} disabled={isCreatingOneOff} checked={selectedGroupIds.includes(g.id)} onChange={(e) => {
+                        const checked = e.currentTarget.checked;
+                        setSelectedGroupIds(prev => checked ? [...prev, g.id] : prev.filter(id => id !== g.id));
+                      }} />
+                      <span>{g.name}</span>
+                    </label>
+                  </div>
+                ))
+              )}
+            </div>
           </div>
 
           <div style={{ flex: '1 1 50%', overflow: 'auto', paddingLeft: 12 }}>
@@ -649,49 +748,52 @@ export default function ItemEditDrawer({ opened, onClose, masterItemId, initialN
                   </div>
                 ))
               )}
+              {/* Item groups are shown on the left under Categories (no duplicate here) */}
+            </div>
+            {/* Promotion modal, validation hint, and action buttons moved here into right column */}
+            <Modal opened={promotionConfirm.open} onClose={() => setPromotionConfirm({ open: false })} title={promotionConfirm.reason === 'promote' ? 'Promote this item to the master list?' : 'Convert this one-off to a regular master item?'} zIndex={(zIndex ?? 2000) + 100}>
+              <div>
+                <Text size="sm">This will create/update a master item so the item appears on all lists. Changes may require selecting a category. Proceed?</Text>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
+                  <Button variant="default" onClick={() => setPromotionConfirm({ open: false })}>Cancel</Button>
+                  <Button color="blue" onClick={async () => {
+                    // Confirm conversion: turn OFF the one-off switch so save() will convert the item
+                    setThisTripOnly(false);
+                    setPromotionConfirm({ open: false });
+                  }}>Promote Item</Button>
+                </div>
+              </div>
+            </Modal>
+
+            {(
+              (name && (name || '').trim()) && (
+                (!selectedCategory) || (!masterItemId && !selectedWhole && selectedMembers.length === 0)
+              )
+            ) ? (
+              <div style={{ marginTop: 12, marginBottom: 8 }}>
+                <Text size="sm" color="red">Please select a category and at least one assignment (member or Whole Family) before saving.</Text>
+              </div>
+            ) : null}
+
+            <div style={{ marginTop: 8, display: 'flex', justifyContent: 'flex-end' }}>
+              <Group>
+                {masterItemId ? (
+                  <Button color="red" variant="light" onClick={handleDelete} disabled={saving}>Delete</Button>
+                ) : null}
+                <Button variant="default" onClick={onClose}>Cancel</Button>
+                <Button onClick={save} loading={saving}
+                  disabled={
+                    !( (name || '').trim() ) ||
+                    !selectedCategory ||
+                    (!masterItemId && !selectedWhole && selectedMembers.length === 0)
+                  }
+                >Save</Button>
+              </Group>
             </div>
           </div>
         </div>
 
-        {/* Buttons below in single column; promote/edit checkbox handled above for create-case */}
-        <div style={{ marginTop: 12 }}>
-          {/* Buttons area - promotion handled by unified switch above */}
-
-          <Modal opened={promotionConfirm.open} onClose={() => setPromotionConfirm({ open: false })} title={promotionConfirm.reason === 'promote' ? 'Promote this item to the master list?' : 'Convert this one-off to a regular master item?'} zIndex={(zIndex ?? 2000) + 100}>
-          <div>
-            <Text size="sm">This will create/update a master item so the item appears on all lists. Changes may require selecting a category. Proceed?</Text>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
-              <Button variant="default" onClick={() => setPromotionConfirm({ open: false })}>Cancel</Button>
-              <Button color="blue" onClick={async () => {
-                // Confirm promotion: enable the flag and close modal
-                setAlsoAddForFutureTrips(true);
-                setPromotionConfirm({ open: false });
-              }}>Promote Item</Button>
-            </div>
-          </div>
-          </Modal>
-
-          <Group mt="md" style={{ justifyContent: 'space-between' }}>
-            <div />
-            <Group>
-              {/* Delete button shown only when editing an existing master item */}
-              {masterItemId ? (
-                <Button color="red" variant="light" onClick={handleDelete} disabled={saving}>Delete</Button>
-              ) : null}
-              <Button variant="default" onClick={onClose}>Cancel</Button>
-                      <Button onClick={save} loading={saving}
-                        disabled={
-                          // name must be non-empty after trimming
-                          !( (name || '').trim() ) ||
-                          // category must be selected when not a one-off
-                          (!isOneOff && !selectedCategory) ||
-                          // when creating require assignments (whole or members)
-                          (!masterItemId && !selectedWhole && selectedMembers.length === 0)
-                        }
-                      >Save</Button>
-            </Group>
-          </Group>
-        </div>
+        
       </div>
     </Drawer>
   );

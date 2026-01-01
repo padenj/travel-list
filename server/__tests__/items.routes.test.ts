@@ -61,11 +61,15 @@ describe('Items routes', () => {
   });
 
   it('creates, updates, assigns and returns edit-data for an item', async () => {
-    // Create an item via API
+    // Create a category to assign to the item
+    const cid = uuidv4();
+    await categoryRepo.create({ id: cid, familyId, name: 'Essentials', created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
+
+    // Create an item via API (include required categoryId)
     const createResp = await request(app)
       .post('/api/items')
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ familyId, name: 'Wallet' });
+      .send({ familyId, name: 'Wallet', categoryId: cid });
     expect(createResp.status).toBe(200);
     const created = createResp.body.item;
     expect(created).toBeDefined();
@@ -90,12 +94,12 @@ describe('Items routes', () => {
     expect(updResp.body.item).toBeDefined();
     expect(updResp.body.item.name).toBe('Travel Wallet');
 
-    // Create a category and assign it to the item
-    const cid = uuidv4();
-    await categoryRepo.create({ id: cid, familyId, name: 'Essentials', created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
+    // Create a new category and assign it to the item
+    const cid2 = uuidv4();
+    await categoryRepo.create({ id: cid2, familyId, name: 'Accessories', created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
 
     const assignCat = await request(app)
-      .post(`/api/items/${itemId}/categories/${cid}`)
+      .post(`/api/items/${itemId}/categories/${cid2}`)
       .set('Authorization', `Bearer ${adminToken}`)
       .send();
     expect(assignCat.status).toBe(200);
@@ -124,7 +128,8 @@ describe('Items routes', () => {
       .send();
     expect(catResp.status).toBe(200);
     expect(Array.isArray(catResp.body.categories)).toBe(true);
-    expect(catResp.body.categories.map((c: any) => c.id)).toContain(cid);
+    const catIds = catResp.body.categories.map((c: any) => c.id);
+    expect(catIds).toContain(cid2);
 
     // Fetch item members
     const memResp = await request(app)

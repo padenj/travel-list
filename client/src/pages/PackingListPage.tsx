@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Container, Title, Group, Button, Modal, TextInput } from '@mantine/core';
-import ManagePackingLists from './ManagePackingLists';
+import ManagePackingLists from '../components/ManagePackingLists';
 import { getCurrentUserProfile, createPackingList } from '../api';
 import { showNotification } from '@mantine/notifications';
 import { useActivePackingList } from '../contexts/ActivePackingListContext';
