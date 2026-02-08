@@ -6,6 +6,8 @@ import express, { Request, Response, Router } from 'express';
 import path from 'path';
 import fs from 'fs';
 import { logAudit } from './audit';
+import { getDb } from './db';
+import { insertPackingListAudit, listPackingListAudit, listPackingListItemAudit, type AppliesToScope, type PackingListAuditAction } from './packing-list-audit';
 import { validatePassword, hashPassword, comparePassword, hashPasswordSync, comparePasswordSync, generateToken } from './auth';
 import { authMiddleware, familyAccessMiddleware } from './middleware';
 import { UserRepository, FamilyRepository, CategoryRepository, ItemRepository, updateCategoryPositions } from './repositories';
@@ -35,15 +37,107 @@ import { PackingListRepository } from './repositories';
 const packingListRepo = new PackingListRepository();
 import { addClient, removeClient, broadcastEvent, getClients, sseLog } from './sse';
 
+async function snapshotPackingListItemsForAudit(packingListId: string): Promise<Map<string, { name: string; appliesToScope: AppliesToScope }>> {
+  const db = await getDb();
+  const rows: any[] = await db.all(
+    `SELECT
+      pli.id as packing_list_item_id,
+      COALESCE(i.name, pli.display_name, '') as name,
+      CASE
+        WHEN iwf.item_id IS NOT NULL THEN 'family'
+        ELSE 'member'
+      END as applies_to_scope
+     FROM packing_list_items pli
+     LEFT JOIN items i ON i.id = pli.item_id AND i.deleted_at IS NULL
+     LEFT JOIN item_whole_family iwf ON iwf.item_id = i.id
+     WHERE pli.packing_list_id = ?`,
+    [packingListId]
+  );
+  const map = new Map<string, { name: string; appliesToScope: AppliesToScope }>();
+  for (const r of rows || []) {
+    if (!r || !r.packing_list_item_id) continue;
+    map.set(String(r.packing_list_item_id), { name: String(r.name || ''), appliesToScope: r.applies_to_scope as AppliesToScope });
+  }
+  return map;
+}
+
+async function getPackingListItemAuditInfo(packingListItemId: string): Promise<{ name: string; appliesToScope: AppliesToScope } | null> {
+  const db = await getDb();
+  const row: any = await db.get(
+    `SELECT
+      pli.id as packing_list_item_id,
+      COALESCE(i.name, pli.display_name, '') as name,
+      CASE
+        WHEN iwf.item_id IS NOT NULL THEN 'family'
+        ELSE 'member'
+      END as applies_to_scope
+     FROM packing_list_items pli
+     LEFT JOIN items i ON i.id = pli.item_id AND i.deleted_at IS NULL
+     LEFT JOIN item_whole_family iwf ON iwf.item_id = i.id
+     WHERE pli.id = ?`,
+    [packingListItemId]
+  );
+  if (!row) return null;
+  return { name: String(row.name || ''), appliesToScope: row.applies_to_scope as AppliesToScope };
+}
+
+async function auditPackingListDiff(opts: {
+  packingListId: string;
+  actorUserId?: string | null;
+  before: Map<string, { name: string; appliesToScope: AppliesToScope }>;
+  after: Map<string, { name: string; appliesToScope: AppliesToScope }>;
+  source?: string;
+}): Promise<void> {
+  const added: string[] = [];
+  const removed: string[] = [];
+  for (const id of opts.after.keys()) {
+    if (!opts.before.has(id)) added.push(id);
+  }
+  for (const id of opts.before.keys()) {
+    if (!opts.after.has(id)) removed.push(id);
+  }
+
+  for (const id of added) {
+    const info = opts.after.get(id);
+    await insertPackingListAudit({
+      packingListId: opts.packingListId,
+      packingListItemId: id,
+      actorUserId: opts.actorUserId ?? null,
+      action: 'ITEM_ADDED',
+      appliesToScope: info?.appliesToScope || 'member',
+      appliesToMemberId: null,
+      details: info?.name ? `Added ${info.name}` : 'Item added',
+      metadata: { source: opts.source || 'unknown', itemName: info?.name || null }
+    });
+  }
+
+  for (const id of removed) {
+    const info = opts.before.get(id);
+    await insertPackingListAudit({
+      packingListId: opts.packingListId,
+      packingListItemId: id,
+      actorUserId: opts.actorUserId ?? null,
+      action: 'ITEM_REMOVED',
+      appliesToScope: info?.appliesToScope || 'member',
+      appliesToMemberId: null,
+      details: info?.name ? `Removed ${info.name}` : 'Item removed',
+      metadata: { source: opts.source || 'unknown', itemName: info?.name || null }
+    });
+  }
+}
+
 // Async propagation helper: when a template changes, update all packing lists assigned to it
-function propagateTemplateToAssignedLists(templateId: string) {
+function propagateTemplateToAssignedLists(templateId: string, actorUserId?: string | null) {
   // run asynchronously to avoid blocking API responses
   setImmediate(async () => {
     try {
       const lists = await packingListRepo.getPackingListsForTemplate(templateId);
       for (const l of lists) {
         try {
+          const before = await snapshotPackingListItemsForAudit(l.id);
           await packingListRepo.reconcilePackingListAgainstTemplate(l.id, templateId);
+          const after = await snapshotPackingListItemsForAudit(l.id);
+          await auditPackingListDiff({ packingListId: l.id, actorUserId: actorUserId ?? null, before, after, source: 'template_propagation' });
         } catch (err) {
           console.error('Error reconciling packing list from template during propagation', { listId: l.id, templateId, err });
         }
@@ -123,7 +217,7 @@ router.put('/template/:id', authMiddleware, async (req: Request, res: Response) 
     }
     const updated = await templateRepo.update(id, updates);
   // enqueue propagation to assigned packing lists (async)
-  propagateTemplateToAssignedLists(id);
+  propagateTemplateToAssignedLists(id, req.user?.id);
   return res.json({ template: updated });
   } catch (error) {
     console.error('Error updating template:', error);
@@ -162,7 +256,7 @@ router.post('/template/:id/categories/:categoryId', authMiddleware, async (req: 
     }
     await templateRepo.assignCategory(id, categoryId);
   // propagate changes to assigned lists
-  propagateTemplateToAssignedLists(id);
+  propagateTemplateToAssignedLists(id, req.user?.id);
   return res.json({ message: 'Category assigned to template' });
   } catch (error) {
     console.error('Error assigning category:', error);
@@ -271,7 +365,7 @@ router.put('/item-group/:id', authMiddleware, async (req: Request, res: Response
       }
     }
     const updated = await templateRepo.update(id, updates);
-    propagateTemplateToAssignedLists(id);
+    propagateTemplateToAssignedLists(id, req.user?.id);
     return res.json({ itemGroup: updated });
   } catch (error) {
     console.error('Error updating item group:', error);
@@ -308,7 +402,7 @@ router.delete('/template/:id/categories/:categoryId', authMiddleware, async (req
       }
     }
     await templateRepo.removeCategory(id, categoryId);
-  propagateTemplateToAssignedLists(id);
+  propagateTemplateToAssignedLists(id, req.user?.id);
   return res.json({ message: 'Category removed from template' });
   } catch (error) {
     console.error('Error removing category:', error);
@@ -458,7 +552,7 @@ router.post('/template/:id/sync-items', authMiddleware, async (req: Request, res
 
   const updatedItems = await templateRepo.getItemsForTemplate(id);
   // propagate changes to assigned lists
-  propagateTemplateToAssignedLists(id);
+  propagateTemplateToAssignedLists(id, req.user?.id);
   return res.json({ templateId: id, items: updatedItems });
   } catch (error) {
     console.error('Error syncing template items:', error);
@@ -488,7 +582,7 @@ router.post('/item-group/:id/sync-items', authMiddleware, async (req: Request, r
     for (const itemId of toAdd) await templateRepo.assignItem(id, itemId);
     for (const itemId of toRemove) await templateRepo.removeItem(id, itemId);
     const updatedItems = await templateRepo.getItemsForTemplate(id);
-    propagateTemplateToAssignedLists(id);
+    propagateTemplateToAssignedLists(id, req.user?.id);
     return res.json({ itemGroupId: id, items: updatedItems });
   } catch (error) {
     console.error('Error syncing item group items:', error);
@@ -701,9 +795,12 @@ router.post('/families/:familyId/packing-lists', authMiddleware, familyAccessMid
       newList.member_ids = memberIds;
     }
     if (templateId) {
+      const before = await snapshotPackingListItemsForAudit(newList.id);
       // record assignment and reconcile immediately for newly created list
       await packingListRepo.setTemplatesForPackingList(newList.id, [templateId]);
       await packingListRepo.reconcilePackingListAgainstTemplate(newList.id, templateId);
+      const after = await snapshotPackingListItemsForAudit(newList.id);
+      await auditPackingListDiff({ packingListId: newList.id, actorUserId: req.user?.id ?? null, before, after, source: 'create_list_with_template' });
     }
     return res.json({ list: newList });
   } catch (error) {
@@ -740,6 +837,44 @@ router.get('/packing-lists/:id', authMiddleware, async (req: Request, res: Respo
   }
 });
 
+// Get audit log entries for a packing list (paginated)
+router.get('/packing-lists/:id/audit', authMiddleware, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const limitRaw = (req.query && (req.query.limit as any)) || undefined;
+  const beforeIdRaw = (req.query && (req.query.beforeId as any)) || undefined;
+  const limit = limitRaw ? Number(limitRaw) : 50;
+  const beforeId = beforeIdRaw ? Number(beforeIdRaw) : null;
+  try {
+    const list = await packingListRepo.findById(id);
+    if (!list) return res.status(404).json({ error: 'Packing list not found' });
+    if (req.user?.role !== 'SystemAdmin' && req.user?.familyId !== list.family_id) return res.status(403).json({ error: 'Forbidden' });
+    const result = await listPackingListAudit({ packingListId: id, limit, beforeId });
+    return res.json({ items: result.items, nextBeforeId: result.nextBeforeId });
+  } catch (error) {
+    console.error('Error fetching packing list audit:', error);
+    return res.status(500).json({ error: 'Failed to fetch packing list audit' });
+  }
+});
+
+// Get audit log entries for a specific packing-list item (paginated)
+router.get('/packing-lists/:listId/items/:packingListItemId/audit', authMiddleware, async (req: Request, res: Response) => {
+  const { listId, packingListItemId } = req.params;
+  const limitRaw = (req.query && (req.query.limit as any)) || undefined;
+  const beforeIdRaw = (req.query && (req.query.beforeId as any)) || undefined;
+  const limit = limitRaw ? Number(limitRaw) : 50;
+  const beforeId = beforeIdRaw ? Number(beforeIdRaw) : null;
+  try {
+    const list = await packingListRepo.findById(listId);
+    if (!list) return res.status(404).json({ error: 'Packing list not found' });
+    if (req.user?.role !== 'SystemAdmin' && req.user?.familyId !== list.family_id) return res.status(403).json({ error: 'Forbidden' });
+    const result = await listPackingListItemAudit({ packingListId: listId, packingListItemId, limit, beforeId });
+    return res.json({ items: result.items, nextBeforeId: result.nextBeforeId });
+  } catch (error) {
+    console.error('Error fetching packing list item audit:', error);
+    return res.status(500).json({ error: 'Failed to fetch packing list item audit' });
+  }
+});
+
 // Populate an existing list from a template
 router.post('/packing-lists/:id/populate-from-template', authMiddleware, async (req: Request, res: Response) => {
   const { id } = req.params;
@@ -749,9 +884,12 @@ router.post('/packing-lists/:id/populate-from-template', authMiddleware, async (
     const list = await packingListRepo.findById(id);
     if (!list) return res.status(404).json({ error: 'Packing list not found' });
     if (req.user?.role !== 'SystemAdmin' && req.user?.familyId !== list.family_id) return res.status(403).json({ error: 'Forbidden' });
+    const before = await snapshotPackingListItemsForAudit(id);
     // persist assignment if not already assigned
     await packingListRepo.setTemplatesForPackingList(id, Array.from(new Set([...(await packingListRepo.getTemplatesForPackingList(id)), templateId])));
     await packingListRepo.reconcilePackingListAgainstTemplate(id, templateId);
+    const after = await snapshotPackingListItemsForAudit(id);
+    await auditPackingListDiff({ packingListId: id, actorUserId: req.user?.id ?? null, before, after, source: 'populate_from_template' });
     return res.json({ message: 'Populated from template and reconciled' });
   } catch (error) {
     console.error('Error populating packing list from template:', error);
@@ -769,6 +907,7 @@ router.put('/packing-lists/:id', authMiddleware, async (req: Request, res: Respo
     if (req.user?.role !== 'SystemAdmin' && req.user?.familyId !== existing.family_id) return res.status(403).json({ error: 'Forbidden' });
     // If templateIds provided, persist assignments. Optionally remove associated items for removed templates.
     if (Array.isArray(updates.templateIds)) {
+      const before = await snapshotPackingListItemsForAudit(id);
       const removeItemsFlag = !!updates.removeItemsForRemovedTemplates;
       console.log('[PUT /packing-lists/:id] Template update for list', id, '- templateIds:', updates.templateIds, 'removeItemsFlag:', removeItemsFlag);
       
@@ -787,7 +926,10 @@ router.put('/packing-lists/:id', authMiddleware, async (req: Request, res: Respo
       }
       
       // Enqueue background propagation for any other lists using these templates
-      for (const tid of updates.templateIds) propagateTemplateToAssignedLists(tid);
+      for (const tid of updates.templateIds) propagateTemplateToAssignedLists(tid, req.user?.id);
+
+      const after = await snapshotPackingListItemsForAudit(id);
+      await auditPackingListDiff({ packingListId: id, actorUserId: req.user?.id ?? null, before, after, source: 'packing_list_template_update' });
       
       // remove template-related flags from updates passed to generic update
       delete updates.templateIds;
@@ -865,6 +1007,27 @@ router.post('/packing-lists/:id/items', authMiddleware, async (req: Request, res
     } else {
       return res.status(400).json({ error: 'masterItemId or oneOff.name is required' });
     }
+
+    try {
+      const info = created && (created as any).id ? await getPackingListItemAuditInfo((created as any).id) : null;
+      await insertPackingListAudit({
+        packingListId: id,
+        packingListItemId: created && (created as any).id ? String((created as any).id) : null,
+        actorUserId: req.user?.id ?? null,
+        action: 'ITEM_ADDED',
+        appliesToScope: (info && info.appliesToScope) ? info.appliesToScope : 'member',
+        appliesToMemberId: null,
+        details: info?.name ? `Added ${info.name}` : 'Item added',
+        metadata: {
+          source: oneOff ? 'one_off' : 'master_item',
+          itemName: info?.name || null,
+          masterItemId: created && (created as any).item_id ? String((created as any).item_id) : (masterItemId ? String(masterItemId) : null),
+          memberIds: Array.isArray(memberIds) ? memberIds : null
+        }
+      });
+    } catch (e) {
+      console.warn('Failed to write packing list audit for add item', { listId: id, err: e });
+    }
   try { broadcastEvent({ type: 'packing_list_changed', listId: id, data: { item: created, change: 'add_item' } }); } catch (e) {}
   return res.json({ item: created });
   } catch (error) {
@@ -931,6 +1094,30 @@ router.patch('/packing-lists/:listId/items/:itemId/check', authMiddleware, async
     if (process.env.NODE_ENV !== 'production') console.log('About to call setUserItemChecked with', { listName: list.name, packing_list_item_id: pli.id, memberId, checked, checkedType: typeof checked });
   await packingListRepo.setUserItemChecked(pli.id, memberId, !!checked);
   console.log('setUserItemChecked completed for', { listName: list.name, packing_list_item_id: pli.id, memberId });
+
+  try {
+    const info = await getPackingListItemAuditInfo(pli.id);
+    const action: PackingListAuditAction = (!!checked) ? 'ITEM_CHECKED' : 'ITEM_UNCHECKED';
+    const appliesToScope: AppliesToScope = (memberId === null) ? 'family' : 'member';
+    await insertPackingListAudit({
+      packingListId: listId,
+      packingListItemId: pli.id,
+      actorUserId: req.user?.id ?? null,
+      action,
+      appliesToScope,
+      appliesToMemberId: memberId,
+      details: info?.name ? `${!!checked ? 'Checked' : 'Unchecked'} ${info.name}` : (!!checked ? 'Item checked' : 'Item unchecked'),
+      metadata: {
+        source: 'check',
+        itemName: info?.name || null,
+        memberId: memberId,
+        checked: !!checked
+      }
+    });
+  } catch (e) {
+    console.warn('Failed to write packing list audit for check', { listId, itemId: pli.id, err: e });
+  }
+
   try { broadcastEvent({ type: 'packing_list_changed', listId, data: { itemId: pli.id, change: 'check', memberId, checked: !!checked } }); } catch (e) {}
     return res.json({ message: 'Check updated' });
   } catch (error) {
@@ -954,17 +1141,37 @@ router.patch('/packing-lists/:listId/items/:itemId/not-needed', authMiddleware, 
       if (maybe && maybe.packing_list_id === listId) pli = maybe;
     }
     if (!pli) return res.status(404).json({ error: 'List item not found' });
+  const action: PackingListAuditAction = (!!notNeeded) ? 'ITEM_NOT_NEEDED' : 'ITEM_NEEDED';
+  const memberScoped = (typeof memberId !== 'undefined' && memberId !== null);
+  const appliesToScope: AppliesToScope = memberScoped ? 'member' : 'family';
+  const appliesToMemberId = memberScoped ? String(memberId) : null;
+
+  let updatedLegacyRow: any = null;
   // If memberId is present, set per-member not-needed; otherwise, update legacy column as well for compatibility
-  if (typeof memberId !== 'undefined' && memberId !== null) {
+  if (memberScoped) {
     await packingListRepo.setUserItemNotNeeded(pli.id, memberId, !!notNeeded);
-    try { broadcastEvent({ type: 'packing_list_changed', listId, data: { itemId: pli.id, change: 'not_needed', notNeeded: !!notNeeded, memberId } }); } catch (e) {}
-    return res.json({ message: 'not_needed updated (per-member)' });
   } else {
-    const updated = await packingListRepo.setNotNeeded(pli.id, !!notNeeded);
-    try { broadcastEvent({ type: 'packing_list_changed', listId, data: { itemId: pli.id, change: 'not_needed', notNeeded: !!notNeeded, updated } }); } catch (e) {}
-    console.log('PATCH not-needed completed, returning updated row', { updated });
-    return res.json({ message: 'not_needed updated', updated });
+    updatedLegacyRow = await packingListRepo.setNotNeeded(pli.id, !!notNeeded);
   }
+
+  try {
+    const info = await getPackingListItemAuditInfo(pli.id);
+    await insertPackingListAudit({
+      packingListId: listId,
+      packingListItemId: pli.id,
+      actorUserId: req.user?.id ?? null,
+      action,
+      appliesToScope,
+      appliesToMemberId,
+      details: info?.name ? `${!!notNeeded ? 'Marked not needed' : 'Marked needed'}: ${info.name}` : (!!notNeeded ? 'Marked not needed' : 'Marked needed'),
+      metadata: { source: 'not_needed', itemName: info?.name || null, notNeeded: !!notNeeded, memberId: appliesToMemberId }
+    });
+  } catch (e) {
+    console.warn('Failed to write packing list audit for not-needed', { listId, itemId: pli.id, err: e });
+  }
+
+  try { broadcastEvent({ type: 'packing_list_changed', listId, data: { itemId: pli.id, change: 'not_needed', notNeeded: !!notNeeded, memberId: memberScoped ? memberId : undefined, updated: updatedLegacyRow } }); } catch (e) {}
+  return res.json(memberScoped ? { message: 'not_needed updated (per-member)' } : { message: 'not_needed updated', updated: updatedLegacyRow });
   } catch (error) {
     console.error('Error updating not_needed:', error);
     return res.status(500).json({ error: 'Failed to update not_needed' });
@@ -1010,9 +1217,32 @@ router.delete('/packing-lists/:listId/items/:itemId', authMiddleware, async (req
     }
     if (!pli) return res.status(404).json({ error: 'List item not found' });
 
+    let auditInfo: { name: string; appliesToScope: AppliesToScope } | null = null;
+    try {
+      auditInfo = await getPackingListItemAuditInfo(pli.id);
+    } catch (e) {
+      auditInfo = null;
+    }
+
     // Remove associated checks and the packing list row
-  await packingListRepo.removeItemByPliId(pli.id, true); // broadcast: true for manual deletions
-  return res.json({ message: 'Packing list item removed' });
+    await packingListRepo.removeItemByPliId(pli.id, true); // broadcast: true for manual deletions
+
+    try {
+      await insertPackingListAudit({
+        packingListId: listId,
+        packingListItemId: pli.id,
+        actorUserId: req.user?.id ?? null,
+        action: 'ITEM_REMOVED',
+        appliesToScope: auditInfo?.appliesToScope || 'member',
+        appliesToMemberId: null,
+        details: auditInfo?.name ? `Removed ${auditInfo.name}` : 'Item removed',
+        metadata: { source: 'remove_item', itemName: auditInfo?.name || null }
+      });
+    } catch (e) {
+      console.warn('Failed to write packing list audit for remove item', { listId, itemId: pli.id, err: e });
+    }
+
+    return res.json({ message: 'Packing list item removed' });
   } catch (error) {
     console.error('Error deleting packing list item:', error);
     return res.status(500).json({ error: 'Failed to delete packing list item' });
@@ -1045,7 +1275,7 @@ router.put('/categories/:id', authMiddleware, async (req: Request, res: Response
     // find templates referencing this category and propagate changes
     try {
       const templateIds = await templateRepo.getTemplatesReferencingCategory(id);
-      for (const tid of templateIds) propagateTemplateToAssignedLists(tid);
+      for (const tid of templateIds) propagateTemplateToAssignedLists(tid, req.user?.id);
     } catch (e) {
       console.error('Error enqueuing propagation after category update', e);
     }
@@ -1114,7 +1344,7 @@ router.delete('/categories/:id', authMiddleware, async (req: Request, res: Respo
     // propagate for templates referencing this category
     try {
       const templateIds = await templateRepo.getTemplatesReferencingCategory(id);
-      for (const tid of templateIds) propagateTemplateToAssignedLists(tid);
+      for (const tid of templateIds) propagateTemplateToAssignedLists(tid, req.user?.id);
     } catch (e) {
       console.error('Error enqueuing propagation after category delete', e);
     }
@@ -1179,7 +1409,7 @@ router.put('/items/:id', authMiddleware, async (req: Request, res: Response) => 
     // enqueue propagation for templates that reference this item
     try {
       const templateIds = await templateRepo.getTemplatesReferencingItem(id);
-      for (const tid of templateIds) propagateTemplateToAssignedLists(tid);
+      for (const tid of templateIds) propagateTemplateToAssignedLists(tid, req.user?.id);
     } catch (e) {
       console.error('Error enqueuing propagation after item update', e);
     }
@@ -1204,7 +1434,7 @@ router.delete('/items/:id', authMiddleware, async (req: Request, res: Response) 
     // Also propagate for templates referencing this item so lists can reconcile
     try {
       const templateIds = await templateRepo.getTemplatesReferencingItem(id);
-      for (const tid of templateIds) propagateTemplateToAssignedLists(tid);
+      for (const tid of templateIds) propagateTemplateToAssignedLists(tid, req.user?.id);
     } catch (e) {
       console.error('Error enqueuing propagation after item delete', e);
     }
@@ -1223,7 +1453,7 @@ router.post('/items/:itemId/categories/:categoryId', authMiddleware, async (req:
     // templates referencing this category may now include this item; propagate those templates
     try {
       const templateIds = await templateRepo.getTemplatesReferencingCategory(categoryId);
-      for (const tid of templateIds) propagateTemplateToAssignedLists(tid);
+      for (const tid of templateIds) propagateTemplateToAssignedLists(tid, req.user?.id);
     } catch (e) {
       console.error('Error enqueuing propagation after item->category assign', e);
     }

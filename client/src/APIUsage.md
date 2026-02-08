@@ -53,10 +53,12 @@ This document maps functions exported from `client/src/api.ts` to the client-sid
   - client/src/components/ItemEditDrawer.tsx
   - client/src/components/BulkEditDrawer.tsx
 
-- `getFamilyPackingLists`, `getPackingList`, `createPackingList`, `addItemToPackingList`, `populatePackingListFromTemplate`, `deletePackingListItem`, `togglePackingListItemCheck`, `setPackingListItemNotNeeded`, `setPackingListItemNotNeededForMember`, `updatePackingList`, `deletePackingList`:
+- `getFamilyPackingLists`, `getPackingList`, `getPackingListAudit`, `getPackingListItemAudit`, `createPackingList`, `addItemToPackingList`, `populatePackingListFromTemplate`, `deletePackingListItem`, `togglePackingListItemCheck`, `setPackingListItemNotNeeded`, `setPackingListItemNotNeededForMember`, `updatePackingList`, `deletePackingList`:
   - client/src/components/ManagePackingLists.tsx
   - client/src/components/GlobalListEditDrawer.tsx
   - client/src/components/Dashboard.tsx
+  - client/src/components/PackingListAuditPanel.tsx
+  - client/src/components/PackingListItemAuditModal.tsx
   - client/src/pages/PackingListPage.tsx
 
 ### Templates

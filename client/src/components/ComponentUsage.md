@@ -118,5 +118,13 @@ This document lists current supporting components in `src/components` and where 
 **Used in:**
   - AppRoutes (route `/`)
 
+### PackingListAuditPanel
+**Used in:**
+  - `Dashboard`
+
+### PackingListItemAuditModal
+**Used in:**
+  - `Dashboard`
+
 ---
 **Note:** This file lists current supporting components only; deleted components were removed from the project and are not included here.

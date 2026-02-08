@@ -9,6 +9,22 @@
 
 "use strict";
 
+// Dev safeguard: service workers + aggressive caching can easily cause a
+// blank screen when running the Vite dev server (stale cached index.html
+// referencing hashed production assets). If we detect a dev origin, disable
+// caching and unregister the worker.
+const IS_DEV_ORIGIN = (() => {
+  try {
+    const h = self.location && self.location.hostname ? String(self.location.hostname) : '';
+    const p = self.location && self.location.port ? String(self.location.port) : '';
+    // localhost / 127.0.0.1 and the VS Code remote passthrough host used by this repo.
+    if (h === 'localhost' || h === '127.0.0.1' || h === 'code3000.padenco.com') return true;
+    // Common case: running Vite on port 3000 behind a dev host.
+    if (p === '3000' && (h.includes('localhost') || h.includes('127.0.0.1') || h.endsWith('.padenco.com'))) return true;
+  } catch (e) {}
+  return false;
+})();
+
 const CACHE_VERSION = 'v1';
 const PRECACHE = `static-${CACHE_VERSION}`;
 const RUNTIME = `runtime-${CACHE_VERSION}`;
@@ -27,6 +43,10 @@ let authToken = null;
 let sseController = { running: false };
 
 self.addEventListener('install', (event) => {
+  if (IS_DEV_ORIGIN) {
+    event.waitUntil(self.skipWaiting());
+    return;
+  }
   event.waitUntil(
     caches.open(PRECACHE)
       .then((cache) => cache.addAll(PRECACHE_URLS))
@@ -35,6 +55,23 @@ self.addEventListener('install', (event) => {
 });
 
 self.addEventListener('activate', (event) => {
+  if (IS_DEV_ORIGIN) {
+    event.waitUntil((async () => {
+      try {
+        const keys = await caches.keys();
+        await Promise.all(keys.map(k => caches.delete(k)));
+      } catch (e) {}
+      try { await self.registration.unregister(); } catch (e) {}
+      try {
+        const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+        for (const c of clients) {
+          try { c.navigate(c.url); } catch (e) { /* ignore */ }
+        }
+      } catch (e) {}
+    })());
+    return;
+  }
+
   // Build a promise that performs cache cleanup then notifies clients.
   const activationPromise = caches.keys().then((keys) => Promise.all(
     keys.map((key) => {
@@ -89,6 +126,8 @@ self.addEventListener('message', (event) => {
 
 // Fetch strategy
 self.addEventListener('fetch', (event) => {
+  if (IS_DEV_ORIGIN) return;
+
   const req = event.request;
   const url = new URL(req.url);
 

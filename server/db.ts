@@ -186,6 +186,22 @@ const SCHEMAS = {
       timestamp TEXT NOT NULL DEFAULT (datetime('now')),
       FOREIGN KEY (user_id) REFERENCES users(id)
     )`,
+  packing_list_audit_log: `
+    CREATE TABLE IF NOT EXISTS packing_list_audit_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      packing_list_id TEXT NOT NULL,
+      packing_list_item_id TEXT,
+      actor_user_id TEXT,
+      action TEXT NOT NULL,
+      applies_to_scope TEXT NOT NULL CHECK (applies_to_scope IN ('family', 'member')),
+      applies_to_member_id TEXT,
+      details TEXT,
+      metadata_json TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (packing_list_id) REFERENCES packing_lists(id) ON DELETE CASCADE,
+      FOREIGN KEY (actor_user_id) REFERENCES users(id),
+      FOREIGN KEY (applies_to_member_id) REFERENCES users(id)
+    )`,
   indexes: `
     CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
     CREATE INDEX IF NOT EXISTS idx_users_family ON users(familyId);
@@ -211,6 +227,9 @@ const SCHEMAS = {
     CREATE INDEX IF NOT EXISTS idx_packing_lists_deleted ON packing_lists(deleted_at);
     CREATE INDEX IF NOT EXISTS idx_packing_list_items_packing_list ON packing_list_items(packing_list_id);
     CREATE INDEX IF NOT EXISTS idx_packing_list_items_item ON packing_list_items(item_id);
+
+    CREATE INDEX IF NOT EXISTS idx_packing_list_audit_log_packing_list_id_id ON packing_list_audit_log(packing_list_id, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_packing_list_audit_log_packing_list_item_id_id ON packing_list_audit_log(packing_list_id, packing_list_item_id, id DESC);
   `
 };
 
@@ -232,6 +251,7 @@ async function initializeDatabase(db: Database): Promise<void> {
       await db.exec(SCHEMAS.families);
       await db.exec(SCHEMAS.users);
       await db.exec(SCHEMAS.audit_log);
+      await db.exec(SCHEMAS.packing_list_audit_log);
       await db.exec(SCHEMAS.indexes);
 
       // Migration: ensure expected columns exist on legacy databases
@@ -246,7 +266,82 @@ async function initializeDatabase(db: Database): Promise<void> {
           }
         };
 
+        // Migration: audit rows should not be deleted when a packing_list_item is deleted.
+        // Early versions created a FK (packing_list_item_id -> packing_list_items) with ON DELETE CASCADE,
+        // which wiped list history on item removal. Rebuild the table to remove that FK.
+        const migratePackingListAuditLogFK = async () => {
+          try {
+            const fkList: any[] = await db.all(`PRAGMA foreign_key_list(packing_list_audit_log)`);
+            const hasPackingListItemFk = fkList.some(fk => fk.from === 'packing_list_item_id');
+            if (!hasPackingListItemFk) return;
+
+            console.log('⚙️ Rebuilding packing_list_audit_log to remove packing_list_item_id FK');
+            await db.exec('PRAGMA foreign_keys = OFF');
+            await db.exec('BEGIN');
+            await db.exec(`
+              CREATE TABLE IF NOT EXISTS packing_list_audit_log_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                packing_list_id TEXT NOT NULL,
+                packing_list_item_id TEXT,
+                actor_user_id TEXT,
+                action TEXT NOT NULL,
+                applies_to_scope TEXT NOT NULL CHECK (applies_to_scope IN ('family', 'member')),
+                applies_to_member_id TEXT,
+                details TEXT,
+                metadata_json TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY (packing_list_id) REFERENCES packing_lists(id) ON DELETE CASCADE,
+                FOREIGN KEY (actor_user_id) REFERENCES users(id),
+                FOREIGN KEY (applies_to_member_id) REFERENCES users(id)
+              )
+            `);
+            await db.run(`
+              INSERT INTO packing_list_audit_log_new (
+                id,
+                packing_list_id,
+                packing_list_item_id,
+                actor_user_id,
+                action,
+                applies_to_scope,
+                applies_to_member_id,
+                details,
+                metadata_json,
+                created_at
+              )
+              SELECT
+                id,
+                packing_list_id,
+                packing_list_item_id,
+                actor_user_id,
+                action,
+                applies_to_scope,
+                applies_to_member_id,
+                details,
+                metadata_json,
+                created_at
+              FROM packing_list_audit_log
+            `);
+            await db.exec('DROP TABLE packing_list_audit_log');
+            await db.exec('ALTER TABLE packing_list_audit_log_new RENAME TO packing_list_audit_log');
+            await db.exec('COMMIT');
+            await db.exec('PRAGMA foreign_keys = ON');
+          } catch (err) {
+            try {
+              await db.exec('ROLLBACK');
+            } catch {
+              // ignore
+            }
+            try {
+              await db.exec('PRAGMA foreign_keys = ON');
+            } catch {
+              // ignore
+            }
+            console.warn('Failed to migrate packing_list_audit_log FK; continuing', err);
+          }
+        };
+
         // packing_list_items should have display_name TEXT and not_needed INTEGER defaults
+        await migratePackingListAuditLogFK();
         await ensureColumn('packing_list_items', 'display_name', 'TEXT');
         await ensureColumn('packing_list_items', 'not_needed', "INTEGER DEFAULT 0");
   // Ensure items.isOneOff exists

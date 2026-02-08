@@ -14,7 +14,7 @@ import '@mantine/core/styles.css';
 import '@mantine/notifications/styles.css';
 
 // Force cache bust in development
-if (process.env.NODE_ENV === 'development') {
+if ((import.meta as any).env && (import.meta as any).env.DEV) {
   const link = document.createElement('link');
   link.rel = 'preload';
   link.href = `/static/css/main.css?v=${Date.now()}`;
@@ -31,7 +31,22 @@ function App(): React.ReactElement {
 
   // Register service worker to receive server events
   useEffect(() => {
+    const metaEnv = (typeof import.meta !== 'undefined' && (import.meta as any).env) ? (import.meta as any).env : undefined;
+    const isDev = !!(metaEnv && metaEnv.DEV);
+    const keepSw = !!(metaEnv && metaEnv.VITE_KEEP_SW && String(metaEnv.VITE_KEEP_SW).toLowerCase() === 'true');
+
     if ('serviceWorker' in navigator) {
+      // In dev, aggressively disable service workers to prevent stale-cached
+      // shells/assets from causing a blank screen and breaking HMR.
+      if (isDev && !keepSw) {
+        navigator.serviceWorker.getRegistrations().then(regs => {
+          regs.forEach(r => {
+            try { r.unregister(); } catch (e) { /* ignore */ }
+          });
+        }).catch(() => {});
+        return;
+      }
+
       navigator.serviceWorker.register('/sw.js').then(reg => {
         console.log('[SW] Registered', reg);
         const getOrCreateClientId = () => {
@@ -128,7 +143,7 @@ function App(): React.ReactElement {
   useEffect(() => {
     try {
       const metaEnv = (typeof import.meta !== 'undefined' && (import.meta as any).env) ? (import.meta as any).env : undefined;
-      const isDev = (metaEnv && metaEnv.DEV) || process.env.NODE_ENV === 'development';
+      const isDev = !!(metaEnv && metaEnv.DEV);
       // Allow opting out of automatic dev-mode SW unregistration by setting
       // VITE_KEEP_SW=true in your Vite environment. This helps when you need
       // to test service worker behavior during development.

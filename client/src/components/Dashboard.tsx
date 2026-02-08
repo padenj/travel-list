@@ -7,6 +7,8 @@ import { IconPlus } from '@tabler/icons-react';
 import { PackingListsSideBySide } from './PackingListsSideBySide';
 import ItemEditDrawer from './ItemEditDrawer';
 import AddItemsDrawer from './AddItemsDrawer';
+import PackingListAuditPanel from './PackingListAuditPanel';
+import PackingListItemAuditModal from './PackingListItemAuditModal';
 import { useActivePackingList } from '../contexts/ActivePackingListContext';
 import { useListEditDrawer } from '../contexts/ListEditDrawerContext';
 import { useImpersonation } from '../contexts/ImpersonationContext';
@@ -35,6 +37,10 @@ export default function Dashboard(): React.ReactElement {
   const [excludedItemIds, setExcludedItemIds] = useState<string[]>([]);
   // Track recent local check updates to avoid reacting to our own SSEs
   const recentLocalChecksRef = React.useRef<Map<string, number>>(new Map());
+  const [auditRefreshKey, setAuditRefreshKey] = useState(0);
+  const [itemAuditOpened, setItemAuditOpened] = useState(false);
+  const [itemAuditPliId, setItemAuditPliId] = useState<string | null>(null);
+  const [itemAuditName, setItemAuditName] = useState<string>('');
 
   // Increment counter whenever activeListId changes to force refresh
   useEffect(() => {
@@ -59,7 +65,9 @@ export default function Dashboard(): React.ReactElement {
           if (data.change === 'check' && data && data.itemId) {
             const when = recentLocalChecksRef.current.get(data.itemId);
             if (when && (Date.now() - when) < 5000) {
-              // skip refresh for this locally-initiated check
+              // skip list refresh for this locally-initiated check, but still
+              // refresh audit views so activity shows up quickly
+              setAuditRefreshKey(prev => prev + 1);
               return;
             }
           }
@@ -67,12 +75,19 @@ export default function Dashboard(): React.ReactElement {
         if (event.listId === activeListId) {
           console.log('[Dashboard] Received server event for active list, refreshing');
           setListSelectionCount(prev => prev + 1);
+          setAuditRefreshKey(prev => prev + 1);
         }
       } catch (e) {}
     };
     window.addEventListener('server-event', handler as EventListener);
     return () => window.removeEventListener('server-event', handler as EventListener);
   }, [activeListId]);
+
+  const handleItemNameClick = useCallback((packingListItemId: string, itemName: string) => {
+    setItemAuditPliId(packingListItemId);
+    setItemAuditName(itemName || 'Item history');
+    setItemAuditOpened(true);
+  }, []);
 
   const { impersonatingFamilyId } = useImpersonation();
 
@@ -506,6 +521,7 @@ export default function Dashboard(): React.ReactElement {
               userLists={userLists}
               wholeFamilyItems={wholeFamilyItems}
               onCheckItem={handleCheckItem}
+              onItemNameClick={handleItemNameClick}
               notNeededByUser={notNeededByUser}
               notNeededWhole={notNeededWhole}
               onToggleNotNeeded={toggleNotNeeded}
@@ -517,6 +533,21 @@ export default function Dashboard(): React.ReactElement {
               currentUserId={currentUserId}
             />
           )}
+
+          <PackingListAuditPanel
+            packingListId={activeListId}
+            refreshKey={auditRefreshKey}
+            onItemClick={(pliId, display) => handleItemNameClick(pliId, display)}
+          />
+
+          <PackingListItemAuditModal
+            opened={itemAuditOpened}
+            onClose={() => setItemAuditOpened(false)}
+            packingListId={activeListId}
+            packingListItemId={itemAuditPliId}
+            itemName={itemAuditName}
+            refreshKey={auditRefreshKey}
+          />
           <ItemEditDrawer
             opened={showItemDrawer}
             onClose={() => { setShowItemDrawer(false); setItemDrawerDefaultMember(null); }}

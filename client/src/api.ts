@@ -186,6 +186,26 @@ export const setChecked = async (itemId: string, checked: boolean): Promise<ApiR
     return authenticatedApiCall(`/packing-lists/${listId}`);
   };
 
+  export const getPackingListAudit = async (listId: string, opts?: { limit?: number; beforeId?: number | null }): Promise<ApiResponse> => {
+    const limit = typeof opts?.limit === 'number' ? opts!.limit : 50;
+    const beforeId = typeof opts?.beforeId === 'number' ? opts!.beforeId : null;
+    const qs = new URLSearchParams();
+    if (limit) qs.set('limit', String(limit));
+    if (beforeId) qs.set('beforeId', String(beforeId));
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    return authenticatedApiCall(`/packing-lists/${listId}/audit${suffix}`);
+  };
+
+  export const getPackingListItemAudit = async (listId: string, packingListItemId: string, opts?: { limit?: number; beforeId?: number | null }): Promise<ApiResponse> => {
+    const limit = typeof opts?.limit === 'number' ? opts!.limit : 50;
+    const beforeId = typeof opts?.beforeId === 'number' ? opts!.beforeId : null;
+    const qs = new URLSearchParams();
+    if (limit) qs.set('limit', String(limit));
+    if (beforeId) qs.set('beforeId', String(beforeId));
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    return authenticatedApiCall(`/packing-lists/${listId}/items/${packingListItemId}/audit${suffix}`);
+  };
+
   export const populatePackingListFromTemplate = async (listId: string, templateId: string): Promise<ApiResponse> => {
     return authenticatedApiCall(`/packing-lists/${listId}/populate-from-template`, {
       method: 'POST',

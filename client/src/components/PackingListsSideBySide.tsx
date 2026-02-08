@@ -8,6 +8,7 @@ export interface PackingListProps {
   userLists: { userId: string; userName: string; items: { id: string; name: string; checked: boolean; masterId?: string | null; added_during_packing?: boolean; display_name?: string | null; masterIsOneOff?: boolean }[] }[];
   wholeFamilyItems: { id: string; name: string; checked: boolean; masterId?: string | null; added_during_packing?: boolean; display_name?: string | null; masterIsOneOff?: boolean }[];
   onCheckItem: (userId: string | null, itemId: string, checked: boolean) => void;
+  onItemNameClick?: (packingListItemId: string, itemName: string) => void;
   notNeededByUser?: Record<string, string[]>;
   notNeededWhole?: string[];
   onToggleNotNeeded?: (userId: string | null, itemId: string) => void;
@@ -20,12 +21,26 @@ export interface PackingListProps {
   currentUserId?: string | null;
 }
 
-const ItemLabel: React.FC<{ text: string; checked?: boolean; isOneOff?: boolean }> = ({ text, checked, isOneOff }) => {
+const ItemLabel: React.FC<{ text: string; checked?: boolean; isOneOff?: boolean; onClick?: () => void }> = ({ text, checked, isOneOff, onClick }) => {
   const theme = useMantineTheme();
   const checkedColor = theme.colors.gray[6];
   return (
     <span style={{ fontSize: 13, lineHeight: '1.2', display: 'flex', gap: 6, alignItems: 'center', whiteSpace: 'normal', wordBreak: 'break-word', flex: '1 1 auto', minWidth: 0, color: checked ? checkedColor : undefined }}>
-      <span style={{ flex: '1 1 auto', minWidth: 0, overflowWrap: 'break-word' }}>{text}</span>
+      <span
+        role={onClick ? 'button' : undefined}
+        tabIndex={onClick ? 0 : undefined}
+        onClick={onClick}
+        onKeyDown={(e) => {
+          if (!onClick) return;
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onClick();
+          }
+        }}
+        style={{ flex: '1 1 auto', minWidth: 0, overflowWrap: 'break-word', cursor: onClick ? 'pointer' : undefined, textDecoration: onClick ? 'underline' : undefined }}
+      >
+        {text}
+      </span>
       {isOneOff ? <span style={{ flex: '0 0 auto' }}><IconSparkles size={12} style={{ opacity: 0.9 }} /></span> : null}
     </span>
   );
@@ -68,7 +83,7 @@ const ItemRow: React.FC<{ checked: boolean; onChange: (checked: boolean) => void
 // Fixed column width (px) used for all columns so they render equal widths
 const COLUMN_WIDTH = 203;
 
-export function PackingListsSideBySide({ userLists, wholeFamilyItems, onCheckItem, notNeededByUser = {}, notNeededWhole = [], onToggleNotNeeded, onOpenAddDrawer, showWhole = true, activeListId, familyId, onRefresh, currentUserId }: PackingListProps) {
+export function PackingListsSideBySide({ userLists, wholeFamilyItems, onCheckItem, onItemNameClick, notNeededByUser = {}, notNeededWhole = [], onToggleNotNeeded, onOpenAddDrawer, showWhole = true, activeListId, familyId, onRefresh, currentUserId }: PackingListProps) {
 
   // Measure available viewport height from the top of this component down to
   // the bottom of the window so columns can fill the visible area without
@@ -285,7 +300,7 @@ export function PackingListsSideBySide({ userLists, wholeFamilyItems, onCheckIte
             <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0' }}>
               <Checkbox checked={item.checked} onChange={e => onCheckItem(null, item.id, e.target.checked)} styles={{ body: { padding: 0 } }} aria-label={item.display_name || item.name} />
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: '1 1 auto', minWidth: 0 }}>
-                <ItemLabel text={item.display_name || item.name} isOneOff={isOneOffItem(item)} />
+                <ItemLabel text={item.display_name || item.name} isOneOff={isOneOffItem(item)} onClick={onItemNameClick ? () => onItemNameClick(item.id, item.display_name || item.name) : undefined} />
               </div>
               <div style={{ display: 'flex', gap: 6, width: 56, flex: '0 0 auto', alignItems: 'center', justifyContent: 'flex-end', zIndex: 3 }}>
                 {onToggleNotNeeded ? (<ActionIcon size="sm" variant="subtle" onClick={() => onToggleNotNeeded(null, item.id)} aria-label="Not needed"><IconHexagonMinus size={14} /></ActionIcon>) : null}
@@ -318,7 +333,7 @@ export function PackingListsSideBySide({ userLists, wholeFamilyItems, onCheckIte
             <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0' }}>
               <Checkbox checked={item.checked} onChange={e => onCheckItem(null, item.id, e.target.checked)} styles={{ body: { padding: 0 } }} aria-label={item.display_name || item.name} />
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: '1 1 auto', minWidth: 0 }}>
-                <ItemLabel text={item.display_name || item.name} isOneOff={isOneOffItem(item)} />
+                <ItemLabel text={item.display_name || item.name} isOneOff={isOneOffItem(item)} onClick={onItemNameClick ? () => onItemNameClick(item.id, item.display_name || item.name) : undefined} />
               </div>
               <div style={{ display: 'flex', gap: 6, width: 56, flex: '0 0 auto', alignItems: 'center', justifyContent: 'flex-end', zIndex: 3 }}>
                 {onToggleNotNeeded ? (<ActionIcon size="sm" variant="subtle" onClick={() => onToggleNotNeeded(null, item.id)} aria-label="Not needed"><IconHexagonMinus size={14} /></ActionIcon>) : null}
@@ -349,7 +364,7 @@ export function PackingListsSideBySide({ userLists, wholeFamilyItems, onCheckIte
             <div key={`wf-dismissed-${item.id}`} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0', color: '#888' }}>
               <Checkbox disabled checked={item.checked} onChange={e => onCheckItem(null, item.id, e.target.checked)} styles={{ body: { padding: 0 } }} aria-label={item.name} />
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: '1 1 auto', minWidth: 0 }}>
-                <ItemLabel text={(item as any).display_name || item.name} isOneOff={isOneOffItem(item)} />
+                <ItemLabel text={(item as any).display_name || item.name} isOneOff={isOneOffItem(item)} onClick={onItemNameClick ? () => onItemNameClick(item.id, (item as any).display_name || item.name) : undefined} />
               </div>
               <div style={{ display: 'flex', gap: 6, width: 56, flex: '0 0 auto', alignItems: 'center', justifyContent: 'flex-end', zIndex: 3 }}>
                 {onToggleNotNeeded ? (<ActionIcon size="sm" variant="subtle" onClick={() => onToggleNotNeeded(null, item.id)} aria-label="Move to active"><IconRotateClockwise size={14} /></ActionIcon>) : null}
@@ -401,7 +416,7 @@ export function PackingListsSideBySide({ userLists, wholeFamilyItems, onCheckIte
             <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0' }}>
               <Checkbox checked={item.checked} onChange={e => onCheckItem(list.userId, item.id, e.target.checked)} styles={{ body: { padding: 0 } }} aria-label={item.display_name || item.name} />
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: '1 1 auto', minWidth: 0 }}>
-                <ItemLabel text={item.display_name || item.name} isOneOff={isOneOffItem(item)} />
+                <ItemLabel text={item.display_name || item.name} isOneOff={isOneOffItem(item)} onClick={onItemNameClick ? () => onItemNameClick(item.id, item.display_name || item.name) : undefined} />
               </div>
               <div style={{ display: 'flex', gap: 6, width: 56, flex: '0 0 auto', alignItems: 'center', zIndex: 3, justifyContent: 'flex-end' }}>
                 {onToggleNotNeeded ? (<ActionIcon size="sm" variant="subtle" onClick={() => onToggleNotNeeded(list.userId, item.id)} aria-label="Not needed"><IconHexagonMinus size={14} /></ActionIcon>) : null}
@@ -436,7 +451,7 @@ export function PackingListsSideBySide({ userLists, wholeFamilyItems, onCheckIte
             <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0' }}>
               <Checkbox checked={item.checked} onChange={e => onCheckItem(list.userId, item.id, e.target.checked)} styles={{ body: { padding: 0 } }} aria-label={item.display_name || item.name} />
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: '1 1 auto', minWidth: 0 }}>
-                <ItemLabel text={item.display_name || item.name} isOneOff={oneOff} />
+                <ItemLabel text={item.display_name || item.name} isOneOff={oneOff} onClick={onItemNameClick ? () => onItemNameClick(item.id, item.display_name || item.name) : undefined} />
               </div>
               <div style={{ display: 'flex', gap: 6, width: 56, flex: '0 0 auto', alignItems: 'center', zIndex: 3, justifyContent: 'flex-end' }}>
                 {onToggleNotNeeded ? (<ActionIcon size="sm" variant="subtle" onClick={() => onToggleNotNeeded(list.userId, item.id)} aria-label="Not needed"><IconHexagonMinus size={14} /></ActionIcon>) : null}
@@ -470,7 +485,7 @@ export function PackingListsSideBySide({ userLists, wholeFamilyItems, onCheckIte
             <div key={`user-dismissed-item-${item.id}`} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0', color: '#888' }}>
               <Checkbox disabled checked={item.checked} onChange={e => onCheckItem(list.userId, item.id, e.target.checked)} styles={{ body: { padding: 0 } }} aria-label={item.name} />
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: '1 1 auto', minWidth: 0 }}>
-                <ItemLabel text={item.display_name || item.name} isOneOff={oneOff} />
+                <ItemLabel text={item.display_name || item.name} isOneOff={oneOff} onClick={onItemNameClick ? () => onItemNameClick(item.id, item.display_name || item.name) : undefined} />
               </div>
               <div style={{ display: 'flex', gap: 6, width: 56, flex: '0 0 auto', alignItems: 'center', zIndex: 3, justifyContent: 'flex-end' }}>
                 {onToggleNotNeeded ? (<ActionIcon size="sm" variant="subtle" onClick={() => onToggleNotNeeded(list.userId, item.id)} aria-label="Move to active"><IconRotateClockwise size={14} /></ActionIcon>) : null}
