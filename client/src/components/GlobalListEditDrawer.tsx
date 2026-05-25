@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { Drawer, Group, Text, ActionIcon, Button, Tooltip, Checkbox, Modal, Badge } from '@mantine/core';
+import { Drawer, Group, Text, ActionIcon, Button, Tooltip, Checkbox, Modal, Badge, TextInput } from '@mantine/core';
 import { IconEdit, IconLayersOff, IconCheck } from '@tabler/icons-react';
 import { useListEditDrawer } from '../contexts/ListEditDrawerContext';
 import { useActivePackingList } from '../contexts/ActivePackingListContext';
@@ -10,10 +10,13 @@ import AddItemsDrawer from './AddItemsDrawer';
 
 export default function GlobalListEditDrawer() {
   const { isOpen, listId, listName, close, renderFn, openForList } = useListEditDrawer();
-  const { pendingOpenEditId, clearPendingOpenEdit } = useActivePackingList();
+  const { pendingOpenEditId, clearPendingOpenEdit, refreshLists } = useActivePackingList();
 
   const [loading, setLoading] = useState(false);
   const [currentName, setCurrentName] = useState<string | null>(null);
+  const [nameDraft, setNameDraft] = useState('');
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [savingName, setSavingName] = useState(false);
   const [editItems, setEditItems] = useState<any[]>([]);
   const [templates, setTemplates] = useState<any[]>([]);
   const [editAssignedTemplates, setEditAssignedTemplates] = useState<string[]>([]);
@@ -23,6 +26,7 @@ export default function GlobalListEditDrawer() {
   const [membersSaved, setMembersSaved] = useState(false);
   const saveTimer = useRef<number | null>(null);
   const debounceTimer = useRef<number | null>(null);
+  const isEditingNameRef = useRef(false);
 
   const [showAddPane, setShowAddPane] = useState(false);
   const [addPaneFamilyId, setAddPaneFamilyId] = useState<string | null>(null);
@@ -34,17 +38,29 @@ export default function GlobalListEditDrawer() {
 
   useEffect(() => {
     if (!isOpen || !listId) return;
+    isEditingNameRef.current = false;
+    setIsEditingName(false);
+    setCurrentName(listName || null);
+    setNameDraft(listName || '');
     (async () => {
       setLoading(true);
       try {
         const res = await getPackingList(listId);
         if (!res.response.ok) {
           setCurrentName(listName || null);
+          if (!isEditingNameRef.current) {
+            setNameDraft(listName || '');
+            setIsEditingName(false);
+          }
           setEditItems([]);
           setEditAssignedTemplates([]);
           return;
         }
         setCurrentName(res.data.name || listName || null);
+        if (!isEditingNameRef.current) {
+          setNameDraft(res.data.name || listName || '');
+          setIsEditingName(false);
+        }
         setEditItems((res.data.items || []).map((it: any) => ({ ...it, itemId: it.item_id, oneOff: !!it.master_is_one_off, whole_family: !!it.whole_family })));
         setEditAssignedTemplates(Array.isArray(res.data.template_ids) ? res.data.template_ids : []);
         const memberIds = Array.isArray(res.data.list?.member_ids) ? res.data.list.member_ids : (Array.isArray(res.data.member_ids) ? res.data.member_ids : []);
@@ -151,6 +167,47 @@ export default function GlobalListEditDrawer() {
     }, 500);
   };
 
+  const startRenaming = () => {
+    isEditingNameRef.current = true;
+    setNameDraft(currentName || listName || '');
+    setIsEditingName(true);
+  };
+
+  const cancelRenaming = () => {
+    isEditingNameRef.current = false;
+    setNameDraft(currentName || listName || '');
+    setIsEditingName(false);
+  };
+
+  const saveListName = async () => {
+    if (!listId) return;
+    const trimmed = nameDraft.trim();
+    if (!trimmed) {
+      showNotification({ title: 'Error', message: 'List name is required', color: 'red' });
+      return;
+    }
+
+    setSavingName(true);
+    try {
+      const res = await updatePackingList(listId, { name: trimmed });
+      if (res.response.ok) {
+        isEditingNameRef.current = false;
+        setCurrentName(trimmed);
+        setNameDraft(trimmed);
+        setIsEditingName(false);
+        if (refreshLists) await refreshLists();
+        showNotification({ title: 'Renamed', message: 'List renamed', color: 'green' });
+      } else {
+        showNotification({ title: 'Error', message: 'Failed to rename list', color: 'red' });
+      }
+    } catch (err) {
+      console.error('Failed to rename list', err);
+      showNotification({ title: 'Error', message: 'Failed to rename list', color: 'red' });
+    } finally {
+      setSavingName(false);
+    }
+  };
+
   if (renderFn) return <>{isOpen ? renderFn() : null}</>;
 
   return (
@@ -159,8 +216,33 @@ export default function GlobalListEditDrawer() {
         <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
           <Group style={{ marginBottom: 8, gap: 8 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Text fw={700} style={{ minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{currentName || ''}</Text>
-              <ActionIcon onClick={() => {}} size="md"><IconEdit size={16} /></ActionIcon>
+              {isEditingName ? (
+                <>
+                  <TextInput
+                    aria-label="List name"
+                    placeholder="List name"
+                    value={nameDraft}
+                    onChange={(e) => setNameDraft(e.currentTarget.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') void saveListName();
+                      if (e.key === 'Escape') cancelRenaming();
+                    }}
+                  />
+                  <Button size="xs" aria-label="Save list name" disabled={savingName} onClick={() => void saveListName()}>
+                    Save
+                  </Button>
+                  <Button size="xs" variant="subtle" aria-label="Cancel list rename" disabled={savingName} onClick={cancelRenaming}>
+                    Cancel
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Text fw={700} style={{ minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{currentName || ''}</Text>
+                  <ActionIcon aria-label="Rename list" onClick={startRenaming} size="md">
+                    <IconEdit size={16} />
+                  </ActionIcon>
+                </>
+              )}
             </div>
             <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
               <Button size="xs" onClick={() => openAddItemsPane()}>Add Items</Button>
