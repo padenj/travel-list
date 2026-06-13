@@ -6,7 +6,7 @@ import crypto from 'crypto';
 // from separate INSERT statements executed in quick succession.
 const MANUAL_ADDED_THRESHOLD_MS = 100; // 100ms
 import { broadcastEvent } from './sse';
-import { User, Family, Category, Item, ItemCategory, ItemMember, ItemWholeFamily } from './server-types';
+import { User, Family, Category, Item, ItemCategory, ItemMember, ItemWholeFamily, ItemWithCategoryName } from './server-types';
 
 interface CreateUserData extends Omit<User, 'password_hash'> {
   password: string;
@@ -388,9 +388,16 @@ export class ItemRepository {
       return db.all(`SELECT * FROM template_items WHERE template_id = ?`, [template_id]);
     }
 
-    async getItemsForTemplate(template_id: string): Promise<Item[]> {
+    async getItemsForTemplate(template_id: string): Promise<ItemWithCategoryName[]> {
       const db = await getDb();
-      return db.all(`SELECT i.* FROM items i JOIN template_items ti ON i.id = ti.item_id WHERE ti.template_id = ? AND i.deleted_at IS NULL`, [template_id]);
+      return db.all(
+        `SELECT i.*, c.name AS categoryName
+         FROM items i
+         JOIN template_items ti ON i.id = ti.item_id
+         LEFT JOIN categories c ON i.categoryId = c.id
+         WHERE ti.template_id = ? AND i.deleted_at IS NULL`,
+        [template_id]
+      );
     }
 
     // Snapshot all current items of the given categories into the group as

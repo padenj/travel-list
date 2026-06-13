@@ -51,6 +51,10 @@ export interface Item {
   deleted_at?: string | null;
 }
 
+export interface ItemWithCategoryName extends Item {
+  categoryName?: string | null;
+}
+
 // Item-Category assignment
 export interface ItemCategory {
   item_id: string;

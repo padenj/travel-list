@@ -30,11 +30,11 @@ beforeEach(async () => {
   );`);
   // Ensure tables exist. Legacy many-to-many storage removed; tests should
   // use the single-column assignment on items (categoryId) instead.
-  await db.exec('DELETE FROM templates');
   await db.exec('DELETE FROM template_items');
-  await db.exec('DELETE FROM families');
-  await db.exec('DELETE FROM categories');
   await db.exec('DELETE FROM items');
+  await db.exec('DELETE FROM templates');
+  await db.exec('DELETE FROM categories');
+  await db.exec('DELETE FROM families');
 });
 
 describe('TemplateRepository', () => {
@@ -113,5 +113,26 @@ describe('TemplateRepository', () => {
 
     expect(expandedIds).toEqual([existingDirectItemId, snapshottedItemId].sort());
     expect(expandedIds).not.toContain(lateCategoryItemId);
+  });
+
+  it('getItemsForTemplate includes categoryId and categoryName on each item', async () => {
+    const db = await getDb();
+    const repo = new TemplateRepository();
+    const now = new Date().toISOString();
+    const famId = uuidv4();
+    const catId = uuidv4();
+    const templateId = uuidv4();
+    const itemId = uuidv4();
+
+    await db.run(`INSERT INTO families (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)`, [famId, 'Fam', now, now]);
+    await db.run(`INSERT INTO categories (id, familyId, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`, [catId, famId, 'Electronics', now, now]);
+    await db.run(`INSERT INTO items (id, familyId, categoryId, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`, [itemId, famId, catId, 'Laptop', now, now]);
+    await repo.create({ id: templateId, family_id: famId, name: 'T', created_at: now, updated_at: now });
+    await repo.assignItem(templateId, itemId);
+
+    const items = await repo.getItemsForTemplate(templateId);
+    expect(items).toHaveLength(1);
+    expect(items[0].categoryId).toBe(catId);
+    expect(items[0].categoryName).toBe('Electronics');
   });
 });
