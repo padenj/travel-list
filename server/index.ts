@@ -167,6 +167,18 @@ if (isMain) {
 
       console.log(`⚡ Found ${pending.length} pending migration(s). Applying now...`);
 
+      // Back up the database file before running any migrations.
+      if (resolvedDbFile !== ':memory:' && fs.existsSync(resolvedDbFile)) {
+        const ts = new Date().toISOString().replace(/[:.]/g, '-');
+        const backupPath = `${resolvedDbFile}.${ts}.bak`;
+        try {
+          fs.copyFileSync(resolvedDbFile, backupPath);
+          console.log(`💾 DB backed up to ${backupPath}`);
+        } catch (e) {
+          console.warn('⚠️  Could not back up database before migration:', e);
+        }
+      }
+
       const db: any = await getDb();
 
       for (const m of pending) {

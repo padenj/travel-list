@@ -32,6 +32,16 @@ const sqlite3 = require('sqlite3');
     } else if (cmd === 'up') {
       let toRun = migrations.filter(m => !executed.includes(m.name));
       if (steps) toRun = toRun.slice(0, steps);
+      if (toRun.length > 0 && dbFile !== ':memory:' && fs.existsSync(dbFile)) {
+        const ts = new Date().toISOString().replace(/[:.]/g, '-');
+        const backupPath = `${dbFile}.${ts}.bak`;
+        try {
+          fs.copyFileSync(dbFile, backupPath);
+          console.log(`💾 DB backed up to ${backupPath}`);
+        } catch (e) {
+          console.warn('⚠️  Could not back up database before migration:', e.message || e);
+        }
+      }
       for (const m of toRun) {
         console.log('Applying migration', m.name);
         // Use dynamic import to support ESM (project has type:module)
