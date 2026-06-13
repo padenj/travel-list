@@ -48,6 +48,7 @@ This document lists current supporting components in `src/components` and where 
   - `PasswordChangePage`
 
 ### TemplateManager
+Searchable item-group manager using a Mantine `Select` picker, an item-only list, an `Add Item` action via `AddItemsDrawer`, and an `Add from categories` snapshot modal.
 **Used in:**
   - Route `/templates`
   - `__tests__/TemplateManager.test.tsx`
