@@ -107,8 +107,7 @@ if (!hasTestingLibs) {
       (api.getItemGroups as any).mockResolvedValue({ response: { ok: true }, data: { itemGroups: mockTemplates } });
       (api.getCategories as any).mockResolvedValue({ response: { ok: true }, data: { categories: [] } });
       (api.getItems as any).mockResolvedValue({ response: { ok: true }, data: { items: [] } });
-      (api.getCategoriesForTemplate as any).mockResolvedValue({ response: { ok: true }, data: { categories: [] } });
-      (api.getItemsForTemplate as any).mockResolvedValue({ response: { ok: true }, data: { items: [] } });
+      (api.getItemsForItemGroup as any).mockResolvedValue({ response: { ok: true }, data: { items: [] } });
     });
 
     it('renders template tabs and loads details', async () => {

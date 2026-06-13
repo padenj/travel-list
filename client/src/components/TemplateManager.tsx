@@ -4,27 +4,20 @@ import { useNavigate } from 'react-router-dom';
 import {
   getTemplates,
   getItemGroups,
-  createTemplate,
   createItemGroup,
   updateTemplate,
   updateItemGroup,
-  deleteTemplate,
   deleteItemGroup,
-  assignCategoryToTemplate,
-  assignCategoryToItemGroup,
+  addCategoryItemsToItemGroup,
   assignItemToTemplate,
   assignItemToItemGroup,
   getCategories,
   getItems,
-  getCategoriesForTemplate,
-  getCategoriesForItemGroup,
   getItemsForTemplate,
   getItemsForItemGroup,
   getItemsForCategory,
   removeItemFromTemplate,
-  removeItemFromItemGroup,
-  removeCategoryFromTemplate,
-  removeCategoryFromItemGroup
+  removeItemFromItemGroup
 } from '../api';
 import { getMembersForItem } from '../api';
 import { getCurrentUserProfile } from '../api';
@@ -97,11 +90,9 @@ export default function TemplateManager() {
     const details: { [templateId: string]: { categories: Category[]; items: Item[]; categoryItems: { [categoryId: string]: Item[] } } } = {};
     for (const template of templateList) {
       try {
-        const [catRes, itemRes] = await Promise.all([
-            getCategoriesForItemGroup(template.id),
-            getItemsForItemGroup(template.id)
-          ]);
-  const templateCategories = catRes.response.ok && catRes.data ? catRes.data.categories : [];
+        const itemRes = await getItemsForItemGroup(template.id);
+        // TODO Task 8: restore item-group category display after removing category endpoints.
+  const templateCategories: Category[] = [];
   // sort categories alphabetically
   const sortedTemplateCategories = (templateCategories || []).slice().sort((a: Category, b: Category) => (a.name || '').localeCompare(b.name || ''));
         const templateItems = itemRes.response.ok && itemRes.data ? itemRes.data.items : [];
@@ -182,8 +173,8 @@ export default function TemplateManager() {
       templateId = createRes.data?.itemGroup?.id || createRes.data?.template?.id;
     }
     // Assign categories/items
-      for (const catId of form.categories) {
-      await assignCategoryToItemGroup(templateId, catId);
+      if (form.categories.length > 0) {
+      await addCategoryItemsToItemGroup(templateId, form.categories);
     }
     for (const itemId of form.items) {
       await assignItemToItemGroup(templateId, itemId);
@@ -339,15 +330,10 @@ export default function TemplateManager() {
                                       <IconEdit size={16} />
                                     </ActionIcon>
                                     <ActionIcon color="red" variant="light" onClick={async () => {
-                                      // remove category from template
-                                      try {
-                                        await removeCategoryFromTemplate(template.id, category.id);
-                                      } catch (e) {
-                                        // ignore
-                                      }
-                                      setTemplateDetails(prev => ({
-                                        ...prev,
-                                        [template.id]: {
+                                     // TODO Task 8: restore category removal after item-group UI refactor.
+                                     setTemplateDetails(prev => ({
+                                       ...prev,
+                                       [template.id]: {
                                           ...prev[template.id],
                                           categories: prev[template.id].categories.filter(c => c.id !== category.id),
                                           categoryItems: Object.fromEntries(Object.entries(prev[template.id].categoryItems).filter(([k]) => k !== category.id))
@@ -405,13 +391,13 @@ export default function TemplateManager() {
                       <Button onClick={async () => {
                         const tid = showAddCategoryModal.templateId;
                         if (!tid) return;
-                        for (const cid of addCategorySelections) {
-                          await assignCategoryToTemplate(tid, cid);
+                        if (addCategorySelections.length > 0) {
+                          await addCategoryItemsToItemGroup(tid, addCategorySelections);
                         }
                         // reload template details
                         if (familyId) {
-                          const templatesRes = await getTemplates(familyId);
-                          const updatedTemplates = templatesRes.data?.templates || [];
+                         const templatesRes = await getItemGroups(familyId);
+                         const updatedTemplates = templatesRes.data?.itemGroups || templatesRes.data?.templates || [];
                           setTemplates(updatedTemplates);
                           await loadTemplateDetails(updatedTemplates);
                           await fetchMembersForDetails();

@@ -62,11 +62,11 @@ This document maps functions exported from `client/src/api.ts` to the client-sid
   - client/src/pages/PackingListPage.tsx
 
 ### Templates
-- `createTemplate`, `getTemplates`, `getTemplate`, `updateTemplate`, `deleteTemplate`, `assignCategoryToTemplate`, `removeCategoryFromTemplate`, `assignItemToTemplate`, `removeItemFromTemplate`, `getCategoriesForTemplate`, `getItemsForTemplate`, `getExpandedItemsForTemplate`, `syncTemplateItems`:
+- `createTemplate`, `getTemplates`, `getTemplate`, `updateTemplate`, `deleteTemplate`, `assignItemToTemplate`, `removeItemFromTemplate`, `getItemsForTemplate`, `getExpandedItemsForTemplate`, `syncTemplateItems`:
   - client/src/components/TemplateManager.tsx
 
 ### Item Groups (aliases)
-- `getItemGroups`, `getItemGroup`, `updateItemGroup`, `deleteItemGroup`, `assignCategoryToItemGroup`, `removeCategoryFromItemGroup`, `assignItemToItemGroup`, `removeItemFromItemGroup`, `getCategoriesForItemGroup`, `getItemsForItemGroup`, `getExpandedItemsForItemGroup`, `syncItemGroupItems`:
+- `getItemGroups`, `getItemGroup`, `updateItemGroup`, `deleteItemGroup`, `addCategoryItemsToItemGroup`, `assignItemToItemGroup`, `removeItemFromItemGroup`, `getItemsForItemGroup`, `getExpandedItemsForItemGroup`, `syncItemGroupItems`:
   - client/src/components/ItemEditDrawer.tsx
   - client/src/components/TemplateManager.tsx
 
