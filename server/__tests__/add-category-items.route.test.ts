@@ -158,6 +158,34 @@ describe('POST /api/item-group/:id/add-category-items', () => {
     expect(res.body).toEqual({ error: 'One or more categories do not belong to this family' });
   });
 
+  it('excludes cross-family items that share a categoryId', async () => {
+    const db = await getDb();
+    const now = new Date().toISOString();
+    const cat = uuidv4();
+    const grp = uuidv4();
+    const ownItem = uuidv4();
+    const otherFamilyId = uuidv4();
+    const crossItem = uuidv4();
+
+    await db.run(`INSERT INTO families (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)`, [otherFamilyId, 'Other', now, now]);
+    await db.run(`INSERT INTO categories (id, familyId, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`, [cat, famId, 'Docs', now, now]);
+    await db.run(`INSERT INTO templates (id, family_id, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`, [grp, famId, 'G', '', now, now]);
+    // item belonging to the correct family
+    await db.run(`INSERT INTO items (id, familyId, name, categoryId, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`, [ownItem, famId, 'Own', cat, now, now]);
+    // item belonging to a different family but same categoryId — should NOT be added
+    await db.run(`INSERT INTO items (id, familyId, name, categoryId, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`, [crossItem, otherFamilyId, 'Cross', cat, now, now]);
+
+    const res = await request(app)
+      .post(`/api/item-group/${grp}/add-category-items`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ categoryIds: [cat] });
+
+    expect(res.status).toBe(200);
+    const returnedIds = (res.body.items || []).map((i: any) => i.id);
+    expect(returnedIds).toContain(ownItem);
+    expect(returnedIds).not.toContain(crossItem);
+  });
+
   it('returns 404 for a missing group', async () => {
     const res = await request(app)
       .post(`/api/item-group/${uuidv4()}/add-category-items`)

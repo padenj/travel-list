@@ -395,12 +395,12 @@ export class ItemRepository {
 
     // Snapshot all current items of the given categories into the group as
     // individual items, skipping any already present. Returns the group's items.
-    async addCategoryItems(template_id: string, category_ids: string[]): Promise<Item[]> {
+    async addCategoryItems(template_id: string, category_ids: string[], family_id: string): Promise<Item[]> {
       const db = await getDb();
       for (const category_id of category_ids) {
         const items = await db.all(
-          `SELECT id FROM items WHERE categoryId = ? AND deleted_at IS NULL`,
-          [category_id]
+          `SELECT id FROM items WHERE categoryId = ? AND familyId = ? AND deleted_at IS NULL`,
+          [category_id, family_id]
         );
         for (const it of items) {
           await db.run(

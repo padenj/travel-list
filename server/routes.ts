@@ -407,7 +407,7 @@ router.post('/item-group/:id/add-category-items', authMiddleware, async (req: Re
         return res.status(403).json({ error: 'One or more categories do not belong to this family' });
       }
     }
-    const items = await templateRepo.addCategoryItems(id, categoryIds);
+    const items = await templateRepo.addCategoryItems(id, categoryIds, existing.family_id);
     try {
       const lists = await packingListRepo.getPackingListsForTemplate(id);
       for (const l of lists) {

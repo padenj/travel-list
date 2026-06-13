@@ -99,7 +99,7 @@ describe('TemplateRepository', () => {
 
     await repo.assignItem(template_id, existingDirectItemId);
 
-    const templateItems = await repo.addCategoryItems(template_id, [categoryId]);
+    const templateItems = await repo.addCategoryItems(template_id, [categoryId], family_id);
     const templateItemIds = templateItems.map(item => item.id).sort();
 
     expect(templateItemIds).toEqual([existingDirectItemId, snapshottedItemId].sort());
