@@ -356,7 +356,15 @@ export class ItemRepository {
 
     async findAll(family_id: string): Promise<Template[]> {
       const db = await getDb();
-      return db.all(`SELECT * FROM templates WHERE family_id = ? AND deleted_at IS NULL ORDER BY created_at DESC`, [family_id]);
+      return db.all(
+        `SELECT t.*, COUNT(ti.item_id) AS item_count
+         FROM templates t
+         LEFT JOIN template_items ti ON ti.template_id = t.id
+         WHERE t.family_id = ? AND t.deleted_at IS NULL
+         GROUP BY t.id
+         ORDER BY t.created_at DESC`,
+        [family_id]
+      );
     }
 
     async update(id: string, updates: Partial<Template>): Promise<Template | undefined> {

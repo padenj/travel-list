@@ -76,6 +76,7 @@ export interface Template {
   created_at: string;
   updated_at: string;
   deleted_at?: string | null;
+  item_count?: number;
 }
 
 // Template-Item assignment

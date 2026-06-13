@@ -77,7 +77,7 @@ export default function PackingListPage(): React.ReactElement {
       <Title order={2} mb="lg">Packing Lists</Title>
       <Group mb="md" style={{ justifyContent: 'space-between' }}>
         <div />
-        <Button onClick={() => setShowCreateModal(true)}>New List</Button>
+        <Button onClick={openCreateModal}>New List</Button>
       </Group>
 
       <ManagePackingLists />

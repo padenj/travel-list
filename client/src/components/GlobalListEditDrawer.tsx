@@ -301,7 +301,7 @@ export default function GlobalListEditDrawer() {
               <Text fw={700} size="sm">Auto-add items from the following groups</Text>
               <div style={{ marginTop: 8 }}>
                 {templates.length === 0 ? (
-                  <Text size="sm" c="dimmed">No item groups available</Text>
+                  <Text size="sm" c="dimmed">No item groups yet. Create item groups in <strong>Manage Item Groups</strong> and add items to them first.</Text>
                 ) : (
                   <div>
                     {templates.map(t => {
@@ -343,7 +343,11 @@ export default function GlobalListEditDrawer() {
                           }} />
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                             <Text>{t.name}</Text>
-                            <Text size="xs" c="dimmed">{t.description || ''}</Text>
+                            {t.item_count === 0 ? (
+                              <Text size="xs" c="orange">0 items — add items in Manage Item Groups</Text>
+                            ) : (
+                              <Text size="xs" c="dimmed">{t.item_count != null ? `${t.item_count} item${t.item_count !== 1 ? 's' : ''}` : (t.description || '')}</Text>
+                            )}
                           </div>
                         </div>
                       );
