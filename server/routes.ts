@@ -401,6 +401,12 @@ router.post('/item-group/:id/add-category-items', authMiddleware, async (req: Re
     if (!Array.isArray(categoryIds) || categoryIds.length === 0) {
       return res.status(400).json({ error: 'categoryIds must be a non-empty array' });
     }
+    for (const cid of categoryIds) {
+      const cat = await categoryRepo.findById(cid);
+      if (!cat || cat.familyId !== existing.family_id) {
+        return res.status(403).json({ error: 'One or more categories do not belong to this family' });
+      }
+    }
     const items = await templateRepo.addCategoryItems(id, categoryIds);
     try {
       const lists = await packingListRepo.getPackingListsForTemplate(id);

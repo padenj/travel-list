@@ -12,6 +12,7 @@ describe('POST /api/item-group/:id/add-category-items', () => {
   let app: express.Application;
   let famId: string;
   let adminToken: string;
+  let familyAdminToken: string;
 
   beforeEach(async () => {
     app = express();
@@ -38,6 +39,25 @@ describe('POST /api/item-group/:id/add-category-items', () => {
       updated_at: new Date().toISOString(),
     } as any);
     adminToken = generateToken({ id: adminId, username: adminUsername, role: USER_ROLES.SYSTEM_ADMIN, familyId: famId } as any);
+
+    const familyAdminId = uuidv4();
+    const familyAdminUsername = `family_admin_${Date.now()}`;
+    await userRepo.create({
+      id: familyAdminId,
+      username: familyAdminUsername,
+      email: `${familyAdminUsername}@x.com`,
+      password: hashPasswordSync('pw'),
+      role: USER_ROLES.FAMILY_ADMIN,
+      familyId: famId,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    } as any);
+    familyAdminToken = generateToken({
+      id: familyAdminId,
+      username: familyAdminUsername,
+      role: USER_ROLES.FAMILY_ADMIN,
+      familyId: famId,
+    } as any);
   });
 
   afterEach(async () => {
@@ -80,6 +100,62 @@ describe('POST /api/item-group/:id/add-category-items', () => {
 
     const rows = await db.all(`SELECT item_id FROM template_items WHERE template_id = ?`, [grp]);
     expect(rows.length).toBe(2);
+  });
+
+  it('allows a family admin to add items from selected categories to the group', async () => {
+    const db = await getDb();
+    const now = new Date().toISOString();
+    const cat = uuidv4();
+    const grp = uuidv4();
+    const itemA = uuidv4();
+
+    await db.run(`INSERT INTO categories (id, familyId, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`, [cat, famId, 'Docs', now, now]);
+    await db.run(`INSERT INTO templates (id, family_id, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`, [grp, famId, 'G', '', now, now]);
+    await db.run(`INSERT INTO items (id, familyId, name, categoryId, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`, [itemA, famId, 'A', cat, now, now]);
+
+    const res = await request(app)
+      .post(`/api/item-group/${grp}/add-category-items`)
+      .set('Authorization', `Bearer ${familyAdminToken}`)
+      .send({ categoryIds: [cat] });
+
+    expect(res.status).toBe(200);
+    expect((res.body.items || []).map((i: any) => i.id)).toContain(itemA);
+  });
+
+  it('returns 400 for empty categoryIds', async () => {
+    const db = await getDb();
+    const now = new Date().toISOString();
+    const grp = uuidv4();
+
+    await db.run(`INSERT INTO templates (id, family_id, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`, [grp, famId, 'G', '', now, now]);
+
+    const res = await request(app)
+      .post(`/api/item-group/${grp}/add-category-items`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ categoryIds: [] });
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ error: 'categoryIds must be a non-empty array' });
+  });
+
+  it('returns 403 for a category from another family', async () => {
+    const db = await getDb();
+    const now = new Date().toISOString();
+    const grp = uuidv4();
+    const otherFamilyId = uuidv4();
+    const otherCategoryId = uuidv4();
+
+    await db.run(`INSERT INTO templates (id, family_id, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`, [grp, famId, 'G', '', now, now]);
+    await db.run(`INSERT INTO families (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)`, [otherFamilyId, 'Other Family', now, now]);
+    await db.run(`INSERT INTO categories (id, familyId, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`, [otherCategoryId, otherFamilyId, 'Other Docs', now, now]);
+
+    const res = await request(app)
+      .post(`/api/item-group/${grp}/add-category-items`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ categoryIds: [otherCategoryId] });
+
+    expect(res.status).toBe(403);
+    expect(res.body).toEqual({ error: 'One or more categories do not belong to this family' });
   });
 
   it('returns 404 for a missing group', async () => {
