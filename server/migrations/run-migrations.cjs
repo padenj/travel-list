@@ -18,7 +18,7 @@ const sqlite3 = require('sqlite3');
     const storage = new SimpleJSONStorage({ path: './server/migrations/migrations.json' });
 
     const migrationsDir = path.resolve(process.cwd(), './server/migrations/migrations');
-    const files = fs.readdirSync(migrationsDir).filter(f => f.endsWith('.js')).sort();
+    const files = fs.readdirSync(migrationsDir).filter(f => f.endsWith('.js') || f.endsWith('.cjs')).sort();
     const migrations = files.map(f => ({ name: f, path: path.join(migrationsDir, f) }));
 
     const executed = await storage.executed();
@@ -32,6 +32,16 @@ const sqlite3 = require('sqlite3');
     } else if (cmd === 'up') {
       let toRun = migrations.filter(m => !executed.includes(m.name));
       if (steps) toRun = toRun.slice(0, steps);
+      if (toRun.length > 0 && dbFile !== ':memory:' && fs.existsSync(dbFile)) {
+        const ts = new Date().toISOString().replace(/[:.]/g, '-');
+        const backupPath = `${dbFile}.${ts}.bak`;
+        try {
+          fs.copyFileSync(dbFile, backupPath);
+          console.log(`💾 DB backed up to ${backupPath}`);
+        } catch (e) {
+          console.warn('⚠️  Could not back up database before migration:', e.message || e);
+        }
+      }
       for (const m of toRun) {
         console.log('Applying migration', m.name);
         // Use dynamic import to support ESM (project has type:module)

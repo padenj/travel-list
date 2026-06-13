@@ -66,6 +66,14 @@ describe('Database', () => {
       expect(columnNames).toContain('details');
       expect(columnNames).toContain('timestamp');
     });
+
+    it('should not create template_categories table', async () => {
+      const table = await db.get(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'template_categories'"
+      );
+
+      expect(table).toBeUndefined();
+    });
   });
 
   describe('Constraints and Indexes', () => {
@@ -93,6 +101,8 @@ describe('Database', () => {
       expect(indexNames).toContain('idx_users_family');
       expect(indexNames).toContain('idx_users_deleted');
       expect(indexNames).toContain('idx_families_deleted');
+      expect(indexNames).not.toContain('idx_template_categories_template');
+      expect(indexNames).not.toContain('idx_template_categories_category');
     });
   });
 

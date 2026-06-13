@@ -27,6 +27,7 @@ This document lists current supporting components in `src/components` and where 
   - `src/pages/SystemAdminPage`
 
 ### CategoryManagementPage (supporting parts)
+Uses a searchable Mantine `Select` to choose the active category while preserving custom drag-sort order before showing that category's detail card.
 **Used in:**
   - `src/pages/CategoryManagementPage`
 
@@ -48,6 +49,7 @@ This document lists current supporting components in `src/components` and where 
   - `PasswordChangePage`
 
 ### TemplateManager
+Searchable item-group manager using a Mantine `Select` picker, an item-only list, an `Add Item` action via `AddItemsDrawer`, and an `Add from categories` snapshot modal.
 **Used in:**
   - Route `/templates`
   - `__tests__/TemplateManager.test.tsx`

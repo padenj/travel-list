@@ -91,7 +91,7 @@ if (!hasTestingLibs) {
     };
   });
 
-  const mockTemplates = [{ id: 't1', name: 'Weekend' }, { id: 't2', name: 'Business' }];
+  const mockItemGroups = [{ id: 't1', name: 'Weekend' }, { id: 't2', name: 'Business' }];
 
   // Defer importing TemplateManager until after mocks are registered so its imports use the mocked modules.
   let TemplateManager: any;
@@ -103,15 +103,13 @@ if (!hasTestingLibs) {
   describe('TemplateManager', () => {
     beforeEach(() => {
       (api.getCurrentUserProfile as any).mockResolvedValue({ response: { ok: true }, data: { family: { id: 'f1' } } });
-      (api.getTemplates as any).mockResolvedValue({ response: { ok: true }, data: { templates: mockTemplates } });
-      (api.getItemGroups as any).mockResolvedValue({ response: { ok: true }, data: { itemGroups: mockTemplates } });
+      (api.getItemGroups as any).mockResolvedValue({ response: { ok: true }, data: { itemGroups: mockItemGroups } });
       (api.getCategories as any).mockResolvedValue({ response: { ok: true }, data: { categories: [] } });
       (api.getItems as any).mockResolvedValue({ response: { ok: true }, data: { items: [] } });
-      (api.getCategoriesForTemplate as any).mockResolvedValue({ response: { ok: true }, data: { categories: [] } });
-      (api.getItemsForTemplate as any).mockResolvedValue({ response: { ok: true }, data: { items: [] } });
+      (api.getItemsForItemGroup as any).mockResolvedValue({ response: { ok: true }, data: { items: [] } });
     });
 
-    it('renders template tabs and loads details', async () => {
+    it('renders item group selector and loads items', async () => {
       render(
         <MemoryRouter>
           <MantineProvider>
@@ -124,16 +122,16 @@ if (!hasTestingLibs) {
         </MemoryRouter>
       );
 
-  await waitFor(() => expect(api.getItemGroups).toHaveBeenCalled());
-  // Tabs may render the same label in multiple places (tab and heading). Use getAllByText.
-  expect(screen.getAllByText('Weekend').length).toBeGreaterThan(0);
-  expect(screen.getAllByText('Business').length).toBeGreaterThan(0);
+      await waitFor(() => expect(api.getItemGroups).toHaveBeenCalled());
+      expect(screen.getByLabelText(/Select item group/i)).toBeTruthy();
+      expect(screen.getAllByText('Weekend').length).toBeGreaterThan(0);
     });
 
-    it('opens new template modal and creates template', async () => {
-      (api.createTemplate as any).mockResolvedValue({ response: { ok: true }, data: { template: { id: 't3', name: 'New' } } });
-      (api.getTemplates as any).mockResolvedValueOnce({ response: { ok: true }, data: { templates: mockTemplates } })
-        .mockResolvedValueOnce({ response: { ok: true }, data: { templates: [...mockTemplates, { id: 't3', name: 'New' }] } });
+    it('opens new item group modal and creates item group', async () => {
+      (api.createItemGroup as any).mockResolvedValue({ response: { ok: true }, data: { itemGroup: { id: 't3', name: 'New' } } });
+      (api.getItemGroups as any)
+        .mockResolvedValueOnce({ response: { ok: true }, data: { itemGroups: mockItemGroups } })
+        .mockResolvedValueOnce({ response: { ok: true }, data: { itemGroups: [...mockItemGroups, { id: 't3', name: 'New' }] } });
 
       render(
         <MemoryRouter>
@@ -147,34 +145,23 @@ if (!hasTestingLibs) {
         </MemoryRouter>
       );
 
-      await waitFor(() => expect(api.getTemplates).toHaveBeenCalled());
+      await waitFor(() => expect(api.getItemGroups).toHaveBeenCalled());
 
-  // Click the 'New Template' button
-  const newBtn = screen.getByText(/New Item Group/i);
-  const user = await userEventLib.setup();
-  await user.click(newBtn);
+      const newBtn = screen.getByText(/New Item Group/i);
+      const user = await userEventLib.setup();
+      await user.click(newBtn);
 
-    // Fill the modal form - our TextInput mock uses placeholder equal to label
-  const nameInput = screen.getByPlaceholderText(/Item Group Name/i);
-  await user.type(nameInput, 'New');
-  const createBtn = screen.getByText(/Create/i);
-  await user.click(createBtn);
+      const nameInput = screen.getByPlaceholderText(/Item Group Name/i);
+      await user.type(nameInput, 'New');
+      const createBtn = screen.getByText(/Create/i);
+      await user.click(createBtn);
 
-      await waitFor(() => expect(api.createTemplate).toHaveBeenCalled());
-      // Component may trigger multiple template refreshes (initial load + explicit refresh).
-      // Accept >= 2 calls rather than an exact number to avoid brittle timing failures.
+      await waitFor(() => expect(api.createItemGroup).toHaveBeenCalled());
       await waitFor(() => expect((api.getItemGroups as any).mock.calls.length).toBeGreaterThanOrEqual(2));
-      // Multiple elements may contain the label 'New' (tab label + heading). Ensure at least one exists.
       expect(screen.getAllByText('New').length).toBeGreaterThan(0);
     });
 
-    it('re-fetches templates when bumpRefresh is called', async () => {
-      // First call returns the initial templates, second call returns an updated list
-      (api.getTemplates as any)
-        .mockResolvedValueOnce({ response: { ok: true }, data: { templates: mockTemplates } })
-        .mockResolvedValueOnce({ response: { ok: true }, data: { templates: [...mockTemplates, { id: 't4', name: 'Family' }] } });
-
-      // Small test helper component that triggers bumpRefresh from the same provider tree
+    it('re-fetches item groups when bumpRefresh is called', async () => {
       const React = require('react');
       function RefreshTrigger() {
         const { bumpRefresh } = useRefresh();
@@ -198,12 +185,9 @@ if (!hasTestingLibs) {
       await waitFor(() => expect(api.getItemGroups).toHaveBeenCalled());
 
       const user = await userEventLib.setup();
-      // Trigger the refresh which should cause TemplateManager to re-fetch templates
       await user.click(screen.getByText(/Trigger Refresh/i));
 
-      // Expect at least a second call to getTemplates and the new template label to appear
       await waitFor(() => expect((api.getItemGroups as any).mock.calls.length).toBeGreaterThanOrEqual(2));
-      expect(screen.getAllByText('Family').length).toBeGreaterThan(0);
     });
   });
 }

@@ -315,28 +315,18 @@ export const setChecked = async (itemId: string, checked: boolean): Promise<ApiR
     });
   };
 
-  export const assignCategoryToTemplate = async (templateId: string, categoryId: string): Promise<ApiResponse> => {
-    return authenticatedApiCall(`/template/${templateId}/categories/${categoryId}`, {
+  export interface Item {
+    id: string;
+    name?: string;
+    [key: string]: unknown;
+  }
+
+  export const addCategoryItemsToItemGroup = async (itemGroupId: string, categoryIds: string[]): Promise<Item[]> => {
+    const result = await authenticatedApiCall(`/item-group/${itemGroupId}/add-category-items`, {
       method: 'POST',
+      body: JSON.stringify({ categoryIds }),
     });
-  };
-
-  export const assignCategoryToItemGroup = async (itemGroupId: string, categoryId: string): Promise<ApiResponse> => {
-    return authenticatedApiCall(`/item-group/${itemGroupId}/categories/${categoryId}`, {
-      method: 'POST',
-    });
-  };
-
-  export const removeCategoryFromTemplate = async (templateId: string, categoryId: string): Promise<ApiResponse> => {
-    return authenticatedApiCall(`/template/${templateId}/categories/${categoryId}`, {
-      method: 'DELETE',
-    });
-  };
-
-  export const removeCategoryFromItemGroup = async (itemGroupId: string, categoryId: string): Promise<ApiResponse> => {
-    return authenticatedApiCall(`/item-group/${itemGroupId}/categories/${categoryId}`, {
-      method: 'DELETE',
-    });
+    return Array.isArray(result.data?.items) ? result.data.items : [];
   };
 
   export const assignItemToTemplate = async (templateId: string, itemId: string): Promise<ApiResponse> => {
@@ -369,14 +359,6 @@ export const setChecked = async (itemId: string, checked: boolean): Promise<ApiR
 
   export const getExpandedItemsForItemGroup = async (itemGroupId: string): Promise<ApiResponse> => {
     return authenticatedApiCall(`/item-group/${itemGroupId}/expanded-items`);
-  };
-
-  export const getCategoriesForTemplate = async (templateId: string): Promise<ApiResponse> => {
-    return authenticatedApiCall(`/template/${templateId}/categories`);
-  };
-
-  export const getCategoriesForItemGroup = async (itemGroupId: string): Promise<ApiResponse> => {
-    return authenticatedApiCall(`/item-group/${itemGroupId}/categories`);
   };
 
   export const getItemsForTemplate = async (templateId: string): Promise<ApiResponse> => {

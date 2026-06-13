@@ -25,8 +25,7 @@ import {
   Loader,
   ActionIcon,
   Text,
-  Tabs,
-  List,
+  Select,
   Modal,
   Checkbox,
 } from '@mantine/core';
@@ -255,9 +254,10 @@ export default function CategoryManagementPage(): React.ReactElement {
   const handleDelete = async (id: string) => {
     const res = await deleteCategory(id);
     if (res.response.ok) {
-      setCategories(categories.filter(cat => cat.id !== id));
-      if (selectedTab === id && categories.length > 1) {
-        changeSelectedTab(categories[0].id);
+      const remainingCategories = categories.filter(cat => cat.id !== id);
+      setCategories(remainingCategories);
+      if (selectedTab === id) {
+        changeSelectedTab(remainingCategories[0]?.id ?? null);
       }
       bumpRefresh();
     }
@@ -334,158 +334,161 @@ export default function CategoryManagementPage(): React.ReactElement {
                 </div>
               </div>
             </Modal>
-            <Tabs value={selectedTab} onChange={changeSelectedTab} keepMounted={false}>
-              <Tabs.List>
-                {categories.map(cat => (
-                  <Tabs.Tab key={cat.id} value={cat.id}>{cat.name}</Tabs.Tab>
-                ))}
-              </Tabs.List>
-              {categories.map(cat => (
-                <Tabs.Panel key={cat.id} value={cat.id}>
-                  <Card withBorder mt="md">
-                    <Group mb="md" align="center" style={{ justifyContent: 'space-between' }}>
-                      {editId === cat.id ? (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%' }}>
-                          <TextInput
-                            value={editName}
-                            onChange={e => setEditName(e.target.value)}
-                            onKeyDown={e => e.key === 'Enter' && handleUpdate()}
-                            style={{ flex: '1 1 auto' }}
-                          />
-                          <ActionIcon color="green" onClick={handleUpdate} title="Save">
-                            <IconEdit size={16} />
-                          </ActionIcon>
-                          <ActionIcon color="gray" onClick={() => { setEditId(null); setEditName(''); }} title="Cancel">
-                            <IconX size={16} />
-                          </ActionIcon>
-                        </div>
-                      ) : (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <Title order={4} style={{ margin: 0 }}>{cat.name}</Title>
-                          <ActionIcon color="blue" variant="light" onClick={() => handleEdit(cat.id, cat.name)} title="Edit category name">
-                            <IconEdit size={16} />
-                          </ActionIcon>
-                        </div>
-                      )}
-                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8 }}>
-                        <div>
-                          <Button size="xs" leftSection={<IconPlus size={14} />} onClick={() => {
-                            // Open ItemEditDrawer in create mode with category pre-selected
-                            changeSelectedTab(cat.id);
-                            setShowAddPaneForCategory({ open: true, categoryId: cat.id });
-                            setEditMasterItemId(null);
-                            // ensure the name field is cleared when opening for create
-                            setShowEditDrawer(true);
-                          }}>Add</Button>
-                        </div>
-                        <div>
-                          <Checkbox label="Select multiple" checked={multiSelectMode} onChange={(e) => { setMultiSelectMode(e.currentTarget.checked); if (!e.currentTarget.checked) setSelectedItems(new Set()); }} />
-                        </div>
-                        {multiSelectMode && (
-                          <div>
-                            <Group>
-                              <Text size="sm">{selectedItems.size} selected</Text>
-                              <Button size="xs" onClick={() => setShowBulkEdit(true)} disabled={selectedItems.size === 0}>Bulk Edit</Button>
-                            </Group>
-                          </div>
-                        )}
-                      </div>
-                    </Group>
-                    <Title order={5} mb="sm">Items in this category</Title>
-                    {categoryItems[cat.id]?.length > 0 ? (
-                      <div>
-                        <style>{`
-                          .tl-category-grid {
-                            display: grid;
-                            gap: 8px;
-                            grid-template-columns: repeat(1, 1fr);
-                          }
-                          @media (min-width: 640px) {
-                            .tl-category-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-                          }
-                          @media (min-width: 1024px) {
-                            .tl-category-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-                          }
-                          @media (min-width: 1280px) {
-                            .tl-category-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-                          }
-                          .tl-category-item {
-                            display: flex;
-                            align-items: center;
-                            justify-content: space-between;
-                            padding: 8px 10px;
-                            border-radius: 6px;
-                            border: 1px solid rgba(0,0,0,0.04);
-                            background: #fff;
-                          }
-                          .tl-category-item .tl-item-left { flex: 1 1 auto; margin-right: 12px; }
-                          .tl-category-item .tl-item-right { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; }
-                        `}</style>
-                        <div className="tl-category-grid">
-                          {categoryItems[cat.id].slice().sort((a, b) => (a.name || '').localeCompare(b.name || '')).map((item) => (
-                            <div key={item.id} className="tl-category-item">
-                              <div className="tl-item-left" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                {multiSelectMode && (
-                                  <input
-                                    type="checkbox"
-                                    aria-label={`Select ${item.name}`}
-                                    checked={selectedItems.has(item.id)}
-                                    onChange={(e) => {
-                                      const checked = (e.currentTarget as HTMLInputElement).checked;
-                                      setSelectedItems(prev => {
-                                        const copy = new Set(prev);
-                                        if (checked) copy.add(item.id); else copy.delete(item.id);
-                                        return copy;
-                                      });
-                                    }}
-                                  />
-                                )}
-                                <div>
-                                  <Text>{item.name}</Text>
-                                  {itemWholeFamily[item.id] ? (
-                                    <Text c="dimmed" size="sm">Whole family</Text>
-                                  ) : Array.isArray(itemMembers[item.id]) && itemMembers[item.id].length > 0 ? (
-                                    <Text c="dimmed" size="sm">{itemMembers[item.id].map((m: any) => m.name).join(', ')}</Text>
-                                  ) : null}
-                                </div>
-                              </div>
-                              <div className="tl-item-right">
-                                <ActionIcon color="blue" variant="light" onClick={() => { setEditMasterItemId(item.id); setShowEditDrawer(true); }} title="Edit item">
-                                  <IconEdit size={16} />
-                                </ActionIcon>
-                                <ConfirmDelete
-                                  title="Delete item"
-                                  confirmText="Delete item?"
-                                  onConfirm={async () => {
-                                    const res = await deleteItem(item.id);
-                                    if (res.response.ok) {
-                                      setCategoryItems(prev => ({
-                                        ...prev,
-                                        [cat.id]: (prev[cat.id] || []).filter(i => i.id !== item.id),
-                                      }));
-                                      setItems(prev => prev.filter(i => i.id !== item.id));
-                                      bumpRefresh();
-                                    } else {
-                                      // basic error feedback; project uses notifications elsewhere
-                                      alert('Failed to delete item: ' + (res.data?.error || res.response.statusText));
-                                    }
-                                  }}
-                                />
-                              </div>
-                            </div>
-                          ))}
-                        </div>
+            <Select
+              searchable
+              placeholder="Select a category"
+              nothingFoundMessage="No categories found"
+              data={categories.map(cat => ({ value: cat.id, label: cat.name }))}
+              value={selectedTab}
+              onChange={changeSelectedTab}
+              mb="md"
+              aria-label="Select category"
+            />
+            {(() => {
+              const cat = categories.find(category => category.id === selectedTab);
+              if (!cat) return null;
+
+              return (
+                <Card withBorder mt="md">
+                  <Group mb="md" align="center" style={{ justifyContent: 'space-between' }}>
+                    {editId === cat.id ? (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%' }}>
+                        <TextInput
+                          value={editName}
+                          onChange={e => setEditName(e.target.value)}
+                          onKeyDown={e => e.key === 'Enter' && handleUpdate()}
+                          style={{ flex: '1 1 auto' }}
+                        />
+                        <ActionIcon color="green" onClick={handleUpdate} title="Save">
+                          <IconEdit size={16} />
+                        </ActionIcon>
+                        <ActionIcon color="gray" onClick={() => { setEditId(null); setEditName(''); }} title="Cancel">
+                          <IconX size={16} />
+                        </ActionIcon>
                       </div>
                     ) : (
-                      <Text c="dimmed">No items in this category</Text>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <Title order={4} style={{ margin: 0 }}>{cat.name}</Title>
+                        <ActionIcon color="blue" variant="light" onClick={() => handleEdit(cat.id, cat.name)} title="Edit category name">
+                          <IconEdit size={16} />
+                        </ActionIcon>
+                      </div>
                     )}
-                    <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginTop: 16 }}>
-                      <ConfirmDelete onConfirm={() => handleDelete(cat.id)} title="Delete category" />
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8 }}>
+                      <div>
+                        <Button size="xs" leftSection={<IconPlus size={14} />} onClick={() => {
+                          changeSelectedTab(cat.id);
+                          setShowAddPaneForCategory({ open: true, categoryId: cat.id });
+                          setEditMasterItemId(null);
+                          setShowEditDrawer(true);
+                        }}>Add</Button>
+                      </div>
+                      <div>
+                        <Checkbox label="Select multiple" checked={multiSelectMode} onChange={(e) => { setMultiSelectMode(e.currentTarget.checked); if (!e.currentTarget.checked) setSelectedItems(new Set()); }} />
+                      </div>
+                      {multiSelectMode && (
+                        <div>
+                          <Group>
+                            <Text size="sm">{selectedItems.size} selected</Text>
+                            <Button size="xs" onClick={() => setShowBulkEdit(true)} disabled={selectedItems.size === 0}>Bulk Edit</Button>
+                          </Group>
+                        </div>
+                      )}
                     </div>
-                  </Card>
-                </Tabs.Panel>
-              ))}
-            </Tabs>
+                  </Group>
+                  <Title order={5} mb="sm">Items in this category</Title>
+                  {categoryItems[cat.id]?.length > 0 ? (
+                    <div>
+                      <style>{`
+                        .tl-category-grid {
+                          display: grid;
+                          gap: 8px;
+                          grid-template-columns: repeat(1, 1fr);
+                        }
+                        @media (min-width: 640px) {
+                          .tl-category-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+                        }
+                        @media (min-width: 1024px) {
+                          .tl-category-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+                        }
+                        @media (min-width: 1280px) {
+                          .tl-category-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+                        }
+                        .tl-category-item {
+                          display: flex;
+                          align-items: center;
+                          justify-content: space-between;
+                          padding: 8px 10px;
+                          border-radius: 6px;
+                          border: 1px solid rgba(0,0,0,0.04);
+                          background: #fff;
+                        }
+                        .tl-category-item .tl-item-left { flex: 1 1 auto; margin-right: 12px; }
+                        .tl-category-item .tl-item-right { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; }
+                      `}</style>
+                      <div className="tl-category-grid">
+                        {categoryItems[cat.id].slice().sort((a, b) => (a.name || '').localeCompare(b.name || '')).map((item) => (
+                          <div key={item.id} className="tl-category-item">
+                            <div className="tl-item-left" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              {multiSelectMode && (
+                                <input
+                                  type="checkbox"
+                                  aria-label={`Select ${item.name}`}
+                                  checked={selectedItems.has(item.id)}
+                                  onChange={(e) => {
+                                    const checked = (e.currentTarget as HTMLInputElement).checked;
+                                    setSelectedItems(prev => {
+                                      const copy = new Set(prev);
+                                      if (checked) copy.add(item.id); else copy.delete(item.id);
+                                      return copy;
+                                    });
+                                  }}
+                                />
+                              )}
+                              <div>
+                                <Text>{item.name}</Text>
+                                {itemWholeFamily[item.id] ? (
+                                  <Text c="dimmed" size="sm">Whole family</Text>
+                                ) : Array.isArray(itemMembers[item.id]) && itemMembers[item.id].length > 0 ? (
+                                  <Text c="dimmed" size="sm">{itemMembers[item.id].map((m: any) => m.name).join(', ')}</Text>
+                                ) : null}
+                              </div>
+                            </div>
+                            <div className="tl-item-right">
+                              <ActionIcon color="blue" variant="light" onClick={() => { setEditMasterItemId(item.id); setShowEditDrawer(true); }} title="Edit item">
+                                <IconEdit size={16} />
+                              </ActionIcon>
+                              <ConfirmDelete
+                                title="Delete item"
+                                confirmText="Delete item?"
+                                onConfirm={async () => {
+                                  const res = await deleteItem(item.id);
+                                  if (res.response.ok) {
+                                    setCategoryItems(prev => ({
+                                      ...prev,
+                                      [cat.id]: (prev[cat.id] || []).filter(i => i.id !== item.id),
+                                    }));
+                                    setItems(prev => prev.filter(i => i.id !== item.id));
+                                    bumpRefresh();
+                                  } else {
+                                    alert('Failed to delete item: ' + (res.data?.error || res.response.statusText));
+                                  }
+                                }}
+                              />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <Text c="dimmed">No items in this category</Text>
+                  )}
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginTop: 16 }}>
+                    <ConfirmDelete onConfirm={() => handleDelete(cat.id)} title="Delete category" />
+                  </div>
+                </Card>
+              );
+            })()}
             {/* AddItemsDrawer removed: Add now opens ItemEditDrawer in create mode with category pre-selected */}
             <BulkEditDrawer
               opened={showBulkEdit}

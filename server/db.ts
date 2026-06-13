@@ -78,14 +78,6 @@ const SCHEMAS = {
         FOREIGN KEY (family_id) REFERENCES families(id)
       );
 
-      CREATE TABLE IF NOT EXISTS template_categories (
-        template_id TEXT NOT NULL,
-        category_id TEXT NOT NULL,
-        PRIMARY KEY (template_id, category_id),
-        FOREIGN KEY (template_id) REFERENCES templates(id),
-        FOREIGN KEY (category_id) REFERENCES categories(id)
-      );
-
       CREATE TABLE IF NOT EXISTS template_items (
         template_id TEXT NOT NULL,
         item_id TEXT NOT NULL,
@@ -219,8 +211,6 @@ const SCHEMAS = {
     CREATE INDEX IF NOT EXISTS idx_item_whole_family_family ON item_whole_family(family_id);
     CREATE INDEX IF NOT EXISTS idx_templates_family ON templates(family_id);
     CREATE INDEX IF NOT EXISTS idx_templates_deleted ON templates(deleted_at);
-    CREATE INDEX IF NOT EXISTS idx_template_categories_template ON template_categories(template_id);
-    CREATE INDEX IF NOT EXISTS idx_template_categories_category ON template_categories(category_id);
     CREATE INDEX IF NOT EXISTS idx_template_items_template ON template_items(template_id);
     CREATE INDEX IF NOT EXISTS idx_template_items_item ON template_items(item_id);
     CREATE INDEX IF NOT EXISTS idx_packing_lists_family ON packing_lists(family_id);

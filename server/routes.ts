@@ -243,64 +243,6 @@ router.delete('/template/:id', authMiddleware, async (req: Request, res: Respons
   }
 });
 
-// Assign/remove categories/items to template
-router.post('/template/:id/categories/:categoryId', authMiddleware, async (req: Request, res: Response) => {
-  const { id, categoryId } = req.params;
-  try {
-    const existing = await templateRepo.findById(id);
-    if (!existing) return res.status(404).json({ error: 'Template not found' });
-    if (req.user?.role !== 'SystemAdmin') {
-      if (req.user?.familyId !== existing.family_id || req.user.role !== 'FamilyAdmin') {
-        return res.status(403).json({ error: 'Forbidden' });
-      }
-    }
-    await templateRepo.assignCategory(id, categoryId);
-  // propagate changes to assigned lists
-  propagateTemplateToAssignedLists(id, req.user?.id);
-  return res.json({ message: 'Category assigned to template' });
-  } catch (error) {
-    console.error('Error assigning category:', error);
-    return res.status(500).json({ error: 'Failed to assign category' });
-  }
-});
-
-// Item-group alias: assign/remove categories
-router.post('/item-group/:id/categories/:categoryId', authMiddleware, async (req: Request, res: Response) => {
-  const { id, categoryId } = req.params;
-  try {
-    const existing = await templateRepo.findById(id);
-    if (!existing) return res.status(404).json({ error: 'Item group not found' });
-    if (req.user?.role !== 'SystemAdmin') {
-      if (req.user?.familyId !== existing.family_id || req.user.role !== 'FamilyAdmin') {
-        return res.status(403).json({ error: 'Forbidden' });
-      }
-    }
-    await templateRepo.assignCategory(id, categoryId);
-    return res.json({ message: 'Category assigned to item group' });
-  } catch (error) {
-    console.error('Error assigning category to item group:', error);
-    return res.status(500).json({ error: 'Failed to assign category to item group' });
-  }
-});
-
-router.delete('/item-group/:id/categories/:categoryId', authMiddleware, async (req: Request, res: Response) => {
-  const { id, categoryId } = req.params;
-  try {
-    const existing = await templateRepo.findById(id);
-    if (!existing) return res.status(404).json({ error: 'Item group not found' });
-    if (req.user?.role !== 'SystemAdmin') {
-      if (req.user?.familyId !== existing.family_id || req.user.role !== 'FamilyAdmin') {
-        return res.status(403).json({ error: 'Forbidden' });
-      }
-    }
-    await templateRepo.removeCategory(id, categoryId);
-    return res.json({ message: 'Category removed from item group' });
-  } catch (error) {
-    console.error('Error removing category from item group:', error);
-    return res.status(500).json({ error: 'Failed to remove category from item group' });
-  }
-});
-
 // Aliases: Item-groups endpoints (backwards-compatible wrappers around templates)
 router.post('/item-groups', authMiddleware, async (req: Request, res: Response) => {
   // Delegate to existing template creation handler logic
@@ -391,25 +333,6 @@ router.delete('/item-group/:id', authMiddleware, async (req: Request, res: Respo
   }
 });
 
-router.delete('/template/:id/categories/:categoryId', authMiddleware, async (req: Request, res: Response) => {
-  const { id, categoryId } = req.params;
-  try {
-    const existing = await templateRepo.findById(id);
-    if (!existing) return res.status(404).json({ error: 'Template not found' });
-    if (req.user?.role !== 'SystemAdmin') {
-      if (req.user?.familyId !== existing.family_id || req.user.role !== 'FamilyAdmin') {
-        return res.status(403).json({ error: 'Forbidden' });
-      }
-    }
-    await templateRepo.removeCategory(id, categoryId);
-  propagateTemplateToAssignedLists(id, req.user?.id);
-  return res.json({ message: 'Category removed from template' });
-  } catch (error) {
-    console.error('Error removing category:', error);
-    return res.status(500).json({ error: 'Failed to remove category' });
-  }
-});
-
 router.post('/template/:id/items/:itemId', authMiddleware, async (req: Request, res: Response) => {
   const { id, itemId } = req.params;
   try {
@@ -461,6 +384,42 @@ router.post('/item-group/:id/items/:itemId', authMiddleware, async (req: Request
   } catch (error) {
     console.error('Error assigning item to item group:', error);
     return res.status(500).json({ error: 'Failed to assign item to item group' });
+  }
+});
+
+router.post('/item-group/:id/add-category-items', authMiddleware, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { categoryIds } = req.body as { categoryIds?: string[] };
+  try {
+    const existing = await templateRepo.findById(id);
+    if (!existing) return res.status(404).json({ error: 'Item group not found' });
+    if (req.user?.role !== 'SystemAdmin') {
+      if (req.user?.familyId !== existing.family_id || req.user.role !== 'FamilyAdmin') {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+    }
+    if (!Array.isArray(categoryIds) || categoryIds.length === 0) {
+      return res.status(400).json({ error: 'categoryIds must be a non-empty array' });
+    }
+    for (const cid of categoryIds) {
+      const cat = await categoryRepo.findById(cid);
+      if (!cat || cat.familyId !== existing.family_id) {
+        return res.status(403).json({ error: 'One or more categories do not belong to this family' });
+      }
+    }
+    const items = await templateRepo.addCategoryItems(id, categoryIds, existing.family_id);
+    try {
+      const lists = await packingListRepo.getPackingListsForTemplate(id);
+      for (const l of lists) {
+        await packingListRepo.reconcilePackingListAgainstTemplate(l.id, id);
+      }
+    } catch (err) {
+      console.error('Error propagating item group changes synchronously', { itemGroupId: id, err });
+    }
+    return res.json({ items });
+  } catch (error) {
+    console.error('Error adding category items to item group:', error);
+    return res.status(500).json({ error: 'Failed to add category items to item group' });
   }
 });
 
@@ -587,30 +546,6 @@ router.post('/item-group/:id/sync-items', authMiddleware, async (req: Request, r
   } catch (error) {
     console.error('Error syncing item group items:', error);
     return res.status(500).json({ error: 'Failed to sync item group items' });
-  }
-});
-
-// Get categories assigned to a template
-router.get('/template/:id/categories', authMiddleware, async (req: Request, res: Response) => {
-  const { id } = req.params;
-  try {
-    const categories = await templateRepo.getCategoriesForTemplate(id);
-    return res.json({ categories });
-  } catch (error) {
-    console.error('Error fetching template categories:', error);
-    return res.status(500).json({ error: 'Failed to fetch template categories' });
-  }
-});
-
-// Item-group alias: get categories
-router.get('/item-group/:id/categories', authMiddleware, async (req: Request, res: Response) => {
-  const { id } = req.params;
-  try {
-    const categories = await templateRepo.getCategoriesForTemplate(id);
-    return res.json({ categories });
-  } catch (error) {
-    console.error('Error fetching item group categories:', error);
-    return res.status(500).json({ error: 'Failed to fetch item group categories' });
   }
 });
 
@@ -1272,13 +1207,6 @@ router.put('/categories/:id', authMiddleware, async (req: Request, res: Response
   }
   try {
     const updated = await categoryRepo.update(id, { name: name.trim() });
-    // find templates referencing this category and propagate changes
-    try {
-      const templateIds = await templateRepo.getTemplatesReferencingCategory(id);
-      for (const tid of templateIds) propagateTemplateToAssignedLists(tid, req.user?.id);
-    } catch (e) {
-      console.error('Error enqueuing propagation after category update', e);
-    }
     return res.json({ category: updated });
   } catch (error) {
     console.error('Error updating category:', error);
@@ -1341,13 +1269,6 @@ router.delete('/categories/:id', authMiddleware, async (req: Request, res: Respo
   const { id } = req.params;
   try {
     await categoryRepo.softDelete(id);
-    // propagate for templates referencing this category
-    try {
-      const templateIds = await templateRepo.getTemplatesReferencingCategory(id);
-      for (const tid of templateIds) propagateTemplateToAssignedLists(tid, req.user?.id);
-    } catch (e) {
-      console.error('Error enqueuing propagation after category delete', e);
-    }
     return res.json({ message: 'Category deleted' });
   } catch (error) {
     console.error('Error deleting category:', error);
@@ -1450,13 +1371,6 @@ router.post('/items/:itemId/categories/:categoryId', authMiddleware, async (req:
   const { itemId, categoryId } = req.params;
   try {
     await itemRepo.assignToCategory(itemId, categoryId);
-    // templates referencing this category may now include this item; propagate those templates
-    try {
-      const templateIds = await templateRepo.getTemplatesReferencingCategory(categoryId);
-      for (const tid of templateIds) propagateTemplateToAssignedLists(tid, req.user?.id);
-    } catch (e) {
-      console.error('Error enqueuing propagation after item->category assign', e);
-    }
     return res.json({ message: 'Item assigned to category' });
   } catch (error) {
     console.error('Error assigning item to category:', error);
@@ -1482,18 +1396,8 @@ router.post('/items/:itemId/members/:memberId', authMiddleware, async (req: Requ
     // Broadcast to any packing lists that include this item via templates so clients update
     try {
       // Gather templates that reference this item directly
-      const directTemplateIds = await templateRepo.getTemplatesReferencingItem(itemId);
-      // Also include templates that reference any category the item belongs to
-      const categories = await itemRepo.getCategoriesForItem(itemId);
-      const categoryIds = (categories || []).map((c: any) => c.id);
-      const categoryTemplateIdsSet = new Set<string>();
-      for (const cid of categoryIds) {
-        const tids = await templateRepo.getTemplatesReferencingCategory(cid);
-        for (const t of tids) categoryTemplateIdsSet.add(t);
-      }
-      const allTemplateIdsSet = new Set<string>([...directTemplateIds, ...Array.from(categoryTemplateIdsSet)]);
-      const templateIds = Array.from(allTemplateIdsSet);
-      console.log('[SSE] member assignment changed for item', itemId, 'member', memberId, 'directTemplates=', directTemplateIds.length ? directTemplateIds : 'none', 'categoryTemplates=', Array.from(categoryTemplateIdsSet));
+      const templateIds = await templateRepo.getTemplatesReferencingItem(itemId);
+      console.log('[SSE] member assignment changed for item', itemId, 'member', memberId, 'directTemplates=', templateIds.length ? templateIds : 'none');
       for (const tid of templateIds) {
         const lists = await packingListRepo.getPackingListsForTemplate(tid);
         console.log('[SSE] template', tid, 'affects lists:', lists.map((x: any) => x.id));
@@ -1524,18 +1428,8 @@ router.delete('/items/:itemId/members/:memberId', authMiddleware, async (req: Re
     // Broadcast to any packing lists that include this item via templates so clients update
     try {
       // Gather templates that reference this item directly
-      const directTemplateIds = await templateRepo.getTemplatesReferencingItem(itemId);
-      // Also include templates that reference any category the item belongs to
-      const categories = await itemRepo.getCategoriesForItem(itemId);
-      const categoryIds = (categories || []).map((c: any) => c.id);
-      const categoryTemplateIdsSet = new Set<string>();
-      for (const cid of categoryIds) {
-        const tids = await templateRepo.getTemplatesReferencingCategory(cid);
-        for (const t of tids) categoryTemplateIdsSet.add(t);
-      }
-      const allTemplateIdsSet = new Set<string>([...directTemplateIds, ...Array.from(categoryTemplateIdsSet)]);
-      const templateIds = Array.from(allTemplateIdsSet);
-      console.log('[SSE] member removal for item', itemId, 'member', memberId, 'directTemplates=', directTemplateIds.length ? directTemplateIds : 'none', 'categoryTemplates=', Array.from(categoryTemplateIdsSet));
+      const templateIds = await templateRepo.getTemplatesReferencingItem(itemId);
+      console.log('[SSE] member removal for item', itemId, 'member', memberId, 'directTemplates=', templateIds.length ? templateIds : 'none');
       for (const tid of templateIds) {
         const lists = await packingListRepo.getPackingListsForTemplate(tid);
         console.log('[SSE] template', tid, 'affects lists:', lists.map((x: any) => x.id));

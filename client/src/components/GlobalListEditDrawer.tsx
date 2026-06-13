@@ -3,14 +3,16 @@ import { Drawer, Group, Text, ActionIcon, Button, Tooltip, Checkbox, Modal, Badg
 import { IconEdit, IconLayersOff, IconCheck } from '@tabler/icons-react';
 import { useListEditDrawer } from '../contexts/ListEditDrawerContext';
 import { useActivePackingList } from '../contexts/ActivePackingListContext';
-import { getPackingList, updatePackingList, deletePackingListItem, getTemplates, getItemGroups, addItemToPackingList, getCurrentUserProfile } from '../api';
+import { getPackingList, updatePackingList, deletePackingListItem, getTemplates, getItemGroups, addItemToPackingList, getCurrentUserProfile, getFamily } from '../api';
 import { showNotification } from '@mantine/notifications';
 import ItemEditDrawer from './ItemEditDrawer';
 import AddItemsDrawer from './AddItemsDrawer';
+import { useImpersonation } from '../contexts/ImpersonationContext';
 
 export default function GlobalListEditDrawer() {
   const { isOpen, listId, listName, close, renderFn, openForList } = useListEditDrawer();
   const { pendingOpenEditId, clearPendingOpenEdit, refreshLists } = useActivePackingList();
+  const { impersonatingFamilyId } = useImpersonation();
 
   const [loading, setLoading] = useState(false);
   const [currentName, setCurrentName] = useState<string | null>(null);
@@ -67,13 +69,23 @@ export default function GlobalListEditDrawer() {
         setSelectedMemberIds(memberIds || []);
 
         try {
-          const profile = await getCurrentUserProfile();
-          const fid = profile.response.ok && profile.data.family ? profile.data.family.id : null;
-            if (fid) {
+          let fid: string | null = impersonatingFamilyId;
+          let members: any[] = [];
+          if (fid) {
+            const familyRes = await getFamily(fid);
+            if (familyRes.response.ok) {
+              members = familyRes.data.family?.members || [];
+            }
+          } else {
+            const profile = await getCurrentUserProfile();
+            fid = profile.response.ok && profile.data.family ? profile.data.family.id : null;
+            members = profile.response.ok && profile.data.family?.members ? profile.data.family.members : [];
+          }
+          if (fid) {
             const tRes = await getItemGroups(fid);
             if (tRes.response.ok) setTemplates(tRes.data.itemGroups || tRes.data.templates || []);
-            if (profile.response.ok && profile.data.family && Array.isArray(profile.data.family.members)) setFamilyMembers(profile.data.family.members || []);
           }
+          setFamilyMembers(members);
         } catch (e) {
           // ignore
         }
@@ -83,7 +95,7 @@ export default function GlobalListEditDrawer() {
         setLoading(false);
       }
     })();
-  }, [isOpen, listId]);
+  }, [isOpen, listId, impersonatingFamilyId]);
 
   useEffect(() => {
     if (pendingOpenEditId) {
@@ -249,6 +261,101 @@ export default function GlobalListEditDrawer() {
             </div>
           </Group>
 
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: 16, borderBottom: '1px solid rgba(0,0,0,0.04)', paddingBottom: 12, marginBottom: 12 }}>
+            <div>
+              <Text fw={700} size="sm">Auto-add items from the following groups</Text>
+              <div style={{ marginTop: 8 }}>
+                {templates.length === 0 ? (
+                  <Text size="sm" c="dimmed">No item groups yet. Create item groups in <strong>Manage Item Groups</strong> and add items to them first.</Text>
+                ) : (
+                  <div>
+                    {templates.map(t => {
+                      const checked = editAssignedTemplates.includes(t.id);
+                      return (
+                        <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0' }}>
+                          <Checkbox checked={checked} onChange={async (e) => {
+                            const on = e.currentTarget.checked;
+                            const newTemplateIds = on ? Array.from(new Set([...(editAssignedTemplates || []), t.id])) : (editAssignedTemplates || []).filter(x => x !== t.id);
+                            
+                            if (!on) {
+                              // User is unchecking - ask about item removal
+                              setPendingRemovalTemplateIds(newTemplateIds);
+                              setEditAssignedTemplates(newTemplateIds); // Optimistic update
+                              setRemovalConfirmOpen(true);
+                              return;
+                            }
+                            
+                            // User is checking - add template immediately
+                            setEditAssignedTemplates(newTemplateIds); // Optimistic update
+                            try {
+                              const payload: any = { templateIds: newTemplateIds };
+                              const res = await updatePackingList(listId || '', payload);
+                              if (res.response.ok) {
+                                showNotification({ title: 'Saved', message: 'Item group assignments updated', color: 'green' });
+                                const r = await getPackingList(listId || '');
+                                if (r.response.ok) setEditItems((r.data.items || []).map((it: any) => ({ ...it, itemId: it.item_id, oneOff: !!it.master_is_one_off, whole_family: !!it.whole_family })));
+                              } else {
+                                showNotification({ title: 'Failed', message: 'Could not update assignments', color: 'red' });
+                                // Revert on failure
+                                setEditAssignedTemplates(prev => prev.filter(x => x !== t.id));
+                              }
+                            } catch (err) {
+                              console.error('Failed to update template assignment', err);
+                              showNotification({ title: 'Failed', message: 'Could not update assignments', color: 'red' });
+                              // Revert on failure
+                              setEditAssignedTemplates(prev => prev.filter(x => x !== t.id));
+                            }
+                          }} />
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <Text>{t.name}</Text>
+                            {t.item_count === 0 ? (
+                              <Text size="xs" c="orange">0 items — add items in Manage Item Groups</Text>
+                            ) : (
+                              <Text size="xs" c="dimmed">{t.item_count != null ? `${t.item_count} item${t.item_count !== 1 ? 's' : ''}` : (t.description || '')}</Text>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                <Text fw={700} size="sm">List Members</Text>
+                <div style={{ marginLeft: 'auto' }}>
+                  {savingMembers ? <Text size="xs" c="dimmed">Saving…</Text> : null}
+                  {membersSaved ? <IconCheck size={16} color="green" /> : null}
+                </div>
+              </div>
+              <div style={{ maxHeight: 260, overflow: 'auto', border: '1px solid rgba(0,0,0,0.04)', borderRadius: 6, padding: 8 }}>
+                {familyMembers.length === 0 ? (
+                  <Text c="dimmed" size="sm">No family members</Text>
+                ) : (
+                  familyMembers.map(m => {
+                    const checked = selectedMemberIds.includes(m.id);
+                    return (
+                      <div key={m.id} style={{ padding: '6px 4px', borderBottom: '1px solid rgba(0,0,0,0.02)' }}>
+                        <Checkbox
+                          checked={checked}
+                          onChange={(e) => {
+                            const on = (e.currentTarget as HTMLInputElement).checked;
+                            const next = on ? Array.from(new Set([...(selectedMemberIds || []), m.id])) : (selectedMemberIds || []).filter(id => id !== m.id);
+                            setSelectedMemberIds(next);
+                            saveMemberSelection(next);
+                          }}
+                          label={m.name || m.username}
+                        />
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          </div>
+
           <div style={{ paddingTop: 12, flex: 1, overflow: 'auto' }}>
             {editItems.length === 0 ? (
               <Text c="dimmed">No items in this list</Text>
@@ -296,96 +403,6 @@ export default function GlobalListEditDrawer() {
             )}
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: 16, borderTop: '1px solid rgba(0,0,0,0.04)', paddingTop: 12, marginTop: 12 }}>
-            <div>
-              <Text fw={700} size="sm">Auto-add items from the following groups</Text>
-              <div style={{ marginTop: 8 }}>
-                {templates.length === 0 ? (
-                  <Text size="sm" c="dimmed">No item groups available</Text>
-                ) : (
-                  <div>
-                    {templates.map(t => {
-                      const checked = editAssignedTemplates.includes(t.id);
-                      return (
-                        <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0' }}>
-                          <Checkbox checked={checked} onChange={async (e) => {
-                            const on = e.currentTarget.checked;
-                            const newTemplateIds = on ? Array.from(new Set([...(editAssignedTemplates || []), t.id])) : (editAssignedTemplates || []).filter(x => x !== t.id);
-                            
-                            if (!on) {
-                              // User is unchecking - ask about item removal
-                              setPendingRemovalTemplateIds(newTemplateIds);
-                              setEditAssignedTemplates(newTemplateIds); // Optimistic update
-                              setRemovalConfirmOpen(true);
-                              return;
-                            }
-                            
-                            // User is checking - add template immediately
-                            setEditAssignedTemplates(newTemplateIds); // Optimistic update
-                            try {
-                              const payload: any = { templateIds: newTemplateIds };
-                              const res = await updatePackingList(listId || '', payload);
-                              if (res.response.ok) {
-                                showNotification({ title: 'Saved', message: 'Item group assignments updated', color: 'green' });
-                                const r = await getPackingList(listId || '');
-                                if (r.response.ok) setEditItems((r.data.items || []).map((it: any) => ({ ...it, itemId: it.item_id, oneOff: !!it.master_is_one_off, whole_family: !!it.whole_family })));
-                              } else {
-                                showNotification({ title: 'Failed', message: 'Could not update assignments', color: 'red' });
-                                // Revert on failure
-                                setEditAssignedTemplates(prev => prev.filter(x => x !== t.id));
-                              }
-                            } catch (err) {
-                              console.error('Failed to update template assignment', err);
-                              showNotification({ title: 'Failed', message: 'Could not update assignments', color: 'red' });
-                              // Revert on failure
-                              setEditAssignedTemplates(prev => prev.filter(x => x !== t.id));
-                            }
-                          }} />
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <Text>{t.name}</Text>
-                            <Text size="xs" c="dimmed">{t.description || ''}</Text>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                <Text fw={700} size="sm">List Members</Text>
-                <div style={{ marginLeft: 'auto' }}>
-                  {savingMembers ? <Text size="xs" c="dimmed">Saving…</Text> : null}
-                  {membersSaved ? <IconCheck size={16} color="green" /> : null}
-                </div>
-              </div>
-              <div style={{ maxHeight: 260, overflow: 'auto', border: '1px solid rgba(0,0,0,0.04)', borderRadius: 6, padding: 8 }}>
-                {familyMembers.length === 0 ? (
-                  <Text c="dimmed" size="sm">No family members</Text>
-                ) : (
-                  familyMembers.map(m => {
-                    const checked = selectedMemberIds.includes(m.id);
-                    return (
-                      <div key={m.id} style={{ padding: '6px 4px', borderBottom: '1px solid rgba(0,0,0,0.02)' }}>
-                        <Checkbox
-                          checked={checked}
-                          onChange={(e) => {
-                            const on = (e.currentTarget as HTMLInputElement).checked;
-                            const next = on ? Array.from(new Set([...(selectedMemberIds || []), m.id])) : (selectedMemberIds || []).filter(id => id !== m.id);
-                            setSelectedMemberIds(next);
-                            saveMemberSelection(next);
-                          }}
-                          label={m.name || m.username}
-                        />
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-            </div>
-          </div>
         </div>
       </Drawer>
 

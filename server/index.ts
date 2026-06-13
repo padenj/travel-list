@@ -118,7 +118,7 @@ if (isMain) {
 
       console.log('Using migration storage at', storagePath);
 
-      const files: string[] = fs.existsSync(migrationsDir) ? fs.readdirSync(migrationsDir).filter(f => f.endsWith('.js')).sort() : [];
+      const files: string[] = fs.existsSync(migrationsDir) ? fs.readdirSync(migrationsDir).filter(f => f.endsWith('.js') || f.endsWith('.cjs')).sort() : [];
       const migrations = files.map(f => ({ name: f, path: path.join(migrationsDir, f) }));
 
       if (!fs.existsSync(storagePath)) {
@@ -166,6 +166,18 @@ if (isMain) {
       }
 
       console.log(`⚡ Found ${pending.length} pending migration(s). Applying now...`);
+
+      // Back up the database file before running any migrations.
+      if (resolvedDbFile !== ':memory:' && fs.existsSync(resolvedDbFile)) {
+        const ts = new Date().toISOString().replace(/[:.]/g, '-');
+        const backupPath = `${resolvedDbFile}.${ts}.bak`;
+        try {
+          fs.copyFileSync(resolvedDbFile, backupPath);
+          console.log(`💾 DB backed up to ${backupPath}`);
+        } catch (e) {
+          console.warn('⚠️  Could not back up database before migration:', e);
+        }
+      }
 
       const db: any = await getDb();
 

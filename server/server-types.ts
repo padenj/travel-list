@@ -51,6 +51,10 @@ export interface Item {
   deleted_at?: string | null;
 }
 
+export interface ItemWithCategoryName extends Item {
+  categoryName?: string | null;
+}
+
 // Item-Category assignment
 export interface ItemCategory {
   item_id: string;
@@ -72,12 +76,7 @@ export interface Template {
   created_at: string;
   updated_at: string;
   deleted_at?: string | null;
-}
-
-// Template-Category assignment
-export interface TemplateCategory {
-  template_id: string;
-  category_id: string;
+  item_count?: number;
 }
 
 // Template-Item assignment
