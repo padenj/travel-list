@@ -31,7 +31,6 @@ beforeEach(async () => {
   // Ensure tables exist. Legacy many-to-many storage removed; tests should
   // use the single-column assignment on items (categoryId) instead.
   await db.exec('DELETE FROM templates');
-  await db.exec('DELETE FROM template_categories');
   await db.exec('DELETE FROM template_items');
   await db.exec('DELETE FROM families');
   await db.exec('DELETE FROM categories');

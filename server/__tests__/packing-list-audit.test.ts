@@ -65,7 +65,6 @@ describe('Packing list audit log', () => {
       await db.run('DELETE FROM packing_list_members');
       await db.run('DELETE FROM packing_lists');
       await db.run('DELETE FROM template_items');
-      await db.run('DELETE FROM template_categories');
       await db.run('DELETE FROM templates');
       await db.run('DELETE FROM item_whole_family');
       await db.run('DELETE FROM item_members');
