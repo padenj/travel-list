@@ -261,54 +261,7 @@ export default function GlobalListEditDrawer() {
             </div>
           </Group>
 
-          <div style={{ paddingTop: 12, flex: 1, overflow: 'auto' }}>
-            {editItems.length === 0 ? (
-              <Text c="dimmed">No items in this list</Text>
-            ) : (
-              (() => {
-                const groups: Record<string, any[]> = {};
-                for (const it of editItems) {
-                  const catName = it.category && it.category.name ? it.category.name : 'Uncategorized';
-                  const isOneOff = !!(it.master_is_one_off || it.oneOff || it.added_during_packing || it.addedDuringPacking);
-                  const cat = isOneOff ? 'One-off' : catName;
-                  if (!groups[cat]) groups[cat] = [];
-                  groups[cat].push(it);
-                }
-                return Object.keys(groups).slice().sort((a, b) => (a || '').localeCompare(b || '')).map(cat => (
-                  <div key={cat} style={{ marginBottom: 8 }}>
-                    <Text fw={700} size="sm" style={{ margin: '8px 0' }}>{cat}</Text>
-                    <div>
-                      {(groups[cat] || []).slice().sort((x: any, y: any) => ((x.name || '')).localeCompare((y.name || ''))).map((it: any) => (
-                        <div key={it.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid rgba(0,0,0,0.04)' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                            <div style={{ flex: '1 1 auto', minWidth: 0 }}>
-                              <Text style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{it.name}
-                                <Text component="span" size="xs" c="dimmed">{` - ${it.whole_family ? 'Whole Family' : (it.members && it.members.length ? it.members.map((m: any) => m.name || m.username).join(', ') : 'Unassigned')}`}</Text>
-                              </Text>
-                            </div>
-                            {it.oneOff ? <Badge color="gray" size="xs">One-off</Badge> : null}
-                            {Array.isArray(it.template_ids) && it.template_ids.length > 0 ? (
-                              <Badge color="blue" size="xs" variant="light">
-                                {it.template_ids.map((tid: string) => templates.find((t: any) => t.id === tid)?.name || 'Item group').join(', ')}
-                              </Badge>
-                            ) : null}
-                          </div>
-                          <div style={{ flex: '0 0 auto', marginLeft: 12 }}>
-                            <Group>
-                              <Button size="xs" variant="subtle" onClick={() => { setEditTargetItem(it); setShowEditItemDrawer(true); }}>Edit</Button>
-                              <Button size="xs" color="red" variant="subtle" onClick={() => handleRemoveItem(it.id)}>Remove</Button>
-                            </Group>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ));
-              })()
-            )}
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: 16, borderTop: '1px solid rgba(0,0,0,0.04)', paddingTop: 12, marginTop: 12 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: 16, borderBottom: '1px solid rgba(0,0,0,0.04)', paddingBottom: 12, marginBottom: 12 }}>
             <div>
               <Text fw={700} size="sm">Auto-add items from the following groups</Text>
               <div style={{ marginTop: 8 }}>
@@ -402,6 +355,54 @@ export default function GlobalListEditDrawer() {
               </div>
             </div>
           </div>
+
+          <div style={{ paddingTop: 12, flex: 1, overflow: 'auto' }}>
+            {editItems.length === 0 ? (
+              <Text c="dimmed">No items in this list</Text>
+            ) : (
+              (() => {
+                const groups: Record<string, any[]> = {};
+                for (const it of editItems) {
+                  const catName = it.category && it.category.name ? it.category.name : 'Uncategorized';
+                  const isOneOff = !!(it.master_is_one_off || it.oneOff || it.added_during_packing || it.addedDuringPacking);
+                  const cat = isOneOff ? 'One-off' : catName;
+                  if (!groups[cat]) groups[cat] = [];
+                  groups[cat].push(it);
+                }
+                return Object.keys(groups).slice().sort((a, b) => (a || '').localeCompare(b || '')).map(cat => (
+                  <div key={cat} style={{ marginBottom: 8 }}>
+                    <Text fw={700} size="sm" style={{ margin: '8px 0' }}>{cat}</Text>
+                    <div>
+                      {(groups[cat] || []).slice().sort((x: any, y: any) => ((x.name || '')).localeCompare((y.name || ''))).map((it: any) => (
+                        <div key={it.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid rgba(0,0,0,0.04)' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                            <div style={{ flex: '1 1 auto', minWidth: 0 }}>
+                              <Text style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{it.name}
+                                <Text component="span" size="xs" c="dimmed">{` - ${it.whole_family ? 'Whole Family' : (it.members && it.members.length ? it.members.map((m: any) => m.name || m.username).join(', ') : 'Unassigned')}`}</Text>
+                              </Text>
+                            </div>
+                            {it.oneOff ? <Badge color="gray" size="xs">One-off</Badge> : null}
+                            {Array.isArray(it.template_ids) && it.template_ids.length > 0 ? (
+                              <Badge color="blue" size="xs" variant="light">
+                                {it.template_ids.map((tid: string) => templates.find((t: any) => t.id === tid)?.name || 'Item group').join(', ')}
+                              </Badge>
+                            ) : null}
+                          </div>
+                          <div style={{ flex: '0 0 auto', marginLeft: 12 }}>
+                            <Group>
+                              <Button size="xs" variant="subtle" onClick={() => { setEditTargetItem(it); setShowEditItemDrawer(true); }}>Edit</Button>
+                              <Button size="xs" color="red" variant="subtle" onClick={() => handleRemoveItem(it.id)}>Remove</Button>
+                            </Group>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ));
+              })()
+            )}
+          </div>
+
         </div>
       </Drawer>
 
