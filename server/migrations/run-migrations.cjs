@@ -18,7 +18,7 @@ const sqlite3 = require('sqlite3');
     const storage = new SimpleJSONStorage({ path: './server/migrations/migrations.json' });
 
     const migrationsDir = path.resolve(process.cwd(), './server/migrations/migrations');
-    const files = fs.readdirSync(migrationsDir).filter(f => f.endsWith('.js')).sort();
+    const files = fs.readdirSync(migrationsDir).filter(f => f.endsWith('.js') || f.endsWith('.cjs')).sort();
     const migrations = files.map(f => ({ name: f, path: path.join(migrationsDir, f) }));
 
     const executed = await storage.executed();

@@ -118,7 +118,7 @@ if (isMain) {
 
       console.log('Using migration storage at', storagePath);
 
-      const files: string[] = fs.existsSync(migrationsDir) ? fs.readdirSync(migrationsDir).filter(f => f.endsWith('.js')).sort() : [];
+      const files: string[] = fs.existsSync(migrationsDir) ? fs.readdirSync(migrationsDir).filter(f => f.endsWith('.js') || f.endsWith('.cjs')).sort() : [];
       const migrations = files.map(f => ({ name: f, path: path.join(migrationsDir, f) }));
 
       if (!fs.existsSync(storagePath)) {
