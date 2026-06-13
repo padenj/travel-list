@@ -327,7 +327,7 @@ export class ItemRepository {
 }
 
 
-  import { Template, TemplateCategory, TemplateItem } from './server-types';
+  import { Template, TemplateItem } from './server-types';
 
   export class TemplateRepository {
     async create(template: Partial<Template>): Promise<Template> {
@@ -372,27 +372,6 @@ export class ItemRepository {
       await db.run(`UPDATE templates SET deleted_at = ? WHERE id = ?`, [new Date().toISOString(), id]);
     }
 
-    // Category assignments
-    async assignCategory(template_id: string, category_id: string): Promise<void> {
-      const db = await getDb();
-      await db.run(`INSERT OR IGNORE INTO template_categories (template_id, category_id) VALUES (?, ?)`, [template_id, category_id]);
-    }
-
-    async removeCategory(template_id: string, category_id: string): Promise<void> {
-      const db = await getDb();
-      await db.run(`DELETE FROM template_categories WHERE template_id = ? AND category_id = ?`, [template_id, category_id]);
-    }
-
-    async getCategories(template_id: string): Promise<TemplateCategory[]> {
-      const db = await getDb();
-      return db.all(`SELECT * FROM template_categories WHERE template_id = ?`, [template_id]);
-    }
-
-    async getCategoriesForTemplate(template_id: string): Promise<Category[]> {
-      const db = await getDb();
-      return db.all(`SELECT c.* FROM categories c JOIN template_categories tc ON c.id = tc.category_id WHERE tc.template_id = ? AND c.deleted_at IS NULL`, [template_id]);
-    }
-
     // Item assignments
     async assignItem(template_id: string, item_id: string): Promise<void> {
       const db = await getDb();
@@ -414,31 +393,36 @@ export class ItemRepository {
       return db.all(`SELECT i.* FROM items i JOIN template_items ti ON i.id = ti.item_id WHERE ti.template_id = ? AND i.deleted_at IS NULL`, [template_id]);
     }
 
-    // Dynamic expansion: get all items for a template (categories + items)
+    // Snapshot all current items of the given categories into the group as
+    // individual items, skipping any already present. Returns the group's items.
+    async addCategoryItems(template_id: string, category_ids: string[]): Promise<Item[]> {
+      const db = await getDb();
+      for (const category_id of category_ids) {
+        const items = await db.all(
+          `SELECT id FROM items WHERE categoryId = ? AND deleted_at IS NULL`,
+          [category_id]
+        );
+        for (const it of items) {
+          await db.run(
+            `INSERT OR IGNORE INTO template_items (template_id, item_id) VALUES (?, ?)`,
+            [template_id, it.id]
+          );
+        }
+      }
+      return this.getItemsForTemplate(template_id);
+    }
+
+    // Get all items for a group (direct items only — categories are no longer supported)
     async getExpandedItems(template_id: string): Promise<Item[]> {
       const db = await getDb();
-      // Get items from referenced categories
-      const categoryRows = await db.all(`SELECT category_id FROM template_categories WHERE template_id = ?`, [template_id]);
-      const categoryIds = categoryRows.map((row: any) => row.category_id);
-      let items: Item[] = [];
-      if (categoryIds.length > 0) {
-        // Include items that are assigned via the single-column items.categoryId
-        const placeholders = categoryIds.map(() => '?').join(',');
-        const categoryItems = await db.all(
-          `SELECT DISTINCT i.* FROM items i WHERE i.categoryId IN (${placeholders}) AND i.deleted_at IS NULL`,
-          categoryIds
-        );
-        items = items.concat(categoryItems);
-      }
-      // Get individually referenced items
       const itemRows = await db.all(`SELECT item_id FROM template_items WHERE template_id = ?`, [template_id]);
       const itemIds = itemRows.map((row: any) => row.item_id);
-      if (itemIds.length > 0) {
-        const directItems = await db.all(`SELECT * FROM items WHERE id IN (${itemIds.map(() => '?').join(',')}) AND deleted_at IS NULL`, itemIds);
-        items = items.concat(directItems);
-      }
-      // Remove duplicates by item id
-      const uniqueItems = Object.values(items.reduce<{[id: string]: Item}>((acc, item) => { acc[item.id] = item; return acc; }, {}));
+      if (itemIds.length === 0) return [];
+      const items = await db.all(
+        `SELECT * FROM items WHERE id IN (${itemIds.map(() => '?').join(',')}) AND deleted_at IS NULL`,
+        itemIds
+      );
+      const uniqueItems = Object.values(items.reduce<{ [id: string]: Item }>((acc, item) => { acc[item.id] = item; return acc; }, {}));
       return uniqueItems as Item[];
     }
 
@@ -449,12 +433,6 @@ export class ItemRepository {
       return rows.map(r => r.template_id);
     }
 
-    // Find templates that reference a given category (directly) - return template ids
-    async getTemplatesReferencingCategory(category_id: string): Promise<string[]> {
-      const db = await getDb();
-      const rows: any[] = await db.all(`SELECT template_id FROM template_categories WHERE category_id = ?`, [category_id]);
-      return rows.map(r => r.template_id);
-    }
   }
 
   import { PackingList, PackingListItem } from './server-types';

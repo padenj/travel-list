@@ -74,12 +74,6 @@ export interface Template {
   deleted_at?: string | null;
 }
 
-// Template-Category assignment
-export interface TemplateCategory {
-  template_id: string;
-  category_id: string;
-}
-
 // Template-Item assignment
 export interface TemplateItem {
   template_id: string;

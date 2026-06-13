@@ -75,7 +75,7 @@ export async function seedTemplatesForFamily(passedFamilyId?: string, familyName
     console.log(`  - template: ${tpl.name} (${tplId})`);
     for (const catName of tpl.categories || []) {
       const catId = categoryMap[catName];
-      if (catId) await templateRepo.assignCategory(tplId, catId);
+      if (catId) await templateRepo.addCategoryItems(tplId, [catId]);
     }
     for (const itemName of tpl.items || []) {
       const itemId = itemMap[itemName];

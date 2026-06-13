@@ -20,6 +20,7 @@ beforeEach(async () => {
   await db.exec(`CREATE TABLE IF NOT EXISTS items (
     id TEXT PRIMARY KEY,
     familyId TEXT NOT NULL,
+    categoryId TEXT,
     name TEXT NOT NULL,
     checked INTEGER DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -62,35 +63,56 @@ describe('TemplateRepository', () => {
     const deleted = await repo.findById(id);
     expect(deleted).toBeUndefined();
   });
-});
 
-  it('should expand items from categories and direct items', async () => {
+  it('should snapshot category items into direct template items and expand item-only results', async () => {
     const repo = new TemplateRepository();
     const template_id = uuidv4();
     const family_id = uuidv4();
     const db = await getDb();
-    await db.run('PRAGMA foreign_keys = ON');
+    const now = new Date().toISOString();
+    const categoryId = uuidv4();
+    const snapshottedItemId = uuidv4();
+    const existingDirectItemId = uuidv4();
+    const lateCategoryItemId = uuidv4();
+
     await db.run(`INSERT INTO families (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)`, [family_id, 'ExpandFam', new Date().toISOString(), new Date().toISOString()]);
     await repo.create({
       id: template_id,
       family_id,
       name: 'Expand Test',
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
+      created_at: now,
+      updated_at: now,
     });
-  // Insert category and items
-  const catId = uuidv4();
-  const itemId1 = uuidv4();
-  const itemId2 = uuidv4();
-  await db.run(`INSERT INTO categories (id, familyId, name, created_at, updated_at, deleted_at) VALUES (?, ?, ?, ?, ?, NULL)`, [catId, family_id, 'Cat', new Date().toISOString(), new Date().toISOString()]);
-  await db.run(`INSERT INTO items (id, familyId, name, created_at, updated_at, deleted_at) VALUES (?, ?, ?, ?, ?, NULL)`, [itemId1, family_id, 'Item1', new Date().toISOString(), new Date().toISOString()]);
-  await db.run(`INSERT INTO items (id, familyId, name, created_at, updated_at, deleted_at) VALUES (?, ?, ?, ?, ?, NULL)`, [itemId2, family_id, 'Item2', new Date().toISOString(), new Date().toISOString()]);
-  // Assign via the single-category column on items
-  await db.run(`UPDATE items SET categoryId = ? WHERE id = ?`, [catId, itemId1]);
-  await repo.assignCategory(template_id, catId);
-  await repo.assignItem(template_id, itemId2);
-  const expanded = await repo.getExpandedItems(template_id);
-  const expandedIds = expanded.map(i => i.id);
-  expect(expandedIds).toContain(itemId1);
-  expect(expandedIds).toContain(itemId2);
+
+    await db.run(
+      `INSERT INTO categories (id, familyId, name, created_at, updated_at, deleted_at) VALUES (?, ?, ?, ?, ?, NULL)`,
+      [categoryId, family_id, 'Category', now, now]
+    );
+    await db.run(
+      `INSERT INTO items (id, familyId, categoryId, name, created_at, updated_at, deleted_at) VALUES (?, ?, ?, ?, ?, ?, NULL)`,
+      [snapshottedItemId, family_id, categoryId, 'Snapshotted item', now, now]
+    );
+    await db.run(
+      `INSERT INTO items (id, familyId, categoryId, name, created_at, updated_at, deleted_at) VALUES (?, ?, ?, ?, ?, ?, NULL)`,
+      [existingDirectItemId, family_id, categoryId, 'Existing direct item', now, now]
+    );
+
+    await repo.assignItem(template_id, existingDirectItemId);
+
+    const templateItems = await repo.addCategoryItems(template_id, [categoryId]);
+    const templateItemIds = templateItems.map(item => item.id).sort();
+
+    expect(templateItemIds).toEqual([existingDirectItemId, snapshottedItemId].sort());
+
+    await db.run(
+      `INSERT INTO items (id, familyId, categoryId, name, created_at, updated_at, deleted_at) VALUES (?, ?, ?, ?, ?, ?, NULL)`,
+      [lateCategoryItemId, family_id, categoryId, 'Late category item', now, now]
+    );
+
+    const expanded = await repo.getExpandedItems(template_id);
+    const expandedIds = expanded.map(item => item.id).sort();
+
+    expect(expandedIds).toEqual([existingDirectItemId, snapshottedItemId].sort());
+    expect(expandedIds).not.toContain(lateCategoryItemId);
   });
+});
