@@ -5,7 +5,7 @@
   - Foreign key member_id -> users(id)
   - Backfills each existing packing list with users from the same family
 */
-module.exports.up = async function up(db) {
+module.exports.up = async function up({ db }) {
   // Create table
   await db.exec(`
     CREATE TABLE IF NOT EXISTS packing_list_members (
@@ -32,7 +32,7 @@ module.exports.up = async function up(db) {
   `);
 };
 
-module.exports.down = async function down(db) {
+module.exports.down = async function down({ db }) {
   await db.exec(`DROP INDEX IF EXISTS idx_plm_member_id;`);
   await db.exec(`DROP INDEX IF EXISTS idx_plm_packing_list_id;`);
   await db.exec(`DROP TABLE IF EXISTS packing_list_members;`);
