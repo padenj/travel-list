@@ -6,8 +6,12 @@ module.exports = {
     try {
       pairs = await db.all(`SELECT template_id, category_id FROM template_categories`);
     } catch (e) {
-      // template_categories already gone; nothing to migrate
-      pairs = [];
+      if (e && typeof e === 'object' && 'message' in e && String(e.message).includes('no such table')) {
+        // table already dropped; nothing to migrate
+        pairs = [];
+      } else {
+        throw e;
+      }
     }
     for (const { template_id, category_id } of pairs) {
       const items = await db.all(
