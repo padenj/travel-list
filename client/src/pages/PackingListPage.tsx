@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { Container, Title, Group, Button, Modal, TextInput } from '@mantine/core';
 import ManagePackingLists from '../components/ManagePackingLists';
-import { getCurrentUserProfile, createPackingList } from '../api';
+import { getCurrentUserProfile, createPackingList, getFamily } from '../api';
 import { showNotification } from '@mantine/notifications';
 import { useActivePackingList } from '../contexts/ActivePackingListContext';
+import { useImpersonation } from '../contexts/ImpersonationContext';
 
 export default function PackingListPage(): React.ReactElement {
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -12,18 +13,12 @@ export default function PackingListPage(): React.ReactElement {
   const [familyMembers, setFamilyMembers] = useState<any[]>([]);
   const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
   const { refreshLists, requestOpenEdit } = useActivePackingList();
+  const { impersonatingFamilyId } = useImpersonation();
 
   const createNewList = async () => {
     setCreating(true);
     try {
-      // Prefer impersonation when present; otherwise fall back to current user's profile
-      let fid: string | null = null;
-      try {
-        const { impersonatingFamilyId } = await import('../contexts/ImpersonationContext').then(m => ({ impersonatingFamilyId: m.useImpersonation().impersonatingFamilyId }));
-        if (impersonatingFamilyId) fid = impersonatingFamilyId;
-      } catch (e) {
-        // ignore
-      }
+      let fid: string | null = impersonatingFamilyId;
       if (!fid) {
         const profile = await getCurrentUserProfile();
         fid = profile.response.ok && profile.data.family ? profile.data.family.id : null;
@@ -50,21 +45,20 @@ export default function PackingListPage(): React.ReactElement {
   const openCreateModal = async () => {
     setShowCreateModal(true);
     try {
-      let fid: string | null = null;
-      try {
-        const { impersonatingFamilyId } = await import('../contexts/ImpersonationContext').then(m => ({ impersonatingFamilyId: m.useImpersonation().impersonatingFamilyId }));
-        if (impersonatingFamilyId) fid = impersonatingFamilyId;
-      } catch (e) {}
-      if (!fid) {
+      const fid = impersonatingFamilyId;
+      if (fid) {
+        const familyRes = await getFamily(fid);
+        if (familyRes.response.ok && Array.isArray(familyRes.data.family?.members)) {
+          const members = familyRes.data.family.members;
+          setFamilyMembers(members);
+          setSelectedMemberIds(members.map((m: any) => m.id));
+        }
+      } else {
         const profile = await getCurrentUserProfile();
-        fid = profile.response.ok && profile.data.family ? profile.data.family.id : null;
-      }
-      if (!fid) return;
-      // family members are available on profile.family.members
-      const profile = await getCurrentUserProfile();
-      if (profile.response.ok && profile.data.family && Array.isArray(profile.data.family.members)) {
-        setFamilyMembers(profile.data.family.members || []);
-        setSelectedMemberIds((profile.data.family.members || []).map((m: any) => m.id));
+        if (profile.response.ok && profile.data.family && Array.isArray(profile.data.family.members)) {
+          setFamilyMembers(profile.data.family.members || []);
+          setSelectedMemberIds((profile.data.family.members || []).map((m: any) => m.id));
+        }
       }
     } catch (e) {
       setFamilyMembers([]);

@@ -3,14 +3,16 @@ import { Drawer, Group, Text, ActionIcon, Button, Tooltip, Checkbox, Modal, Badg
 import { IconEdit, IconLayersOff, IconCheck } from '@tabler/icons-react';
 import { useListEditDrawer } from '../contexts/ListEditDrawerContext';
 import { useActivePackingList } from '../contexts/ActivePackingListContext';
-import { getPackingList, updatePackingList, deletePackingListItem, getTemplates, getItemGroups, addItemToPackingList, getCurrentUserProfile } from '../api';
+import { getPackingList, updatePackingList, deletePackingListItem, getTemplates, getItemGroups, addItemToPackingList, getCurrentUserProfile, getFamily } from '../api';
 import { showNotification } from '@mantine/notifications';
 import ItemEditDrawer from './ItemEditDrawer';
 import AddItemsDrawer from './AddItemsDrawer';
+import { useImpersonation } from '../contexts/ImpersonationContext';
 
 export default function GlobalListEditDrawer() {
   const { isOpen, listId, listName, close, renderFn, openForList } = useListEditDrawer();
   const { pendingOpenEditId, clearPendingOpenEdit, refreshLists } = useActivePackingList();
+  const { impersonatingFamilyId } = useImpersonation();
 
   const [loading, setLoading] = useState(false);
   const [currentName, setCurrentName] = useState<string | null>(null);
@@ -67,13 +69,23 @@ export default function GlobalListEditDrawer() {
         setSelectedMemberIds(memberIds || []);
 
         try {
-          const profile = await getCurrentUserProfile();
-          const fid = profile.response.ok && profile.data.family ? profile.data.family.id : null;
-            if (fid) {
+          let fid: string | null = impersonatingFamilyId;
+          let members: any[] = [];
+          if (fid) {
+            const familyRes = await getFamily(fid);
+            if (familyRes.response.ok) {
+              members = familyRes.data.family?.members || [];
+            }
+          } else {
+            const profile = await getCurrentUserProfile();
+            fid = profile.response.ok && profile.data.family ? profile.data.family.id : null;
+            members = profile.response.ok && profile.data.family?.members ? profile.data.family.members : [];
+          }
+          if (fid) {
             const tRes = await getItemGroups(fid);
             if (tRes.response.ok) setTemplates(tRes.data.itemGroups || tRes.data.templates || []);
-            if (profile.response.ok && profile.data.family && Array.isArray(profile.data.family.members)) setFamilyMembers(profile.data.family.members || []);
           }
+          setFamilyMembers(members);
         } catch (e) {
           // ignore
         }
@@ -83,7 +95,7 @@ export default function GlobalListEditDrawer() {
         setLoading(false);
       }
     })();
-  }, [isOpen, listId]);
+  }, [isOpen, listId, impersonatingFamilyId]);
 
   useEffect(() => {
     if (pendingOpenEditId) {
