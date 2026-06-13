@@ -21,7 +21,10 @@ import ItemEditDrawer from './ItemEditDrawer';
 
 type Group = { id: string; name: string; description?: string };
 type Category = { id: string; name: string };
-type Item = { id: string; name: string };
+type Item = { id: string; name: string; categoryId?: string; categoryName?: string };
+
+const sortByName = <T extends { name?: string }>(a: T, b: T) =>
+  (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' });
 
 export default function TemplateManager() {
   const [groups, setGroups] = useState<Group[]>([]);
@@ -55,10 +58,12 @@ export default function TemplateManager() {
       if (!fid) return;
       setFamilyId(fid);
       const groupsRes = await getItemGroups(fid);
-      const loaded: Group[] = groupsRes.data?.itemGroups || groupsRes.data?.templates || [];
+      const loaded: Group[] = (groupsRes.data?.itemGroups || groupsRes.data?.templates || [])
+        .slice()
+        .sort(sortByName);
       setGroups(loaded);
       setSelectedGroupId(prev => (prev && loaded.some(g => g.id === prev) ? prev : (loaded[0]?.id ?? null)));
-      getCategories(fid).then(res => setCategories((res.data?.categories || []).slice().sort((a: Category, b: Category) => (a.name || '').localeCompare(b.name || ''))));
+      getCategories(fid).then(res => setCategories((res.data?.categories || []).slice().sort(sortByName)));
       await loadAllGroupItems(loaded);
     }
     fetchData();
@@ -67,7 +72,7 @@ export default function TemplateManager() {
   const loadGroupItems = async (groupId: string): Promise<Item[]> => {
     const res = await getItemsForItemGroup(groupId);
     const items: Item[] = res.response.ok && res.data ? (res.data.items || []) : [];
-    return items.slice().sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    return items.slice().sort(sortByName);
   };
 
   const loadAllGroupItems = async (groupList: Group[]) => {
@@ -116,7 +121,9 @@ export default function TemplateManager() {
     const newId = createRes.data?.itemGroup?.id || createRes.data?.template?.id;
     setModalOpen(false);
     const groupsRes = await getItemGroups(familyId);
-    const loaded: Group[] = groupsRes.data?.itemGroups || groupsRes.data?.templates || [];
+    const loaded: Group[] = (groupsRes.data?.itemGroups || groupsRes.data?.templates || [])
+      .slice()
+      .sort(sortByName);
     setGroups(loaded);
     if (newId) setSelectedGroupId(newId);
     await loadAllGroupItems(loaded);
@@ -126,7 +133,9 @@ export default function TemplateManager() {
     await deleteItemGroup(id);
     if (!familyId) return;
     const groupsRes = await getItemGroups(familyId);
-    const loaded: Group[] = groupsRes.data?.itemGroups || groupsRes.data?.templates || [];
+    const loaded: Group[] = (groupsRes.data?.itemGroups || groupsRes.data?.templates || [])
+      .slice()
+      .sort(sortByName);
     setGroups(loaded);
     setSelectedGroupId(loaded[0]?.id ?? null);
     await loadAllGroupItems(loaded);
@@ -135,6 +144,41 @@ export default function TemplateManager() {
   const selectedGroup = groups.find(g => g.id === selectedGroupId) || null;
   const currentItems = selectedGroupId ? (groupItems[selectedGroupId] || []) : [];
   const excludedItemIds = currentItems.map(i => i.id);
+  const groupedItems = currentItems.reduce((map, item) => {
+    const key = item.categoryName?.trim() || '';
+    const list = map.get(key);
+    if (list) list.push(item);
+    else map.set(key, [item]);
+    return map;
+  }, new Map<string, Item[]>());
+  const sortedCategoryKeys = Array.from(groupedItems.keys())
+    .filter(key => key !== '')
+    .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+
+  if (groupedItems.has('')) {
+    sortedCategoryKeys.push('');
+  }
+
+  const renderGroupItem = (item: Item) => (
+    <List.Item key={item.id}>
+      <Group justify="space-between">
+        <Text>{item.name}</Text>
+        <Group>
+          <Text c="dimmed" size="sm">{(itemMembers[item.id] || []).map(m => m.name).join(', ')}</Text>
+          <ActionIcon color="blue" variant="light" onClick={() => { setEditMasterItemId(item.id); setShowEditDrawer(true); }}>
+            <IconEdit size={16} />
+          </ActionIcon>
+          <ActionIcon color="red" variant="light" onClick={async () => {
+            if (!selectedGroup) return;
+            await removeItemFromItemGroup(selectedGroup.id, item.id);
+            setGroupItems(prev => ({ ...prev, [selectedGroup.id]: (prev[selectedGroup.id] || []).filter(i => i.id !== item.id) }));
+          }}>
+            <IconTrash size={16} />
+          </ActionIcon>
+        </Group>
+      </Group>
+    </List.Item>
+  );
 
   return (
     <div>
@@ -168,7 +212,7 @@ export default function TemplateManager() {
                       const newName = editingNameDraft.trim();
                       if (!newName) return;
                       await updateItemGroup(selectedGroup.id, { name: newName });
-                      setGroups(prev => prev.map(g => g.id === selectedGroup.id ? { ...g, name: newName } : g));
+                      setGroups(prev => prev.map(g => g.id === selectedGroup.id ? { ...g, name: newName } : g).slice().sort(sortByName));
                       setEditingName(false);
                     }}>
                       <IconEdit size={16} />
@@ -199,31 +243,18 @@ export default function TemplateManager() {
                 </Group>
               </Group>
 
-              <List mb="md">
-                {currentItems.length > 0 ? (
-                  currentItems.map(item => (
-                    <List.Item key={item.id}>
-                      <Group justify="space-between">
-                        <Text>{item.name}</Text>
-                        <Group>
-                          <Text c="dimmed" size="sm">{(itemMembers[item.id] || []).map(m => m.name).join(', ')}</Text>
-                          <ActionIcon color="blue" variant="light" onClick={() => { setEditMasterItemId(item.id); setShowEditDrawer(true); }}>
-                            <IconEdit size={16} />
-                          </ActionIcon>
-                          <ActionIcon color="red" variant="light" onClick={async () => {
-                            await removeItemFromItemGroup(selectedGroup.id, item.id);
-                            setGroupItems(prev => ({ ...prev, [selectedGroup.id]: (prev[selectedGroup.id] || []).filter(i => i.id !== item.id) }));
-                          }}>
-                            <IconTrash size={16} />
-                          </ActionIcon>
-                        </Group>
-                      </Group>
-                    </List.Item>
-                  ))
-                ) : (
-                  <List.Item><Text c="dimmed">No items in this group yet.</Text></List.Item>
-                )}
-              </List>
+              {currentItems.length === 0 ? (
+                <Text c="dimmed" mb="md">No items in this group yet.</Text>
+              ) : (
+                sortedCategoryKeys.map(key => (
+                  <div key={key || 'uncategorized'}>
+                    <Text fw={700} mt="xs" mb="xs">{key || 'Uncategorized'}</Text>
+                    <List mb="sm">
+                      {groupedItems.get(key)?.map(renderGroupItem)}
+                    </List>
+                  </div>
+                ))
+              )}
             </Card>
           )}
         </>
