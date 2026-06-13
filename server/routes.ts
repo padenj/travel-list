@@ -243,63 +243,6 @@ router.delete('/template/:id', authMiddleware, async (req: Request, res: Respons
   }
 });
 
-// Assign/remove categories/items to template
-router.post('/template/:id/categories/:categoryId', authMiddleware, async (req: Request, res: Response) => {
-  const { id, categoryId } = req.params;
-  try {
-    const existing = await templateRepo.findById(id);
-    if (!existing) return res.status(404).json({ error: 'Template not found' });
-    if (req.user?.role !== 'SystemAdmin') {
-      if (req.user?.familyId !== existing.family_id || req.user.role !== 'FamilyAdmin') {
-        return res.status(403).json({ error: 'Forbidden' });
-      }
-    }
-    const items = await templateRepo.addCategoryItems(id, [categoryId]);
-    propagateTemplateToAssignedLists(id, req.user?.id);
-    return res.json({ message: 'Category items added to template', items });
-  } catch (error) {
-    console.error('Error assigning category:', error);
-    return res.status(500).json({ error: 'Failed to assign category' });
-  }
-});
-
-// Item-group alias: assign/remove categories
-router.post('/item-group/:id/categories/:categoryId', authMiddleware, async (req: Request, res: Response) => {
-  const { id, categoryId } = req.params;
-  try {
-    const existing = await templateRepo.findById(id);
-    if (!existing) return res.status(404).json({ error: 'Item group not found' });
-    if (req.user?.role !== 'SystemAdmin') {
-      if (req.user?.familyId !== existing.family_id || req.user.role !== 'FamilyAdmin') {
-        return res.status(403).json({ error: 'Forbidden' });
-      }
-    }
-    const items = await templateRepo.addCategoryItems(id, [categoryId]);
-    propagateTemplateToAssignedLists(id, req.user?.id);
-    return res.json({ message: 'Category items added to item group', items });
-  } catch (error) {
-    console.error('Error assigning category to item group:', error);
-    return res.status(500).json({ error: 'Failed to assign category to item group' });
-  }
-});
-
-router.delete('/item-group/:id/categories/:categoryId', authMiddleware, async (req: Request, res: Response) => {
-  const { id, categoryId } = req.params;
-  try {
-    const existing = await templateRepo.findById(id);
-    if (!existing) return res.status(404).json({ error: 'Item group not found' });
-    if (req.user?.role !== 'SystemAdmin') {
-      if (req.user?.familyId !== existing.family_id || req.user.role !== 'FamilyAdmin') {
-        return res.status(403).json({ error: 'Forbidden' });
-      }
-    }
-    return res.status(400).json({ error: 'Removing categories from item groups is no longer supported. Remove items directly instead.' });
-  } catch (error) {
-    console.error('Error removing category from item group:', error);
-    return res.status(500).json({ error: 'Failed to remove category from item group' });
-  }
-});
-
 // Aliases: Item-groups endpoints (backwards-compatible wrappers around templates)
 router.post('/item-groups', authMiddleware, async (req: Request, res: Response) => {
   // Delegate to existing template creation handler logic
@@ -390,23 +333,6 @@ router.delete('/item-group/:id', authMiddleware, async (req: Request, res: Respo
   }
 });
 
-router.delete('/template/:id/categories/:categoryId', authMiddleware, async (req: Request, res: Response) => {
-  const { id, categoryId } = req.params;
-  try {
-    const existing = await templateRepo.findById(id);
-    if (!existing) return res.status(404).json({ error: 'Template not found' });
-    if (req.user?.role !== 'SystemAdmin') {
-      if (req.user?.familyId !== existing.family_id || req.user.role !== 'FamilyAdmin') {
-        return res.status(403).json({ error: 'Forbidden' });
-      }
-    }
-    return res.status(400).json({ error: 'Removing categories from templates is no longer supported. Remove items directly instead.' });
-  } catch (error) {
-    console.error('Error removing category:', error);
-    return res.status(500).json({ error: 'Failed to remove category' });
-  }
-});
-
 router.post('/template/:id/items/:itemId', authMiddleware, async (req: Request, res: Response) => {
   const { id, itemId } = req.params;
   try {
@@ -458,6 +384,36 @@ router.post('/item-group/:id/items/:itemId', authMiddleware, async (req: Request
   } catch (error) {
     console.error('Error assigning item to item group:', error);
     return res.status(500).json({ error: 'Failed to assign item to item group' });
+  }
+});
+
+router.post('/item-group/:id/add-category-items', authMiddleware, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { categoryIds } = req.body as { categoryIds?: string[] };
+  try {
+    const existing = await templateRepo.findById(id);
+    if (!existing) return res.status(404).json({ error: 'Item group not found' });
+    if (req.user?.role !== 'SystemAdmin') {
+      if (req.user?.familyId !== existing.family_id || req.user.role !== 'FamilyAdmin') {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+    }
+    if (!Array.isArray(categoryIds) || categoryIds.length === 0) {
+      return res.status(400).json({ error: 'categoryIds must be a non-empty array' });
+    }
+    const items = await templateRepo.addCategoryItems(id, categoryIds);
+    try {
+      const lists = await packingListRepo.getPackingListsForTemplate(id);
+      for (const l of lists) {
+        await packingListRepo.reconcilePackingListAgainstTemplate(l.id, id);
+      }
+    } catch (err) {
+      console.error('Error propagating item group changes synchronously', { itemGroupId: id, err });
+    }
+    return res.json({ items });
+  } catch (error) {
+    console.error('Error adding category items to item group:', error);
+    return res.status(500).json({ error: 'Failed to add category items to item group' });
   }
 });
 
@@ -584,28 +540,6 @@ router.post('/item-group/:id/sync-items', authMiddleware, async (req: Request, r
   } catch (error) {
     console.error('Error syncing item group items:', error);
     return res.status(500).json({ error: 'Failed to sync item group items' });
-  }
-});
-
-// Get categories assigned to a template
-router.get('/template/:id/categories', authMiddleware, async (req: Request, res: Response) => {
-  const { id } = req.params;
-  try {
-    return res.json({ categories: [] });
-  } catch (error) {
-    console.error('Error fetching template categories:', error);
-    return res.status(500).json({ error: 'Failed to fetch template categories' });
-  }
-});
-
-// Item-group alias: get categories
-router.get('/item-group/:id/categories', authMiddleware, async (req: Request, res: Response) => {
-  const { id } = req.params;
-  try {
-    return res.json({ categories: [] });
-  } catch (error) {
-    console.error('Error fetching item group categories:', error);
-    return res.status(500).json({ error: 'Failed to fetch item group categories' });
   }
 });
 
