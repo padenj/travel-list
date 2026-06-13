@@ -27,7 +27,7 @@ module.exports.up = async function up({ db }) {
     INSERT OR IGNORE INTO packing_list_members (packing_list_id, member_id)
     SELECT pl.id AS packing_list_id, u.id AS member_id
     FROM packing_lists pl
-    JOIN users u ON u.family_id = pl.family_id
+    JOIN users u ON u.familyId = pl.family_id
     WHERE u.deleted_at IS NULL;
   `);
 };
