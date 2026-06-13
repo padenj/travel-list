@@ -27,6 +27,7 @@ This document lists current supporting components in `src/components` and where 
   - `src/pages/SystemAdminPage`
 
 ### CategoryManagementPage (supporting parts)
+Uses a searchable Mantine `Select` to choose the active category while preserving custom drag-sort order before showing that category's detail card.
 **Used in:**
   - `src/pages/CategoryManagementPage`
 
