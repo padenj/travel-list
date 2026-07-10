@@ -414,6 +414,22 @@ export class ItemRepository {
     // Item assignments
     async assignItem(template_id: string, item_id: string): Promise<void> {
       const db = await getDb();
+      const relation = await db.get<{ template_family_id: string; item_family_id: string }>(
+        `SELECT t.family_id AS template_family_id, i.familyId AS item_family_id
+         FROM templates t
+         JOIN items i ON i.id = ?
+         WHERE t.id = ?
+           AND t.deleted_at IS NULL
+           AND i.deleted_at IS NULL`,
+        [item_id, template_id]
+      );
+
+      if (!relation) {
+        throw new Error('Cannot assign item: template or item is missing or inactive');
+      }
+      if (relation.template_family_id !== relation.item_family_id) {
+        throw new Error('Cannot assign item across families');
+      }
       await db.run(`INSERT OR IGNORE INTO template_items (template_id, item_id) VALUES (?, ?)`, [template_id, item_id]);
     }
 

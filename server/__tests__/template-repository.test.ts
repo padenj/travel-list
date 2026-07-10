@@ -176,10 +176,30 @@ describe('TemplateRepository', () => {
     await db.run(`INSERT INTO items (id, familyId, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`, [crossFamilyItemId, otherFamilyId, 'Cross Family Item', now, now]);
 
     await repo.assignItem(templateId, sameFamilyItemId);
-    await repo.assignItem(templateId, crossFamilyItemId);
+    await expect(repo.assignItem(templateId, crossFamilyItemId)).rejects.toThrow(/famil/i);
 
     const items = await repo.getItemsForTemplate(templateId);
     expect(items.map(item => item.id)).toEqual([sameFamilyItemId]);
+  });
+
+  it('assignItem rejects cross-family assignment', async () => {
+    const db = await getDb();
+    const repo = new TemplateRepository();
+    const now = new Date().toISOString();
+    const templateFamilyId = uuidv4();
+    const itemFamilyId = uuidv4();
+    const templateId = uuidv4();
+    const itemId = uuidv4();
+
+    await db.run(`INSERT INTO families (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)`, [templateFamilyId, 'Template Family', now, now]);
+    await db.run(`INSERT INTO families (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)`, [itemFamilyId, 'Item Family', now, now]);
+    await repo.create({ id: templateId, family_id: templateFamilyId, name: 'Group', created_at: now, updated_at: now });
+    await db.run(`INSERT INTO items (id, familyId, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`, [itemId, itemFamilyId, 'Cross-family item', now, now]);
+
+    await expect(repo.assignItem(templateId, itemId)).rejects.toThrow(/famil/i);
+
+    const assignments = await repo.getItems(templateId);
+    expect(assignments).toHaveLength(0);
   });
 
   it('getExpandedItems excludes cross-family items from bad template_items rows', async () => {
