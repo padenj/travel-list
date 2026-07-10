@@ -232,7 +232,8 @@ describe('Category and Item Repositories', () => {
     });
     const crossFamilyTemplateId = uuidv4();
     await templateRepo.create({ id: crossFamilyTemplateId, family_id: otherFamily.id, name: 'Cross Family Leak', created_at: now, updated_at: now });
-    await templateRepo.assignItem(crossFamilyTemplateId, item.id);
+    const db = await getDb();
+    await db.run(`INSERT INTO template_items (template_id, item_id) VALUES (?, ?)`, [crossFamilyTemplateId, item.id]);
 
     const items = await itemRepo.getItemsForCategory(category.id);
     const found = items.find((categoryItem: any) => categoryItem.id === item.id);
