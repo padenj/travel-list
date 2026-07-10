@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { v4 as uuidv4 } from 'uuid';
-import { CategoryRepository, ItemRepository, UserRepository, FamilyRepository } from '../repositories';
+import { CategoryRepository, ItemRepository, UserRepository, FamilyRepository, TemplateRepository } from '../repositories';
 import { getDb, closeDb } from '../db';
 import { Category, Item, Family, User } from '../server-types';
 
@@ -9,6 +9,7 @@ describe('Category and Item Repositories', () => {
   let itemRepo: ItemRepository;
   let familyRepo: FamilyRepository;
   let userRepo: UserRepository;
+  let templateRepo: TemplateRepository;
   let testFamilyId: string;
   let testMemberId: string;
 
@@ -17,6 +18,7 @@ describe('Category and Item Repositories', () => {
     itemRepo = new ItemRepository();
     familyRepo = new FamilyRepository();
     userRepo = new UserRepository();
+    templateRepo = new TemplateRepository();
     await getDb();
     // Create a test family and member
     const family = await familyRepo.create({
@@ -156,6 +158,88 @@ describe('Category and Item Repositories', () => {
     await itemRepo.assignToMember(item.id, testMemberId);
     const members = await itemRepo.getMembersForItem(item.id);
     expect(members.map(m => m.id)).toContain(testMemberId);
+  });
+
+  it('should include sorted itemGroupNames when fetching items for category', async () => {
+    const now = new Date().toISOString();
+    const category = await categoryRepo.create({
+      id: uuidv4(),
+      familyId: testFamilyId,
+      name: 'Essentials',
+      created_at: now,
+      updated_at: now
+    });
+
+    const groupedItem = await itemRepo.create({
+      id: uuidv4(),
+      familyId: testFamilyId,
+      categoryId: category.id,
+      name: 'Toothbrush',
+      created_at: now,
+      updated_at: now
+    });
+    const ungroupedItem = await itemRepo.create({
+      id: uuidv4(),
+      familyId: testFamilyId,
+      categoryId: category.id,
+      name: 'Socks',
+      created_at: now,
+      updated_at: now
+    });
+
+    const groupA = uuidv4();
+    const groupB = uuidv4();
+    await templateRepo.create({ id: groupA, family_id: testFamilyId, name: 'Camping', created_at: now, updated_at: now });
+    await templateRepo.create({ id: groupB, family_id: testFamilyId, name: 'All Trips', created_at: now, updated_at: now });
+    await templateRepo.assignItem(groupA, groupedItem.id);
+    await templateRepo.assignItem(groupB, groupedItem.id);
+
+    const items = await itemRepo.getItemsForCategory(category.id);
+    const grouped = items.find((item: any) => item.id === groupedItem.id);
+    const ungrouped = items.find((item: any) => item.id === ungroupedItem.id);
+
+    expect(grouped?.itemGroupNames).toEqual(['All Trips', 'Camping']);
+    expect(ungrouped?.itemGroupNames).toEqual([]);
+  });
+
+  it('does not include itemGroupNames from templates in a different family', async () => {
+    const now = new Date().toISOString();
+    const category = await categoryRepo.create({
+      id: uuidv4(),
+      familyId: testFamilyId,
+      name: 'Essentials',
+      created_at: now,
+      updated_at: now
+    });
+    const item = await itemRepo.create({
+      id: uuidv4(),
+      familyId: testFamilyId,
+      categoryId: category.id,
+      name: 'Toothbrush',
+      created_at: now,
+      updated_at: now
+    });
+
+    const sameFamilyTemplateId = uuidv4();
+    await templateRepo.create({ id: sameFamilyTemplateId, family_id: testFamilyId, name: 'Same Family Group', created_at: now, updated_at: now });
+    await templateRepo.assignItem(sameFamilyTemplateId, item.id);
+
+    const otherFamily = await familyRepo.create({
+      id: uuidv4(),
+      name: 'Other Family',
+      created_at: now,
+      updated_at: now
+    });
+    const crossFamilyTemplateId = uuidv4();
+    await templateRepo.create({ id: crossFamilyTemplateId, family_id: otherFamily.id, name: 'Cross Family Leak', created_at: now, updated_at: now });
+    const db = await getDb();
+    await db.run(`INSERT INTO template_items (template_id, item_id) VALUES (?, ?)`, [crossFamilyTemplateId, item.id]);
+
+    const items = await itemRepo.getItemsForCategory(category.id);
+    const found = items.find((categoryItem: any) => categoryItem.id === item.id);
+
+    expect(found?.itemGroupNames).toEqual(['Same Family Group']);
+    expect(found?.itemGroupNames).not.toContain('Cross Family Leak');
   });
 
   it('should assign item to whole family and check assignment', async () => {

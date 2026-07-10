@@ -174,6 +174,35 @@ export async function updateCategoryPositions(familyId: string, orderedCategoryI
   }
 }
 
+async function getItemGroupNamesByItemIds(itemIds: string[]): Promise<Record<string, string[]>> {
+  if (itemIds.length === 0) return {};
+  const db = await getDb();
+  const rows = await db.all(
+    `SELECT ti.item_id AS itemId, t.name AS groupName
+     FROM template_items ti
+     JOIN templates t ON t.id = ti.template_id
+     JOIN items i ON i.id = ti.item_id
+     WHERE ti.item_id IN (${itemIds.map(() => '?').join(',')})
+       AND t.deleted_at IS NULL
+       AND i.deleted_at IS NULL
+       AND t.family_id = i.familyId`,
+    itemIds
+  );
+
+  const itemGroupNamesByItemId: Record<string, string[]> = {};
+  for (const row of rows as Array<{ itemId: string; groupName: string }>) {
+    if (!itemGroupNamesByItemId[row.itemId]) itemGroupNamesByItemId[row.itemId] = [];
+    itemGroupNamesByItemId[row.itemId].push(row.groupName);
+  }
+
+  for (const itemId of Object.keys(itemGroupNamesByItemId)) {
+    itemGroupNamesByItemId[itemId] = Array.from(new Set(itemGroupNamesByItemId[itemId]))
+      .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+  }
+
+  return itemGroupNamesByItemId;
+}
+
 export class ItemRepository {
   async setChecked(id: string, checked: boolean): Promise<Item | undefined> {
     const db = await getDb();
@@ -287,6 +316,7 @@ export class ItemRepository {
     const db = await getDb();
     // Select items whose categoryId matches
     const items: Item[] = await db.all(`SELECT * FROM items WHERE categoryId = ? AND deleted_at IS NULL`, [category_id]);
+    const itemGroupNamesByItemId = await getItemGroupNamesByItemIds(items.map(item => item.id));
     // For each item, fetch member IDs and whole family assignment
     const result = [];
     for (const item of items) {
@@ -302,6 +332,7 @@ export class ItemRepository {
         ...item,
         memberIds,
         wholeFamily: !!wholeRow,
+        itemGroupNames: itemGroupNamesByItemId[item.id] || [],
       });
     }
     return result;
@@ -383,6 +414,22 @@ export class ItemRepository {
     // Item assignments
     async assignItem(template_id: string, item_id: string): Promise<void> {
       const db = await getDb();
+      const relation = await db.get<{ template_family_id: string; item_family_id: string }>(
+        `SELECT t.family_id AS template_family_id, i.familyId AS item_family_id
+         FROM templates t
+         JOIN items i ON i.id = ?
+         WHERE t.id = ?
+           AND t.deleted_at IS NULL
+           AND i.deleted_at IS NULL`,
+        [item_id, template_id]
+      );
+
+      if (!relation) {
+        throw new Error('Cannot assign item: template or item is missing or inactive');
+      }
+      if (relation.template_family_id !== relation.item_family_id) {
+        throw new Error('Cannot assign item across families');
+      }
       await db.run(`INSERT OR IGNORE INTO template_items (template_id, item_id) VALUES (?, ?)`, [template_id, item_id]);
     }
 
@@ -398,14 +445,23 @@ export class ItemRepository {
 
     async getItemsForTemplate(template_id: string): Promise<ItemWithCategoryName[]> {
       const db = await getDb();
-      return db.all(
+      const items: ItemWithCategoryName[] = await db.all(
         `SELECT i.*, c.name AS categoryName
          FROM items i
          JOIN template_items ti ON i.id = ti.item_id
-         LEFT JOIN categories c ON i.categoryId = c.id
-         WHERE ti.template_id = ? AND i.deleted_at IS NULL`,
+        JOIN templates t ON t.id = ti.template_id
+        LEFT JOIN categories c ON i.categoryId = c.id
+        WHERE ti.template_id = ?
+          AND i.deleted_at IS NULL
+          AND t.deleted_at IS NULL
+          AND i.familyId = t.family_id`,
         [template_id]
       );
+      const itemGroupNamesByItemId = await getItemGroupNamesByItemIds(items.map(item => item.id));
+      return items.map((item) => ({
+        ...item,
+        itemGroupNames: itemGroupNamesByItemId[item.id] || [],
+      }));
     }
 
     // Snapshot all current items of the given categories into the group as
@@ -430,15 +486,18 @@ export class ItemRepository {
     // Get all items for a group (direct items only — categories are no longer supported)
     async getExpandedItems(template_id: string): Promise<Item[]> {
       const db = await getDb();
-      const itemRows = await db.all(`SELECT item_id FROM template_items WHERE template_id = ?`, [template_id]);
-      const itemIds = itemRows.map((row: any) => row.item_id);
-      if (itemIds.length === 0) return [];
       const items = await db.all(
-        `SELECT * FROM items WHERE id IN (${itemIds.map(() => '?').join(',')}) AND deleted_at IS NULL`,
-        itemIds
+        `SELECT DISTINCT i.*
+         FROM template_items ti
+         JOIN templates t ON t.id = ti.template_id
+         JOIN items i ON i.id = ti.item_id
+         WHERE ti.template_id = ?
+           AND t.deleted_at IS NULL
+           AND i.deleted_at IS NULL
+           AND i.familyId = t.family_id`,
+        [template_id]
       );
-      const uniqueItems = Object.values(items.reduce<{ [id: string]: Item }>((acc, item) => { acc[item.id] = item; return acc; }, {}));
-      return uniqueItems as Item[];
+      return items as Item[];
     }
 
     // Find templates that reference a given item (directly) - return template ids

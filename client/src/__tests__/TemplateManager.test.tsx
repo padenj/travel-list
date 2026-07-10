@@ -1,7 +1,8 @@
-import { describe as _describe, it as _it, expect as _expect, beforeEach as _beforeEach, beforeAll as _beforeAll, vi as _vi } from 'vitest';
-import * as api from '../api';
+import { describe, it, expect, beforeEach, beforeAll, vi } from 'vitest';
 import { ImpersonationProvider } from '../contexts/ImpersonationContext';
 import { RefreshProvider, useRefresh } from '../contexts/RefreshContext';
+
+let api: any;
 
 // Some CI/dev environments may not have the testing-library devDependencies installed.
 // Use a synchronous require.resolve guard to check for their presence. If they're
@@ -19,7 +20,9 @@ try {
 
 if (!hasTestingLibs) {
   // testing libs are not available — skip the UI suite
-  _describe.skip('TemplateManager (component tests skipped - install testing libs)', () => {});
+  const describeOrNoop = typeof describe === 'function' ? describe : ((_: string, fn?: () => void) => fn?.());
+  const skipSuite = (describeOrNoop as typeof describe & { skip?: typeof describe }).skip ?? describeOrNoop;
+  skipSuite('TemplateManager (component tests skipped - install testing libs)', () => {});
 } else {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const rtl = require('@testing-library/react');
@@ -38,10 +41,15 @@ if (!hasTestingLibs) {
   // real @mantine/core before registering the vi.mock above.
   const MantineProvider = React.Fragment;
 
-  const { describe, it, expect, beforeEach, beforeAll, vi } = { describe: _describe, it: _it, expect: _expect, beforeEach: _beforeEach, beforeAll: _beforeAll, vi: _vi };
-
-  // Mock the API module
-  vi.mock('../api');
+  // Mock the API module without evaluating the real module at import time.
+  vi.mock('../api', () => ({
+    getCurrentUserProfile: vi.fn(),
+    getItemGroups: vi.fn(),
+    getCategories: vi.fn(),
+    getItems: vi.fn(),
+    getItemsForItemGroup: vi.fn(),
+    createItemGroup: vi.fn(),
+  }));
 
   // Mock Mantine so tests don't require its provider/context implementation.
   // Provide minimal component stubs and hooks used by the UI.
@@ -72,6 +80,7 @@ if (!hasTestingLibs) {
       Modal: passthrough('div'),
       Text: passthrough('div'),
       Title: passthrough('div'),
+      Badge: passthrough('span'),
       Group: passthrough('div'),
       Stack: passthrough('div'),
     ActionIcon: passthrough('button'),
@@ -96,6 +105,7 @@ if (!hasTestingLibs) {
   // Defer importing TemplateManager until after mocks are registered so its imports use the mocked modules.
   let TemplateManager: any;
   beforeAll(async () => {
+    api = await import('../api');
     const mod = await import('../components/TemplateManager');
     TemplateManager = mod.default;
   });
@@ -124,7 +134,9 @@ if (!hasTestingLibs) {
 
       await waitFor(() => expect(api.getItemGroups).toHaveBeenCalled());
       expect(screen.getByLabelText(/Select item group/i)).toBeTruthy();
-      expect(screen.getAllByText('Weekend').length).toBeGreaterThan(0);
+      await waitFor(() => expect(api.getItemsForItemGroup).toHaveBeenCalledTimes(2));
+      const loadedGroupIds = (api.getItemsForItemGroup as any).mock.calls.map((call: [string]) => call[0]).sort();
+      expect(loadedGroupIds).toEqual(['t1', 't2']);
     });
 
     it('opens new item group modal and creates item group', async () => {
@@ -147,13 +159,15 @@ if (!hasTestingLibs) {
 
       await waitFor(() => expect(api.getItemGroups).toHaveBeenCalled());
 
-      const newBtn = screen.getByText(/New Item Group/i);
+      const [newBtn] = screen.getAllByRole('button', { name: /New Item Group/i });
       const user = await userEventLib.setup();
       await user.click(newBtn);
 
-      const nameInput = screen.getByPlaceholderText(/Item Group Name/i);
+      const nameInput = screen.getAllByPlaceholderText(/Item Group Name/i).at(-1);
+      expect(nameInput).toBeTruthy();
       await user.type(nameInput, 'New');
-      const createBtn = screen.getByText(/Create/i);
+      const createBtn = screen.getAllByRole('button', { name: /^Create$/i }).at(-1);
+      expect(createBtn).toBeTruthy();
       await user.click(createBtn);
 
       await waitFor(() => expect(api.createItemGroup).toHaveBeenCalled());
@@ -188,6 +202,37 @@ if (!hasTestingLibs) {
       await user.click(screen.getByText(/Trigger Refresh/i));
 
       await waitFor(() => expect((api.getItemGroups as any).mock.calls.length).toBeGreaterThanOrEqual(2));
+    });
+
+    it('renders item group badges for group items', async () => {
+      (api.getItemsForItemGroup as any).mockResolvedValue({
+        response: { ok: true },
+        data: {
+          items: [{ id: 'i1', name: 'Aloe', categoryName: 'Bath', itemGroupNames: ['All Trips', 'Camping', 'Beach-Only'] }],
+        },
+      });
+
+      render(
+        <MemoryRouter>
+          <MantineProvider>
+            <RefreshProvider>
+              <ImpersonationProvider>
+                <TemplateManager />
+              </ImpersonationProvider>
+            </RefreshProvider>
+          </MantineProvider>
+        </MemoryRouter>
+      );
+
+      const allTripsBadge = await waitFor(() => screen.getByText('All Trips'));
+      const campingBadge = screen.getByText('Camping');
+      const beachOnlyBadge = screen.getByText('Beach-Only');
+
+      expect((allTripsBadge as HTMLElement).tagName).toBe('SPAN');
+      expect((allTripsBadge as HTMLElement).getAttribute('data-prop-variant')).toBe('light');
+      expect((allTripsBadge as HTMLElement).getAttribute('data-prop-size')).toBe('xs');
+      expect((campingBadge as HTMLElement).tagName).toBe('SPAN');
+      expect((beachOnlyBadge as HTMLElement).tagName).toBe('SPAN');
     });
   });
 }

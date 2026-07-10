@@ -18,10 +18,11 @@ import { useRefresh } from '../contexts/RefreshContext';
 import { IconEdit, IconTrash, IconPlus, IconX } from '@tabler/icons-react';
 import AddItemsDrawer from './AddItemsDrawer';
 import ItemEditDrawer from './ItemEditDrawer';
+import ItemGroupBadges from './ItemGroupBadges';
 
 type Group = { id: string; name: string; description?: string };
 type Category = { id: string; name: string };
-type Item = { id: string; name: string; categoryId?: string; categoryName?: string };
+type Item = { id: string; name: string; categoryId?: string; categoryName?: string; itemGroupNames?: string[] };
 
 const sortByName = <T extends { name?: string }>(a: T, b: T) =>
   (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' });
@@ -161,9 +162,12 @@ export default function TemplateManager() {
 
   const renderGroupItem = (item: Item) => (
     <List.Item key={item.id}>
-      <Group justify="space-between">
-        <Text>{item.name}</Text>
-        <Group>
+      <Group justify="space-between" wrap="nowrap" align="flex-start">
+        <Group gap={8} wrap="wrap" align="center" style={{ flex: 1, minWidth: 0 }}>
+          <Text>{item.name}</Text>
+          <ItemGroupBadges names={item.itemGroupNames} />
+        </Group>
+        <Group style={{ flex: '0 0 auto' }}>
           <Text c="dimmed" size="sm">{(itemMembers[item.id] || []).map(m => m.name).join(', ')}</Text>
           <ActionIcon color="blue" variant="light" onClick={() => { setEditMasterItemId(item.id); setShowEditDrawer(true); }}>
             <IconEdit size={16} />
