@@ -181,8 +181,11 @@ async function getItemGroupNamesByItemIds(itemIds: string[]): Promise<Record<str
     `SELECT ti.item_id AS itemId, t.name AS groupName
      FROM template_items ti
      JOIN templates t ON t.id = ti.template_id
+     JOIN items i ON i.id = ti.item_id
      WHERE ti.item_id IN (${itemIds.map(() => '?').join(',')})
-       AND t.deleted_at IS NULL`,
+       AND t.deleted_at IS NULL
+       AND i.deleted_at IS NULL
+       AND t.family_id = i.familyId`,
     itemIds
   );
 
@@ -430,8 +433,12 @@ export class ItemRepository {
         `SELECT i.*, c.name AS categoryName
          FROM items i
          JOIN template_items ti ON i.id = ti.item_id
-         LEFT JOIN categories c ON i.categoryId = c.id
-         WHERE ti.template_id = ? AND i.deleted_at IS NULL`,
+        JOIN templates t ON t.id = ti.template_id
+        LEFT JOIN categories c ON i.categoryId = c.id
+        WHERE ti.template_id = ?
+          AND i.deleted_at IS NULL
+          AND t.deleted_at IS NULL
+          AND i.familyId = t.family_id`,
         [template_id]
       );
       const itemGroupNamesByItemId = await getItemGroupNamesByItemIds(items.map(item => item.id));

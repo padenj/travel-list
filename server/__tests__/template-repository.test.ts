@@ -157,4 +157,28 @@ describe('TemplateRepository', () => {
     const items = await repo.getItemsForTemplate(groupA);
     expect(items[0].itemGroupNames).toEqual(['All Trips', 'Camping']);
   });
+
+  it('getItemsForTemplate excludes items from different families', async () => {
+    const db = await getDb();
+    const repo = new TemplateRepository();
+    const now = new Date().toISOString();
+    const templateFamilyId = uuidv4();
+    const otherFamilyId = uuidv4();
+    const templateId = uuidv4();
+    const sameFamilyItemId = uuidv4();
+    const crossFamilyItemId = uuidv4();
+
+    await db.run(`INSERT INTO families (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)`, [templateFamilyId, 'Template Family', now, now]);
+    await db.run(`INSERT INTO families (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)`, [otherFamilyId, 'Other Family', now, now]);
+    await repo.create({ id: templateId, family_id: templateFamilyId, name: 'Group', created_at: now, updated_at: now });
+
+    await db.run(`INSERT INTO items (id, familyId, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`, [sameFamilyItemId, templateFamilyId, 'Same Family Item', now, now]);
+    await db.run(`INSERT INTO items (id, familyId, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`, [crossFamilyItemId, otherFamilyId, 'Cross Family Item', now, now]);
+
+    await repo.assignItem(templateId, sameFamilyItemId);
+    await repo.assignItem(templateId, crossFamilyItemId);
+
+    const items = await repo.getItemsForTemplate(templateId);
+    expect(items.map(item => item.id)).toEqual([sameFamilyItemId]);
+  });
 });
