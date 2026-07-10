@@ -10,8 +10,13 @@ import { USER_ROLES } from '../constants';
 
 describe('Item group badges route regressions', () => {
   let app: express.Application;
-  let familyId: string;
-  let adminToken: string;
+  let familyId = '';
+  let adminToken = '';
+  let categoryId = '';
+  let allTripsId = '';
+  let itemId = '';
+  let campingId = '';
+  let adminId = '';
 
   beforeEach(async () => {
     app = express();
@@ -26,7 +31,7 @@ describe('Item group badges route regressions', () => {
     const now = new Date().toISOString();
     await familyRepo.create({ id: familyId, name: 'Badge Family', created_at: now, updated_at: now });
 
-    const adminId = uuidv4();
+    adminId = uuidv4();
     const adminUsername = `admin_badges_${Date.now()}`;
     await userRepo.create({
       id: adminId,
@@ -44,10 +49,10 @@ describe('Item group badges route regressions', () => {
     if (!createdAdmin) throw new Error('admin not created');
     adminToken = generateToken(createdAdmin);
 
-    const categoryId = uuidv4();
-    const itemId = uuidv4();
-    const allTripsId = uuidv4();
-    const campingId = uuidv4();
+    categoryId = uuidv4();
+    itemId = uuidv4();
+    allTripsId = uuidv4();
+    campingId = uuidv4();
 
     await db.run(
       `INSERT INTO categories (id, familyId, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
@@ -63,23 +68,19 @@ describe('Item group badges route regressions', () => {
     await templateRepo.create({ id: campingId, family_id: familyId, name: 'Camping', created_at: now, updated_at: now });
     await templateRepo.assignItem(allTripsId, itemId);
     await templateRepo.assignItem(campingId, itemId);
-
-    // store ids on app locals for each test
-    app.locals.categoryId = categoryId;
-    app.locals.allTripsId = allTripsId;
   });
 
   afterEach(async () => {
     try {
       const db = await getDb();
-      await db.run('DELETE FROM template_items');
-      await db.run('DELETE FROM templates');
-      await db.run('DELETE FROM item_members');
-      await db.run('DELETE FROM item_whole_family');
-      await db.run('DELETE FROM items');
-      await db.run('DELETE FROM categories');
-      await db.run('DELETE FROM users');
-      await db.run('DELETE FROM families');
+      await db.run('DELETE FROM template_items WHERE template_id IN (?, ?) OR item_id = ?', [allTripsId, campingId, itemId]);
+      await db.run('DELETE FROM templates WHERE id IN (?, ?)', [allTripsId, campingId]);
+      await db.run('DELETE FROM item_members WHERE item_id = ?', [itemId]);
+      await db.run('DELETE FROM item_whole_family WHERE item_id = ?', [itemId]);
+      await db.run('DELETE FROM items WHERE id = ?', [itemId]);
+      await db.run('DELETE FROM categories WHERE id = ?', [categoryId]);
+      await db.run('DELETE FROM users WHERE id = ?', [adminId]);
+      await db.run('DELETE FROM families WHERE id = ?', [familyId]);
     } catch {
       // ignore cleanup errors
     }
@@ -88,7 +89,7 @@ describe('Item group badges route regressions', () => {
 
   it('GET /api/categories/:categoryId/items returns itemGroupNames with all item group names', async () => {
     const res = await request(app)
-      .get(`/api/categories/${app.locals.categoryId}/items`)
+      .get(`/api/categories/${categoryId}/items`)
       .set('Authorization', `Bearer ${adminToken}`);
 
     expect(res.status).toBe(200);
@@ -98,7 +99,7 @@ describe('Item group badges route regressions', () => {
 
   it('GET /api/item-group/:id/items includes current group in itemGroupNames', async () => {
     const res = await request(app)
-      .get(`/api/item-group/${app.locals.allTripsId}/items`)
+      .get(`/api/item-group/${allTripsId}/items`)
       .set('Authorization', `Bearer ${adminToken}`);
 
     expect(res.status).toBe(200);
