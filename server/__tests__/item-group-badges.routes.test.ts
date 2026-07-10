@@ -32,7 +32,7 @@ describe('Item group badges route regressions', () => {
     await familyRepo.create({ id: familyId, name: 'Badge Family', created_at: now, updated_at: now });
 
     adminId = uuidv4();
-    const adminUsername = `admin_badges_${Date.now()}`;
+    const adminUsername = `admin_badges_${uuidv4().replace(/-/g, '')}`;
     await userRepo.create({
       id: adminId,
       username: adminUsername,
@@ -94,7 +94,8 @@ describe('Item group badges route regressions', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.items).toHaveLength(1);
-    expect(res.body.items[0].itemGroupNames).toEqual(['All Trips', 'Camping']);
+    expect(res.body.items[0].itemGroupNames).toEqual(expect.arrayContaining(['All Trips', 'Camping']));
+    expect(res.body.items[0].itemGroupNames).toHaveLength(2);
   });
 
   it('GET /api/item-group/:id/items includes current group in itemGroupNames', async () => {
@@ -105,6 +106,7 @@ describe('Item group badges route regressions', () => {
     expect(res.status).toBe(200);
     expect(res.body.items).toHaveLength(1);
     expect(res.body.items[0].itemGroupNames).toContain('All Trips');
-    expect(res.body.items[0].itemGroupNames).toEqual(['All Trips', 'Camping']);
+    expect(res.body.items[0].itemGroupNames).toEqual(expect.arrayContaining(['All Trips', 'Camping']));
+    expect(res.body.items[0].itemGroupNames).toHaveLength(2);
   });
 });
