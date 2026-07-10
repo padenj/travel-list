@@ -1,4 +1,4 @@
-import { describe as _describe, it as _it, expect as _expect, beforeEach as _beforeEach, beforeAll as _beforeAll, vi as _vi } from 'vitest';
+import { describe, it, expect, beforeEach, beforeAll, vi } from 'vitest';
 import * as api from '../api';
 import { ImpersonationProvider } from '../contexts/ImpersonationContext';
 import { RefreshProvider, useRefresh } from '../contexts/RefreshContext';
@@ -37,8 +37,6 @@ if (!hasTestingLibs) {
   // Use a simple Fragment as MantineProvider stub here so we don't load the
   // real @mantine/core before registering the vi.mock above.
   const MantineProvider = React.Fragment;
-
-  const { describe, it, expect, beforeEach, beforeAll, vi } = { describe: _describe, it: _it, expect: _expect, beforeEach: _beforeEach, beforeAll: _beforeAll, vi: _vi };
 
   // Mock the API module
   vi.mock('../api');
@@ -195,7 +193,7 @@ if (!hasTestingLibs) {
       (api.getItemsForItemGroup as any).mockResolvedValue({
         response: { ok: true },
         data: {
-          items: [{ id: 'i1', name: 'Aloe', categoryName: 'Bath', itemGroupNames: ['All Trips', 'Camping', 'Weekend'] }],
+          items: [{ id: 'i1', name: 'Aloe', categoryName: 'Bath', itemGroupNames: ['All Trips', 'Camping', 'Beach-Only'] }],
         },
       });
 
@@ -211,9 +209,15 @@ if (!hasTestingLibs) {
         </MemoryRouter>
       );
 
-      await waitFor(() => expect(screen.getByText('All Trips')).toBeTruthy());
-      expect(screen.getByText('Camping')).toBeTruthy();
-      expect(screen.getAllByText('Weekend').length).toBeGreaterThan(0);
+      const allTripsBadge = await waitFor(() => screen.getByText('All Trips'));
+      const campingBadge = screen.getByText('Camping');
+      const beachOnlyBadge = screen.getByText('Beach-Only');
+
+      expect((allTripsBadge as HTMLElement).tagName).toBe('SPAN');
+      expect((allTripsBadge as HTMLElement).getAttribute('data-prop-variant')).toBe('light');
+      expect((allTripsBadge as HTMLElement).getAttribute('data-prop-size')).toBe('xs');
+      expect((campingBadge as HTMLElement).tagName).toBe('SPAN');
+      expect((beachOnlyBadge as HTMLElement).tagName).toBe('SPAN');
     });
   });
 }

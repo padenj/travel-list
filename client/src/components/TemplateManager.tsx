@@ -163,23 +163,23 @@ export default function TemplateManager() {
   const renderGroupItem = (item: Item) => (
     <List.Item key={item.id}>
       <Group justify="space-between" wrap="nowrap" align="flex-start">
-        <Text>{item.name}</Text>
-        <Stack gap={6} align="flex-end" style={{ flex: '0 0 auto' }}>
+        <Group gap={8} wrap="wrap" align="center" style={{ flex: 1, minWidth: 0 }}>
+          <Text>{item.name}</Text>
           <ItemGroupBadges names={item.itemGroupNames} />
-          <Group>
-            <Text c="dimmed" size="sm">{(itemMembers[item.id] || []).map(m => m.name).join(', ')}</Text>
-            <ActionIcon color="blue" variant="light" onClick={() => { setEditMasterItemId(item.id); setShowEditDrawer(true); }}>
-              <IconEdit size={16} />
-            </ActionIcon>
-            <ActionIcon color="red" variant="light" onClick={async () => {
-              if (!selectedGroup) return;
-              await removeItemFromItemGroup(selectedGroup.id, item.id);
-              setGroupItems(prev => ({ ...prev, [selectedGroup.id]: (prev[selectedGroup.id] || []).filter(i => i.id !== item.id) }));
-            }}>
-              <IconTrash size={16} />
-            </ActionIcon>
-          </Group>
-        </Stack>
+        </Group>
+        <Group style={{ flex: '0 0 auto' }}>
+          <Text c="dimmed" size="sm">{(itemMembers[item.id] || []).map(m => m.name).join(', ')}</Text>
+          <ActionIcon color="blue" variant="light" onClick={() => { setEditMasterItemId(item.id); setShowEditDrawer(true); }}>
+            <IconEdit size={16} />
+          </ActionIcon>
+          <ActionIcon color="red" variant="light" onClick={async () => {
+            if (!selectedGroup) return;
+            await removeItemFromItemGroup(selectedGroup.id, item.id);
+            setGroupItems(prev => ({ ...prev, [selectedGroup.id]: (prev[selectedGroup.id] || []).filter(i => i.id !== item.id) }));
+          }}>
+            <IconTrash size={16} />
+          </ActionIcon>
+        </Group>
       </Group>
     </List.Item>
   );
