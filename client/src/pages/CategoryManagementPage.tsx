@@ -33,6 +33,7 @@ import AddItemsDrawer from '../components/AddItemsDrawer';
 import ItemEditDrawer from '../components/ItemEditDrawer';
 import ConfirmDelete from '../components/ConfirmDelete';
 import BulkEditDrawer from '../components/BulkEditDrawer';
+import ItemGroupBadges from '../components/ItemGroupBadges';
 import { IconTrash, IconEdit, IconPlus, IconX } from '@tabler/icons-react';
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { arrayMove, SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
@@ -88,7 +89,7 @@ export default function CategoryManagementPage(): React.ReactElement {
   const [editId, setEditId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
   const [items, setItems] = useState<{ id: string; name: string }[]>([]);
-  const [categoryItems, setCategoryItems] = useState<{ [categoryId: string]: { id: string; name: string }[] }>({});
+  const [categoryItems, setCategoryItems] = useState<{ [categoryId: string]: { id: string; name: string; itemGroupNames?: string[] }[] }>({});
   const [itemMembers, setItemMembers] = useState<{ [itemId: string]: { id: string; name: string }[] }>({});
   const [itemWholeFamily, setItemWholeFamily] = useState<{ [itemId: string]: boolean }>({});
   const [familyMembers, setFamilyMembers] = useState<{ id: string; name: string }[]>([]);
@@ -447,6 +448,7 @@ export default function CategoryManagementPage(): React.ReactElement {
                               )}
                               <div>
                                 <Text>{item.name}</Text>
+                                <ItemGroupBadges names={item.itemGroupNames} />
                                 {itemWholeFamily[item.id] ? (
                                   <Text c="dimmed" size="sm">Whole family</Text>
                                 ) : Array.isArray(itemMembers[item.id]) && itemMembers[item.id].length > 0 ? (

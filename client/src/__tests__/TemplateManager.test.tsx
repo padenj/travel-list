@@ -72,6 +72,7 @@ if (!hasTestingLibs) {
       Modal: passthrough('div'),
       Text: passthrough('div'),
       Title: passthrough('div'),
+      Badge: passthrough('span'),
       Group: passthrough('div'),
       Stack: passthrough('div'),
     ActionIcon: passthrough('button'),
@@ -188,6 +189,31 @@ if (!hasTestingLibs) {
       await user.click(screen.getByText(/Trigger Refresh/i));
 
       await waitFor(() => expect((api.getItemGroups as any).mock.calls.length).toBeGreaterThanOrEqual(2));
+    });
+
+    it('renders item group badges for group items', async () => {
+      (api.getItemsForItemGroup as any).mockResolvedValue({
+        response: { ok: true },
+        data: {
+          items: [{ id: 'i1', name: 'Aloe', categoryName: 'Bath', itemGroupNames: ['All Trips', 'Camping', 'Weekend'] }],
+        },
+      });
+
+      render(
+        <MemoryRouter>
+          <MantineProvider>
+            <RefreshProvider>
+              <ImpersonationProvider>
+                <TemplateManager />
+              </ImpersonationProvider>
+            </RefreshProvider>
+          </MantineProvider>
+        </MemoryRouter>
+      );
+
+      await waitFor(() => expect(screen.getByText('All Trips')).toBeTruthy());
+      expect(screen.getByText('Camping')).toBeTruthy();
+      expect(screen.getAllByText('Weekend').length).toBeGreaterThan(0);
     });
   });
 }
