@@ -10,6 +10,7 @@ export default defineConfig({
     setupFiles: ['./tests/setup.ts'],
     include: [
       'client/src/__tests__/GlobalListEditDrawer.test.tsx', // Targeted client regression coverage
+      'client/src/__tests__/Dashboard.test.tsx', // Dashboard edit-list regression coverage
       'src/**/*.test.{ts,tsx}',           // Frontend unit tests
       'server/**/*.test.ts',              // Backend unit tests
       'tests/integration/**/*.test.ts',   // Integration tests

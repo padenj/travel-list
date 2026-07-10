@@ -15,7 +15,7 @@ import { useImpersonation } from '../contexts/ImpersonationContext';
 import { getCurrentUserProfile, getItems, getPackingList, togglePackingListItemCheck, addItemToPackingList, setPackingListItemNotNeeded, setPackingListItemNotNeededForMember } from '../api';
 
 export default function Dashboard(): React.ReactElement {
-  const { activeListId, requestOpenEdit } = useActivePackingList();
+  const { activeListId, requestOpenEdit, availableLists } = useActivePackingList();
   const { openForList } = useListEditDrawer();
   const [userLists, setUserLists] = useState<any[]>([]);
   const [wholeFamilyItems, setWholeFamilyItems] = useState<any[]>([]);
@@ -504,9 +504,10 @@ export default function Dashboard(): React.ReactElement {
                 showNotification({ title: 'No list selected', message: 'Select a list before editing', color: 'yellow' });
                 return;
               }
+              const activeListName = (availableLists || []).find((list: any) => list.id === activeListId)?.name;
               // Request the active-pack list edit (keeps legacy flow) and open the global drawer
               if (requestOpenEdit) requestOpenEdit(activeListId);
-              openForList(activeListId, undefined);
+              openForList(activeListId, activeListName);
             }}>Edit list</Button>
           </Group>
           {!activeListId ? (
