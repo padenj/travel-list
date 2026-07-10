@@ -125,7 +125,9 @@ if (!hasTestingLibs) {
 
       await waitFor(() => expect(api.getItemGroups).toHaveBeenCalled());
       expect(screen.getByLabelText(/Select item group/i)).toBeTruthy();
-      expect(screen.getAllByText('Weekend').length).toBeGreaterThan(0);
+      await waitFor(() => expect(api.getItemsForItemGroup).toHaveBeenCalledTimes(2));
+      const loadedGroupIds = (api.getItemsForItemGroup as any).mock.calls.map((call: [string]) => call[0]).sort();
+      expect(loadedGroupIds).toEqual(['t1', 't2']);
     });
 
     it('opens new item group modal and creates item group', async () => {
@@ -148,13 +150,15 @@ if (!hasTestingLibs) {
 
       await waitFor(() => expect(api.getItemGroups).toHaveBeenCalled());
 
-      const newBtn = screen.getByText(/New Item Group/i);
+      const [newBtn] = screen.getAllByRole('button', { name: /New Item Group/i });
       const user = await userEventLib.setup();
       await user.click(newBtn);
 
-      const nameInput = screen.getByPlaceholderText(/Item Group Name/i);
+      const nameInput = screen.getAllByPlaceholderText(/Item Group Name/i).at(-1);
+      expect(nameInput).toBeTruthy();
       await user.type(nameInput, 'New');
-      const createBtn = screen.getByText(/Create/i);
+      const createBtn = screen.getAllByRole('button', { name: /^Create$/i }).at(-1);
+      expect(createBtn).toBeTruthy();
       await user.click(createBtn);
 
       await waitFor(() => expect(api.createItemGroup).toHaveBeenCalled());
