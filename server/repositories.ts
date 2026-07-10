@@ -470,15 +470,18 @@ export class ItemRepository {
     // Get all items for a group (direct items only — categories are no longer supported)
     async getExpandedItems(template_id: string): Promise<Item[]> {
       const db = await getDb();
-      const itemRows = await db.all(`SELECT item_id FROM template_items WHERE template_id = ?`, [template_id]);
-      const itemIds = itemRows.map((row: any) => row.item_id);
-      if (itemIds.length === 0) return [];
       const items = await db.all(
-        `SELECT * FROM items WHERE id IN (${itemIds.map(() => '?').join(',')}) AND deleted_at IS NULL`,
-        itemIds
+        `SELECT DISTINCT i.*
+         FROM template_items ti
+         JOIN templates t ON t.id = ti.template_id
+         JOIN items i ON i.id = ti.item_id
+         WHERE ti.template_id = ?
+           AND t.deleted_at IS NULL
+           AND i.deleted_at IS NULL
+           AND i.familyId = t.family_id`,
+        [template_id]
       );
-      const uniqueItems = Object.values(items.reduce<{ [id: string]: Item }>((acc, item) => { acc[item.id] = item; return acc; }, {}));
-      return uniqueItems as Item[];
+      return items as Item[];
     }
 
     // Find templates that reference a given item (directly) - return template ids
