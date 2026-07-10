@@ -53,6 +53,7 @@ export interface Item {
 
 export interface ItemWithCategoryName extends Item {
   categoryName?: string | null;
+  itemGroupNames?: string[];
 }
 
 // Item-Category assignment

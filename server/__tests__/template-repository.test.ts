@@ -135,4 +135,26 @@ describe('TemplateRepository', () => {
     expect(items[0].categoryId).toBe(catId);
     expect(items[0].categoryName).toBe('Electronics');
   });
+
+  it('getItemsForTemplate includes sorted itemGroupNames for each item', async () => {
+    const db = await getDb();
+    const repo = new TemplateRepository();
+    const now = new Date().toISOString();
+    const famId = uuidv4();
+    const catId = uuidv4();
+    const groupA = uuidv4();
+    const groupB = uuidv4();
+    const itemId = uuidv4();
+
+    await db.run(`INSERT INTO families (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)`, [famId, 'Fam', now, now]);
+    await db.run(`INSERT INTO categories (id, familyId, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`, [catId, famId, 'Bath', now, now]);
+    await db.run(`INSERT INTO items (id, familyId, categoryId, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`, [itemId, famId, catId, 'Aloe', now, now]);
+    await repo.create({ id: groupA, family_id: famId, name: 'Camping', created_at: now, updated_at: now });
+    await repo.create({ id: groupB, family_id: famId, name: 'All Trips', created_at: now, updated_at: now });
+    await repo.assignItem(groupA, itemId);
+    await repo.assignItem(groupB, itemId);
+
+    const items = await repo.getItemsForTemplate(groupA);
+    expect(items[0].itemGroupNames).toEqual(['All Trips', 'Camping']);
+  });
 });

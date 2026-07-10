@@ -174,6 +174,32 @@ export async function updateCategoryPositions(familyId: string, orderedCategoryI
   }
 }
 
+async function getItemGroupNamesByItemIds(itemIds: string[]): Promise<Record<string, string[]>> {
+  if (itemIds.length === 0) return {};
+  const db = await getDb();
+  const rows = await db.all(
+    `SELECT ti.item_id AS itemId, t.name AS groupName
+     FROM template_items ti
+     JOIN templates t ON t.id = ti.template_id
+     WHERE ti.item_id IN (${itemIds.map(() => '?').join(',')})
+       AND t.deleted_at IS NULL`,
+    itemIds
+  );
+
+  const itemGroupNamesByItemId: Record<string, string[]> = {};
+  for (const row of rows as Array<{ itemId: string; groupName: string }>) {
+    if (!itemGroupNamesByItemId[row.itemId]) itemGroupNamesByItemId[row.itemId] = [];
+    itemGroupNamesByItemId[row.itemId].push(row.groupName);
+  }
+
+  for (const itemId of Object.keys(itemGroupNamesByItemId)) {
+    itemGroupNamesByItemId[itemId] = Array.from(new Set(itemGroupNamesByItemId[itemId]))
+      .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+  }
+
+  return itemGroupNamesByItemId;
+}
+
 export class ItemRepository {
   async setChecked(id: string, checked: boolean): Promise<Item | undefined> {
     const db = await getDb();
@@ -287,6 +313,7 @@ export class ItemRepository {
     const db = await getDb();
     // Select items whose categoryId matches
     const items: Item[] = await db.all(`SELECT * FROM items WHERE categoryId = ? AND deleted_at IS NULL`, [category_id]);
+    const itemGroupNamesByItemId = await getItemGroupNamesByItemIds(items.map(item => item.id));
     // For each item, fetch member IDs and whole family assignment
     const result = [];
     for (const item of items) {
@@ -302,6 +329,7 @@ export class ItemRepository {
         ...item,
         memberIds,
         wholeFamily: !!wholeRow,
+        itemGroupNames: itemGroupNamesByItemId[item.id] || [],
       });
     }
     return result;
@@ -398,7 +426,7 @@ export class ItemRepository {
 
     async getItemsForTemplate(template_id: string): Promise<ItemWithCategoryName[]> {
       const db = await getDb();
-      return db.all(
+      const items: ItemWithCategoryName[] = await db.all(
         `SELECT i.*, c.name AS categoryName
          FROM items i
          JOIN template_items ti ON i.id = ti.item_id
@@ -406,6 +434,11 @@ export class ItemRepository {
          WHERE ti.template_id = ? AND i.deleted_at IS NULL`,
         [template_id]
       );
+      const itemGroupNamesByItemId = await getItemGroupNamesByItemIds(items.map(item => item.id));
+      return items.map((item) => ({
+        ...item,
+        itemGroupNames: itemGroupNamesByItemId[item.id] || [],
+      }));
     }
 
     // Snapshot all current items of the given categories into the group as
