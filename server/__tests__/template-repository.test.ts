@@ -135,7 +135,6 @@ describe('TemplateRepository', () => {
     expect(items[0].categoryId).toBe(catId);
     expect(items[0].categoryName).toBe('Electronics');
   });
-
   it('getItemsForTemplate includes sorted itemGroupNames for each item', async () => {
     const db = await getDb();
     const repo = new TemplateRepository();
