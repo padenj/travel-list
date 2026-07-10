@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, beforeAll, vi } from 'vitest';
-import * as api from '../api';
 import { ImpersonationProvider } from '../contexts/ImpersonationContext';
 import { RefreshProvider, useRefresh } from '../contexts/RefreshContext';
+
+let api: any;
 
 // Some CI/dev environments may not have the testing-library devDependencies installed.
 // Use a synchronous require.resolve guard to check for their presence. If they're
@@ -40,8 +41,15 @@ if (!hasTestingLibs) {
   // real @mantine/core before registering the vi.mock above.
   const MantineProvider = React.Fragment;
 
-  // Mock the API module
-  vi.mock('../api');
+  // Mock the API module without evaluating the real module at import time.
+  vi.mock('../api', () => ({
+    getCurrentUserProfile: vi.fn(),
+    getItemGroups: vi.fn(),
+    getCategories: vi.fn(),
+    getItems: vi.fn(),
+    getItemsForItemGroup: vi.fn(),
+    createItemGroup: vi.fn(),
+  }));
 
   // Mock Mantine so tests don't require its provider/context implementation.
   // Provide minimal component stubs and hooks used by the UI.
@@ -97,6 +105,7 @@ if (!hasTestingLibs) {
   // Defer importing TemplateManager until after mocks are registered so its imports use the mocked modules.
   let TemplateManager: any;
   beforeAll(async () => {
+    api = await import('../api');
     const mod = await import('../components/TemplateManager');
     TemplateManager = mod.default;
   });
