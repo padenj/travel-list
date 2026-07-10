@@ -1,11 +1,4 @@
-import {
-  describe as _describe,
-  it as _it,
-  expect as _expect,
-  beforeEach as _beforeEach,
-  beforeAll as _beforeAll,
-  vi as _vi,
-} from 'vitest';
+import { describe, it, expect, beforeEach, beforeAll, vi } from 'vitest';
 import * as api from '../api';
 import { ImpersonationProvider } from '../contexts/ImpersonationContext';
 import { RefreshProvider } from '../contexts/RefreshContext';
@@ -18,22 +11,13 @@ try {
 }
 
 if (!hasTestingLibs) {
-  _describe.skip('CategoryManagementPage (component tests skipped - install testing libs)', () => {});
+  describe.skip('CategoryManagementPage (component tests skipped - install testing libs)', () => {});
 } else {
   const rtl = require('@testing-library/react');
   const { render, screen, waitFor } = rtl;
   const { MemoryRouter } = require('react-router-dom');
   const React = require('react');
   const MantineProvider = React.Fragment;
-
-  const { describe, it, expect, beforeEach, beforeAll, vi } = {
-    describe: _describe,
-    it: _it,
-    expect: _expect,
-    beforeEach: _beforeEach,
-    beforeAll: _beforeAll,
-    vi: _vi,
-  };
 
   vi.mock('../api', () => ({
     getCategories: vi.fn(),
