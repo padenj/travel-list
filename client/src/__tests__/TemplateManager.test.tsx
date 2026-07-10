@@ -19,7 +19,9 @@ try {
 
 if (!hasTestingLibs) {
   // testing libs are not available — skip the UI suite
-  _describe.skip('TemplateManager (component tests skipped - install testing libs)', () => {});
+  const describeOrNoop = typeof describe === 'function' ? describe : ((_: string, fn?: () => void) => fn?.());
+  const skipSuite = (describeOrNoop as typeof describe & { skip?: typeof describe }).skip ?? describeOrNoop;
+  skipSuite('TemplateManager (component tests skipped - install testing libs)', () => {});
 } else {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const rtl = require('@testing-library/react');
