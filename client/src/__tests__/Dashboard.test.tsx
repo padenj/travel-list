@@ -1,5 +1,5 @@
-import { describe as _describe, it as _it, expect as _expect, beforeEach as _beforeEach, beforeAll as _beforeAll, vi as _vi } from 'vitest';
-import * as api from '../api';
+// @vitest-environment jsdom
+import { describe as _describe, it as _it, expect as _expect, beforeEach as _beforeEach, beforeAll as _beforeAll, afterEach as _afterEach, vi as _vi } from 'vitest';
 
 let hasTestingLibs = true;
 try {
@@ -12,26 +12,29 @@ try {
 if (!hasTestingLibs) {
   _describe.skip('Dashboard (component tests skipped - install testing libs)', () => {});
 } else {
+  if (!(globalThis as any).localStorage) {
+    (globalThis as any).localStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
+  }
   const rtl = require('@testing-library/react');
   const userEvent = require('@testing-library/user-event');
   const React = require('react');
   const { MemoryRouter } = require('react-router-dom');
-  const { render, screen } = rtl;
+  const { render, screen, cleanup, fireEvent } = rtl;
   const userEventLib = (userEvent && userEvent.default) || userEvent;
 
-  const { describe, it, expect, beforeEach, beforeAll, vi } = { describe: _describe, it: _it, expect: _expect, beforeEach: _beforeEach, beforeAll: _beforeAll, vi: _vi };
+  const { describe, it, expect, beforeEach, beforeAll, afterEach, vi } = { describe: _describe, it: _it, expect: _expect, beforeEach: _beforeEach, beforeAll: _beforeAll, afterEach: _afterEach, vi: _vi };
 
-  vi.mock('../api');
+  _vi.mock('../api');
 
-  const { requestOpenEdit, openForList, showNotification } = vi.hoisted(() => ({
-    requestOpenEdit: vi.fn(),
-    openForList: vi.fn(),
-    showNotification: vi.fn(),
+  const { requestOpenEdit, openForList, showNotification } = _vi.hoisted(() => ({
+    requestOpenEdit: _vi.fn(),
+    openForList: _vi.fn(),
+    showNotification: _vi.fn(),
   }));
 
-  vi.mock('@mantine/notifications', () => ({ showNotification }));
+  _vi.mock('@mantine/notifications', () => ({ showNotification }));
 
-  vi.mock('../contexts/ActivePackingListContext', () => ({
+  _vi.mock('../contexts/ActivePackingListContext', () => ({
     useActivePackingList: () => ({
       activeListId: 'list-1',
       requestOpenEdit,
@@ -39,38 +42,38 @@ if (!hasTestingLibs) {
     }),
   }));
 
-  vi.mock('../contexts/ListEditDrawerContext', () => ({
+  _vi.mock('../contexts/ListEditDrawerContext', () => ({
     useListEditDrawer: () => ({
       openForList,
     }),
   }));
 
-  vi.mock('../contexts/ImpersonationContext', () => ({
+  _vi.mock('../contexts/ImpersonationContext', () => ({
     useImpersonation: () => ({
       impersonatingFamilyId: null,
     }),
   }));
 
-  vi.mock('../components/ActivePackingListSelector', () => ({
+  _vi.mock('../components/ActivePackingListSelector', () => ({
     default: () => null,
   }));
-  vi.mock('../components/PackingListsSideBySide', () => ({
+  _vi.mock('../components/PackingListsSideBySide', () => ({
     PackingListsSideBySide: () => null,
   }));
-  vi.mock('../components/ItemEditDrawer', () => ({
+  _vi.mock('../components/ItemEditDrawer', () => ({
     default: () => null,
   }));
-  vi.mock('../components/AddItemsDrawer', () => ({
+  _vi.mock('../components/AddItemsDrawer', () => ({
     default: () => null,
   }));
-  vi.mock('../components/PackingListAuditPanel', () => ({
+  _vi.mock('../components/PackingListAuditPanel', () => ({
     default: () => null,
   }));
-  vi.mock('../components/PackingListItemAuditModal', () => ({
+  _vi.mock('../components/PackingListItemAuditModal', () => ({
     default: () => null,
   }));
 
-  vi.mock('@mantine/core', () => {
+  _vi.mock('@mantine/core', () => {
     const React = require('react');
     const passthrough = (el = 'div') => ({ children, ...props }: any) => {
       const allowed = new Set(['children', 'onClick', 'style', 'role', 'aria-label', 'disabled', 'type']);
@@ -90,14 +93,18 @@ if (!hasTestingLibs) {
   });
 
   let Dashboard: any;
+  let api: any;
   beforeAll(async () => {
+    api = await import('../api');
     const mod = await import('../components/Dashboard');
     Dashboard = mod.default;
   });
 
   describe('Dashboard', () => {
     beforeEach(() => {
+      cleanup();
       vi.clearAllMocks();
+      vi.useRealTimers();
       (api.getCurrentUserProfile as any).mockResolvedValue({
         response: { ok: true },
         data: { user: { id: 'u1' }, family: { id: 'f1', members: [] } },
@@ -108,8 +115,15 @@ if (!hasTestingLibs) {
       });
       (api.getPackingList as any).mockResolvedValue({
         response: { ok: true },
-        data: { items: [], checks: [] },
+        data: { items: [], checks: [], list: { notes: '' } },
       });
+      (api.updatePackingList as any).mockResolvedValue({
+        response: { ok: true },
+        data: {},
+      });
+    });
+    afterEach(() => {
+      cleanup();
     });
 
     it('opens list editor with the active list name', async () => {
@@ -124,6 +138,41 @@ if (!hasTestingLibs) {
 
       expect(requestOpenEdit).toHaveBeenCalledWith('list-1');
       expect(openForList).toHaveBeenCalledWith('list-1', 'Summer Trip');
+    });
+
+    it('shows helper text for empty notes in collapsed trip notes panel', async () => {
+      render(
+        <MemoryRouter>
+          <Dashboard />
+        </MemoryRouter>
+      );
+
+      expect(screen.getAllByText('Add reminders for future trips…').length).toBeGreaterThan(0);
+    });
+
+    it('debounces notes save and flushes a single save on blur', async () => {
+      render(
+        <MemoryRouter>
+          <Dashboard />
+        </MemoryRouter>
+      );
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Expand notes' }));
+      const textarea = await screen.findByRole('textbox', { name: 'Trip notes editor' });
+      vi.useFakeTimers();
+
+      fireEvent.change(textarea, { target: { value: 'Pack charger' } });
+      expect(api.updatePackingList).not.toHaveBeenCalled();
+
+      vi.advanceTimersByTime(400);
+      expect(api.updatePackingList).not.toHaveBeenCalled();
+
+      fireEvent.blur(textarea);
+      expect(api.updatePackingList).toHaveBeenCalledTimes(1);
+      expect(api.updatePackingList).toHaveBeenCalledWith('list-1', { notes: 'Pack charger' });
+
+      vi.advanceTimersByTime(1000);
+      expect(api.updatePackingList).toHaveBeenCalledTimes(1);
     });
   });
 }
