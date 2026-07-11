@@ -108,6 +108,7 @@ const SCHEMAS = {
         id TEXT PRIMARY KEY,
         family_id TEXT NOT NULL,
         name TEXT NOT NULL,
+        notes TEXT,
         created_at TEXT NOT NULL DEFAULT (datetime('now')),
         updated_at TEXT NOT NULL DEFAULT (datetime('now')),
         deleted_at TEXT,
@@ -342,6 +343,8 @@ async function initializeDatabase(db: Database): Promise<void> {
     await ensureColumn('categories', 'position', 'INTEGER');
     // Ensure users.position exists for ordering family members
     await ensureColumn('users', 'position', 'INTEGER');
+    // Ensure packing_lists.notes exists
+    await ensureColumn('packing_lists', 'notes', 'TEXT');
       
         // No automatic packing_list_items schema rebuild here. Schema migrations
         // are handled via an explicit migration framework (see project notes).
