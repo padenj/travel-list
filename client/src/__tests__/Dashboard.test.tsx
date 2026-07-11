@@ -289,7 +289,7 @@ if (!hasTestingLibs) {
       expect(api.updatePackingList).toHaveBeenCalledTimes(4);
     });
 
-    it('does not apply older same-list save response when it resolves before newer response', async () => {
+    it('does not apply older same-list save response when it resolves after newer response', async () => {
       const pendingByList: Record<string, Array<(value: any) => void>> = {};
       (api.updatePackingList as any).mockImplementation((listId: string) => new Promise(resolve => {
         if (!pendingByList[listId]) pendingByList[listId] = [];
@@ -313,13 +313,13 @@ if (!hasTestingLibs) {
       expect(api.updatePackingList).toHaveBeenNthCalledWith(1, 'list-1', { notes: 'first-save' });
       expect(api.updatePackingList).toHaveBeenNthCalledWith(2, 'list-1', { notes: 'second-save' });
 
-      pendingByList['list-1'][0]({ response: { ok: true }, data: {} });
+      pendingByList['list-1'][1]({ response: { ok: true }, data: {} });
       await Promise.resolve();
       await Promise.resolve();
 
       expect((textarea as HTMLTextAreaElement).value).toBe('second-save');
 
-      pendingByList['list-1'][1]({ response: { ok: true }, data: {} });
+      pendingByList['list-1'][0]({ response: { ok: true }, data: {} });
       await Promise.resolve();
       await Promise.resolve();
 
