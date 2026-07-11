@@ -702,7 +702,8 @@ router.get('/families/:familyId/packing-lists', authMiddleware, familyAccessMidd
     const listsWithMembers = [] as any[];
     for (const l of lists) {
       const memberIds = await packingListRepo.getMemberIdsForPackingList(l.id);
-      listsWithMembers.push({ ...l, member_ids: memberIds });
+      const { notes: _notes, ...listSummary } = l as any;
+      listsWithMembers.push({ ...listSummary, member_ids: memberIds });
     }
     return res.json({ lists: listsWithMembers });
   } catch (error) {
