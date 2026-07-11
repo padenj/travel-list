@@ -19,7 +19,7 @@ if (!hasTestingLibs) {
   const userEvent = require('@testing-library/user-event');
   const React = require('react');
   const { MemoryRouter } = require('react-router-dom');
-  const { render, screen, cleanup, fireEvent } = rtl;
+  const { render, screen, cleanup, fireEvent, waitFor } = rtl;
   const userEventLib = (userEvent && userEvent.default) || userEvent;
 
   const { describe, it, expect, beforeEach, beforeAll, afterEach, vi } = { describe: _describe, it: _it, expect: _expect, beforeEach: _beforeEach, beforeAll: _beforeAll, afterEach: _afterEach, vi: _vi };
@@ -153,6 +153,50 @@ if (!hasTestingLibs) {
       );
 
       expect(screen.getAllByText('Add reminders for future trips…').length).toBeGreaterThan(0);
+    });
+
+    it('does not apply stale notes load response after switching lists', async () => {
+      const pendingByList: Record<string, (value: any) => void> = {};
+      (api.getPackingList as any).mockImplementation((listId: string) => new Promise(resolve => {
+        pendingByList[listId] = resolve;
+      }));
+
+      const view = render(
+        <MemoryRouter>
+          <Dashboard />
+        </MemoryRouter>
+      );
+
+      await waitFor(() => expect(api.getPackingList).toHaveBeenCalledWith('list-1'));
+
+      activeListState.id = 'list-2';
+      view.rerender(
+        <MemoryRouter>
+          <Dashboard />
+        </MemoryRouter>
+      );
+
+      await waitFor(() => expect(api.getPackingList).toHaveBeenCalledWith('list-2'));
+
+      pendingByList['list-2']({
+        response: { ok: true },
+        data: { items: [], checks: [], list: { notes: 'notes-for-list-2' } },
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Expand notes' }));
+      const textarea = await screen.findByRole('textbox', { name: 'Trip notes editor' });
+      expect((textarea as HTMLTextAreaElement).value).toBe('notes-for-list-2');
+
+      pendingByList['list-1']({
+        response: { ok: true },
+        data: { items: [], checks: [], list: { notes: 'stale-notes-for-list-1' } },
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect((textarea as HTMLTextAreaElement).value).toBe('notes-for-list-2');
     });
 
     it('debounces notes save and flushes a single save on blur', async () => {

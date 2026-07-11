@@ -48,6 +48,7 @@ export default function Dashboard(): React.ReactElement {
   const notesSaveTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const notesGenerationByListRef = React.useRef<Map<string, number>>(new Map());
   const notesLatestDispatchedSequenceByListRef = React.useRef<Map<string, number>>(new Map());
+  const notesLoadRequestTokenRef = React.useRef(0);
   const notesEditingRef = React.useRef(false);
 
   const getNotesGeneration = useCallback((listId: string) => {
@@ -165,6 +166,8 @@ export default function Dashboard(): React.ReactElement {
   const { impersonatingFamilyId } = useImpersonation();
 
   useEffect(() => {
+    const notesLoadRequestToken = ++notesLoadRequestTokenRef.current;
+    const notesLoadListId = activeListId;
     
     (async () => {
       try {
@@ -218,9 +221,11 @@ export default function Dashboard(): React.ReactElement {
   const fetchedNotes = typeof (listRes.data?.list?.notes ?? listRes.data?.notes) === 'string'
     ? (listRes.data.list?.notes ?? listRes.data.notes)
     : '';
-  setLoadedNotes(fetchedNotes);
-  if (!notesEditingRef.current) {
-    setNotesDraft(fetchedNotes);
+  if (notesLoadRequestToken === notesLoadRequestTokenRef.current && notesLoadListId && activeListIdRef.current === notesLoadListId) {
+    setLoadedNotes(fetchedNotes);
+    if (!notesEditingRef.current) {
+      setNotesDraft(fetchedNotes);
+    }
   }
 
         // Extract per-list member selection (if present) and apply it to effectiveMembers
