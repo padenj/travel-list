@@ -47,8 +47,7 @@ export default function Dashboard(): React.ReactElement {
   const activeListIdRef = React.useRef<string | null>(activeListId);
   const notesSaveTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const notesGenerationByListRef = React.useRef<Map<string, number>>(new Map());
-  const notesSaveSequenceByListRef = React.useRef<Map<string, number>>(new Map());
-  const notesLastAppliedSequenceByListRef = React.useRef<Map<string, number>>(new Map());
+  const notesLatestDispatchedSequenceByListRef = React.useRef<Map<string, number>>(new Map());
   const notesEditingRef = React.useRef(false);
 
   const getNotesGeneration = useCallback((listId: string) => {
@@ -64,8 +63,8 @@ export default function Dashboard(): React.ReactElement {
 
   const saveNotes = useCallback(async (listId: string, notes: string, generation: number) => {
     if (generation !== getNotesGeneration(listId)) return;
-    const requestSequence = (notesSaveSequenceByListRef.current.get(listId) ?? 0) + 1;
-    notesSaveSequenceByListRef.current.set(listId, requestSequence);
+    const requestSequence = (notesLatestDispatchedSequenceByListRef.current.get(listId) ?? 0) + 1;
+    notesLatestDispatchedSequenceByListRef.current.set(listId, requestSequence);
     try {
       const result = await updatePackingList(listId, { notes });
       if (!result.response.ok) {
@@ -74,9 +73,8 @@ export default function Dashboard(): React.ReactElement {
       }
       if (activeListIdRef.current !== listId) return;
       if (generation !== getNotesGeneration(listId)) return;
-      const lastAppliedSequenceForList = notesLastAppliedSequenceByListRef.current.get(listId) ?? 0;
-      if (requestSequence < lastAppliedSequenceForList) return;
-      notesLastAppliedSequenceByListRef.current.set(listId, requestSequence);
+      const latestDispatchedSequenceForList = notesLatestDispatchedSequenceByListRef.current.get(listId) ?? 0;
+      if (requestSequence !== latestDispatchedSequenceForList) return;
       setLoadedNotes(notes);
       if (!notesEditingRef.current) setNotesDraft(notes);
     } catch (err) {
@@ -104,8 +102,7 @@ export default function Dashboard(): React.ReactElement {
     if (activeListId) {
       const nextGeneration = getNotesGeneration(activeListId) + 1;
       notesGenerationByListRef.current.set(activeListId, nextGeneration);
-      notesSaveSequenceByListRef.current.set(activeListId, 0);
-      notesLastAppliedSequenceByListRef.current.set(activeListId, 0);
+      notesLatestDispatchedSequenceByListRef.current.set(activeListId, 0);
     }
     setNotesExpanded(false);
     setNotesDraft('');
