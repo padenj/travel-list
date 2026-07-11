@@ -77,4 +77,47 @@ describe('Packing lists routes', () => {
     expect(addRes.body.item).toBeDefined();
     expect(addRes.body.item.display_name).toBe('Travel Pillow');
   });
+
+  it('returns list notes from GET /packing-lists/:id after notes are set', async () => {
+    const createRes = await request(app)
+      .post(`/api/families/${testFamilyId}/packing-lists`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ name: 'Notes Trip' });
+
+    expect(createRes.status).toBe(200);
+    const listId = createRes.body.list.id;
+
+    const putRes = await request(app)
+      .put(`/api/packing-lists/${listId}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ notes: 'Remember adapters and rain cover.' });
+
+    expect(putRes.status).toBe(200);
+    expect(putRes.body.list.notes).toBe('Remember adapters and rain cover.');
+
+    const getRes = await request(app)
+      .get(`/api/packing-lists/${listId}`)
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(getRes.status).toBe(200);
+    expect(getRes.body.list.notes).toBe('Remember adapters and rain cover.');
+  });
+
+  it('rejects non-string notes payload in PUT /packing-lists/:id', async () => {
+    const createRes = await request(app)
+      .post(`/api/families/${testFamilyId}/packing-lists`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ name: 'Invalid Notes Trip' });
+
+    expect(createRes.status).toBe(200);
+    const listId = createRes.body.list.id;
+
+    const putRes = await request(app)
+      .put(`/api/packing-lists/${listId}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ notes: { invalid: true } });
+
+    expect(putRes.status).toBe(400);
+    expect(putRes.body).toEqual({ error: 'notes must be a string' });
+  });
 });
