@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { describe as _describe, it as _it, expect as _expect, beforeEach as _beforeEach, beforeAll as _beforeAll, afterEach as _afterEach, vi as _vi } from 'vitest';
+import * as api from '../api';
 
 let hasTestingLibs = true;
 try {
@@ -15,6 +16,7 @@ if (!hasTestingLibs) {
   if (!(globalThis as any).localStorage) {
     (globalThis as any).localStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
   }
+
   const rtl = require('@testing-library/react');
   const userEvent = require('@testing-library/user-event');
   const React = require('react');
@@ -24,18 +26,18 @@ if (!hasTestingLibs) {
 
   const { describe, it, expect, beforeEach, beforeAll, afterEach, vi } = { describe: _describe, it: _it, expect: _expect, beforeEach: _beforeEach, beforeAll: _beforeAll, afterEach: _afterEach, vi: _vi };
 
-  _vi.mock('../api');
+  vi.mock('../api');
 
-  const { requestOpenEdit, openForList, showNotification, activeListState } = _vi.hoisted(() => ({
-    requestOpenEdit: _vi.fn(),
-    openForList: _vi.fn(),
-    showNotification: _vi.fn(),
+  const { requestOpenEdit, openForList, showNotification, activeListState } = vi.hoisted(() => ({
+    requestOpenEdit: vi.fn(),
+    openForList: vi.fn(),
+    showNotification: vi.fn(),
     activeListState: { id: 'list-1' as string },
   }));
 
-  _vi.mock('@mantine/notifications', () => ({ showNotification }));
+  vi.mock('@mantine/notifications', () => ({ showNotification }));
 
-  _vi.mock('../contexts/ActivePackingListContext', () => ({
+  vi.mock('../contexts/ActivePackingListContext', () => ({
     useActivePackingList: () => ({
       activeListId: activeListState.id,
       requestOpenEdit,
@@ -46,38 +48,38 @@ if (!hasTestingLibs) {
     }),
   }));
 
-  _vi.mock('../contexts/ListEditDrawerContext', () => ({
+  vi.mock('../contexts/ListEditDrawerContext', () => ({
     useListEditDrawer: () => ({
       openForList,
     }),
   }));
 
-  _vi.mock('../contexts/ImpersonationContext', () => ({
+  vi.mock('../contexts/ImpersonationContext', () => ({
     useImpersonation: () => ({
       impersonatingFamilyId: null,
     }),
   }));
 
-  _vi.mock('../components/ActivePackingListSelector', () => ({
+  vi.mock('../components/ActivePackingListSelector', () => ({
     default: () => null,
   }));
-  _vi.mock('../components/PackingListsSideBySide', () => ({
+  vi.mock('../components/PackingListsSideBySide', () => ({
     PackingListsSideBySide: () => null,
   }));
-  _vi.mock('../components/ItemEditDrawer', () => ({
+  vi.mock('../components/ItemEditDrawer', () => ({
     default: () => null,
   }));
-  _vi.mock('../components/AddItemsDrawer', () => ({
+  vi.mock('../components/AddItemsDrawer', () => ({
     default: () => null,
   }));
-  _vi.mock('../components/PackingListAuditPanel', () => ({
+  vi.mock('../components/PackingListAuditPanel', () => ({
     default: () => null,
   }));
-  _vi.mock('../components/PackingListItemAuditModal', () => ({
+  vi.mock('../components/PackingListItemAuditModal', () => ({
     default: () => null,
   }));
 
-  _vi.mock('@mantine/core', () => {
+  vi.mock('@mantine/core', () => {
     const React = require('react');
     const passthrough = (el = 'div') => ({ children, ...props }: any) => {
       const allowed = new Set(['children', 'onClick', 'style', 'role', 'aria-label', 'disabled', 'type']);
@@ -97,9 +99,9 @@ if (!hasTestingLibs) {
   });
 
   let Dashboard: any;
-  let api: any;
+  let apiModule: any;
   beforeAll(async () => {
-    api = await import('../api');
+    apiModule = await import('../api');
     const mod = await import('../components/Dashboard');
     Dashboard = mod.default;
   });
@@ -110,23 +112,24 @@ if (!hasTestingLibs) {
       vi.clearAllMocks();
       vi.useRealTimers();
       activeListState.id = 'list-1';
-      (api.getCurrentUserProfile as any).mockResolvedValue({
+      (apiModule.getCurrentUserProfile as any).mockResolvedValue({
         response: { ok: true },
         data: { user: { id: 'u1' }, family: { id: 'f1', members: [] } },
       });
-      (api.getItems as any).mockResolvedValue({
+      (apiModule.getItems as any).mockResolvedValue({
         response: { ok: true },
         data: { items: [] },
       });
-      (api.getPackingList as any).mockResolvedValue({
+      (apiModule.getPackingList as any).mockResolvedValue({
         response: { ok: true },
         data: { items: [], checks: [], list: { notes: '' } },
       });
-      (api.updatePackingList as any).mockResolvedValue({
+      (apiModule.updatePackingList as any).mockResolvedValue({
         response: { ok: true },
         data: {},
       });
     });
+
     afterEach(() => {
       cleanup();
     });
@@ -157,7 +160,7 @@ if (!hasTestingLibs) {
 
     it('does not apply stale notes load response after switching lists', async () => {
       const pendingByList: Record<string, (value: any) => void> = {};
-      (api.getPackingList as any).mockImplementation((listId: string) => new Promise(resolve => {
+      (apiModule.getPackingList as any).mockImplementation((listId: string) => new Promise(resolve => {
         pendingByList[listId] = resolve;
       }));
 
@@ -167,7 +170,7 @@ if (!hasTestingLibs) {
         </MemoryRouter>
       );
 
-      await waitFor(() => expect(api.getPackingList).toHaveBeenCalledWith('list-1'));
+      await waitFor(() => expect(apiModule.getPackingList).toHaveBeenCalledWith('list-1'));
 
       activeListState.id = 'list-2';
       view.rerender(
@@ -176,7 +179,7 @@ if (!hasTestingLibs) {
         </MemoryRouter>
       );
 
-      await waitFor(() => expect(api.getPackingList).toHaveBeenCalledWith('list-2'));
+      await waitFor(() => expect(apiModule.getPackingList).toHaveBeenCalledWith('list-2'));
 
       pendingByList['list-2']({
         response: { ok: true },
@@ -211,22 +214,22 @@ if (!hasTestingLibs) {
       vi.useFakeTimers();
 
       fireEvent.change(textarea, { target: { value: 'Pack charger' } });
-      expect(api.updatePackingList).not.toHaveBeenCalled();
+      expect(apiModule.updatePackingList).not.toHaveBeenCalled();
 
       vi.advanceTimersByTime(400);
-      expect(api.updatePackingList).not.toHaveBeenCalled();
+      expect(apiModule.updatePackingList).not.toHaveBeenCalled();
 
       fireEvent.blur(textarea);
-      expect(api.updatePackingList).toHaveBeenCalledTimes(1);
-      expect(api.updatePackingList).toHaveBeenCalledWith('list-1', { notes: 'Pack charger' });
+      expect(apiModule.updatePackingList).toHaveBeenCalledTimes(1);
+      expect(apiModule.updatePackingList).toHaveBeenCalledWith('list-1', { notes: 'Pack charger' });
 
       vi.advanceTimersByTime(1000);
-      expect(api.updatePackingList).toHaveBeenCalledTimes(1);
+      expect(apiModule.updatePackingList).toHaveBeenCalledTimes(1);
     });
 
     it('ignores stale save responses after switch-away/switch-back for the same list', async () => {
       const pendingByList: Record<string, Array<(value: any) => void>> = {};
-      (api.updatePackingList as any).mockImplementation((listId: string) => new Promise(resolve => {
+      (apiModule.updatePackingList as any).mockImplementation((listId: string) => new Promise(resolve => {
         if (!pendingByList[listId]) pendingByList[listId] = [];
         pendingByList[listId].push(resolve);
       }));
@@ -243,8 +246,8 @@ if (!hasTestingLibs) {
       fireEvent.blur(textarea);
       fireEvent.change(textarea, { target: { value: 'old-list-second' } });
       fireEvent.blur(textarea);
-      expect(api.updatePackingList).toHaveBeenNthCalledWith(1, 'list-1', { notes: 'old-list-first' });
-      expect(api.updatePackingList).toHaveBeenNthCalledWith(2, 'list-1', { notes: 'old-list-second' });
+      expect(apiModule.updatePackingList).toHaveBeenNthCalledWith(1, 'list-1', { notes: 'old-list-first' });
+      expect(apiModule.updatePackingList).toHaveBeenNthCalledWith(2, 'list-1', { notes: 'old-list-second' });
 
       activeListState.id = 'list-2';
       view.rerender(
@@ -258,7 +261,7 @@ if (!hasTestingLibs) {
       textarea = await screen.findByRole('textbox', { name: 'Trip notes editor' });
       fireEvent.change(textarea, { target: { value: 'new-list-notes' } });
       fireEvent.blur(textarea);
-      expect(api.updatePackingList).toHaveBeenNthCalledWith(3, 'list-2', { notes: 'new-list-notes' });
+      expect(apiModule.updatePackingList).toHaveBeenNthCalledWith(3, 'list-2', { notes: 'new-list-notes' });
 
       activeListState.id = 'list-1';
       view.rerender(
@@ -272,7 +275,7 @@ if (!hasTestingLibs) {
       textarea = await screen.findByRole('textbox', { name: 'Trip notes editor' });
       fireEvent.change(textarea, { target: { value: 'switchback-fresh' } });
       fireEvent.blur(textarea);
-      expect(api.updatePackingList).toHaveBeenNthCalledWith(4, 'list-1', { notes: 'switchback-fresh' });
+      expect(apiModule.updatePackingList).toHaveBeenNthCalledWith(4, 'list-1', { notes: 'switchback-fresh' });
 
       pendingByList['list-1'][2]({ response: { ok: true }, data: {} });
       await Promise.resolve();
@@ -286,12 +289,12 @@ if (!hasTestingLibs) {
 
       expect((textarea as HTMLTextAreaElement).value).toBe('switchback-fresh');
       fireEvent.blur(textarea);
-      expect(api.updatePackingList).toHaveBeenCalledTimes(4);
+      expect(apiModule.updatePackingList).toHaveBeenCalledTimes(4);
     });
 
     it('does not apply older same-list save response when it resolves after newer response', async () => {
       const pendingByList: Record<string, Array<(value: any) => void>> = {};
-      (api.updatePackingList as any).mockImplementation((listId: string) => new Promise(resolve => {
+      (apiModule.updatePackingList as any).mockImplementation((listId: string) => new Promise(resolve => {
         if (!pendingByList[listId]) pendingByList[listId] = [];
         pendingByList[listId].push(resolve);
       }));
@@ -310,8 +313,8 @@ if (!hasTestingLibs) {
       fireEvent.change(textarea, { target: { value: 'second-save' } });
       fireEvent.blur(textarea);
 
-      expect(api.updatePackingList).toHaveBeenNthCalledWith(1, 'list-1', { notes: 'first-save' });
-      expect(api.updatePackingList).toHaveBeenNthCalledWith(2, 'list-1', { notes: 'second-save' });
+      expect(apiModule.updatePackingList).toHaveBeenNthCalledWith(1, 'list-1', { notes: 'first-save' });
+      expect(apiModule.updatePackingList).toHaveBeenNthCalledWith(2, 'list-1', { notes: 'second-save' });
 
       pendingByList['list-1'][1]({ response: { ok: true }, data: {} });
       await Promise.resolve();
