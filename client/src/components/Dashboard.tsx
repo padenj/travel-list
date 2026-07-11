@@ -45,8 +45,8 @@ export default function Dashboard(): React.ReactElement {
   const [notesDraft, setNotesDraft] = useState('');
   const [loadedNotes, setLoadedNotes] = useState('');
   const notesSaveTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-  const notesSaveSequenceRef = React.useRef(0);
-  const notesLastAppliedSequenceRef = React.useRef(0);
+  const notesSaveSequenceByListRef = React.useRef<Map<string, number>>(new Map());
+  const notesLastAppliedSequenceByListRef = React.useRef<Map<string, number>>(new Map());
   const notesEditingRef = React.useRef(false);
 
   const clearNotesSaveTimer = useCallback(() => {
@@ -57,16 +57,18 @@ export default function Dashboard(): React.ReactElement {
   }, []);
 
   const saveNotes = useCallback(async (listId: string, notes: string) => {
-    const requestSequence = ++notesSaveSequenceRef.current;
+    const requestSequence = (notesSaveSequenceByListRef.current.get(listId) ?? 0) + 1;
+    notesSaveSequenceByListRef.current.set(listId, requestSequence);
     try {
       const result = await updatePackingList(listId, { notes });
       if (!result.response.ok) {
         showNotification({ title: 'Save failed', message: 'Could not save trip notes', color: 'yellow' });
         return;
       }
-      if (requestSequence < notesLastAppliedSequenceRef.current) return;
-      notesLastAppliedSequenceRef.current = requestSequence;
       if (activeListId !== listId) return;
+      const lastAppliedSequenceForList = notesLastAppliedSequenceByListRef.current.get(listId) ?? 0;
+      if (requestSequence < lastAppliedSequenceForList) return;
+      notesLastAppliedSequenceByListRef.current.set(listId, requestSequence);
       setLoadedNotes(notes);
       if (!notesEditingRef.current) setNotesDraft(notes);
     } catch (err) {
@@ -86,8 +88,10 @@ export default function Dashboard(): React.ReactElement {
   useEffect(() => {
     clearNotesSaveTimer();
     notesEditingRef.current = false;
-    notesSaveSequenceRef.current = 0;
-    notesLastAppliedSequenceRef.current = 0;
+    if (activeListId) {
+      notesSaveSequenceByListRef.current.set(activeListId, 0);
+      notesLastAppliedSequenceByListRef.current.set(activeListId, 0);
+    }
     setNotesExpanded(false);
     setNotesDraft('');
     setLoadedNotes('');

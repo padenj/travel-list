@@ -26,19 +26,23 @@ if (!hasTestingLibs) {
 
   _vi.mock('../api');
 
-  const { requestOpenEdit, openForList, showNotification } = _vi.hoisted(() => ({
+  const { requestOpenEdit, openForList, showNotification, activeListState } = _vi.hoisted(() => ({
     requestOpenEdit: _vi.fn(),
     openForList: _vi.fn(),
     showNotification: _vi.fn(),
+    activeListState: { id: 'list-1' as string },
   }));
 
   _vi.mock('@mantine/notifications', () => ({ showNotification }));
 
   _vi.mock('../contexts/ActivePackingListContext', () => ({
     useActivePackingList: () => ({
-      activeListId: 'list-1',
+      activeListId: activeListState.id,
       requestOpenEdit,
-      availableLists: [{ id: 'list-1', name: 'Summer Trip' }],
+      availableLists: [
+        { id: 'list-1', name: 'Summer Trip' },
+        { id: 'list-2', name: 'Winter Trip' },
+      ],
     }),
   }));
 
@@ -105,6 +109,7 @@ if (!hasTestingLibs) {
       cleanup();
       vi.clearAllMocks();
       vi.useRealTimers();
+      activeListState.id = 'list-1';
       (api.getCurrentUserProfile as any).mockResolvedValue({
         response: { ok: true },
         data: { user: { id: 'u1' }, family: { id: 'f1', members: [] } },
@@ -173,6 +178,53 @@ if (!hasTestingLibs) {
 
       vi.advanceTimersByTime(1000);
       expect(api.updatePackingList).toHaveBeenCalledTimes(1);
+    });
+
+    it('ignores old-list save responses and still applies new-list saves after switching lists', async () => {
+      const pendingByList: Record<string, Array<(value: any) => void>> = {};
+      (api.updatePackingList as any).mockImplementation((listId: string) => new Promise(resolve => {
+        if (!pendingByList[listId]) pendingByList[listId] = [];
+        pendingByList[listId].push(resolve);
+      }));
+
+      const view = render(
+        <MemoryRouter>
+          <Dashboard />
+        </MemoryRouter>
+      );
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Expand notes' }));
+      let textarea = await screen.findByRole('textbox', { name: 'Trip notes editor' });
+      fireEvent.change(textarea, { target: { value: 'old-list-first' } });
+      fireEvent.blur(textarea);
+      fireEvent.change(textarea, { target: { value: 'old-list-second' } });
+      fireEvent.blur(textarea);
+      expect(api.updatePackingList).toHaveBeenNthCalledWith(1, 'list-1', { notes: 'old-list-first' });
+      expect(api.updatePackingList).toHaveBeenNthCalledWith(2, 'list-1', { notes: 'old-list-second' });
+
+      activeListState.id = 'list-2';
+      view.rerender(
+        <MemoryRouter>
+          <Dashboard />
+        </MemoryRouter>
+      );
+      await Promise.resolve();
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Expand notes' }));
+      textarea = await screen.findByRole('textbox', { name: 'Trip notes editor' });
+      fireEvent.change(textarea, { target: { value: 'new-list-notes' } });
+      fireEvent.blur(textarea);
+      expect(api.updatePackingList).toHaveBeenNthCalledWith(3, 'list-2', { notes: 'new-list-notes' });
+
+      pendingByList['list-1'][1]({ response: { ok: true }, data: {} });
+      await Promise.resolve();
+      await Promise.resolve();
+      pendingByList['list-2'][0]({ response: { ok: true }, data: {} });
+      await Promise.resolve();
+      await Promise.resolve();
+
+      fireEvent.blur(textarea);
+      expect(api.updatePackingList).toHaveBeenCalledTimes(3);
     });
   });
 }
