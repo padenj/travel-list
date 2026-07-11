@@ -53,3 +53,4 @@ core.*
 *.key
 *.crt
 *.p12
+.worktrees/
