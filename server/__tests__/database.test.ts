@@ -67,6 +67,13 @@ describe('Database', () => {
       expect(columnNames).toContain('timestamp');
     });
 
+    it('should include notes column on packing_lists', async () => {
+      const tableInfo = await db.all("PRAGMA table_info(packing_lists)");
+      const columnNames = tableInfo.map((col: any) => col.name);
+
+      expect(columnNames).toContain('notes');
+    });
+
     it('should not create template_categories table', async () => {
       const table = await db.get(
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'template_categories'"

@@ -91,6 +91,7 @@ export interface PackingList {
   id: string;
   family_id: string;
   name: string;
+  notes?: string | null;
   created_at: string;
   updated_at: string;
   deleted_at?: string | null;

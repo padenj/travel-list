@@ -702,7 +702,8 @@ router.get('/families/:familyId/packing-lists', authMiddleware, familyAccessMidd
     const listsWithMembers = [] as any[];
     for (const l of lists) {
       const memberIds = await packingListRepo.getMemberIdsForPackingList(l.id);
-      listsWithMembers.push({ ...l, member_ids: memberIds });
+      const { notes: _notes, ...listSummary } = l as any;
+      listsWithMembers.push({ ...listSummary, member_ids: memberIds });
     }
     return res.json({ lists: listsWithMembers });
   } catch (error) {
@@ -765,7 +766,8 @@ router.get('/packing-lists/:id', authMiddleware, async (req: Request, res: Respo
   // Attach member_ids to the returned list for client consumption
   const memberIds = await packingListRepo.getMemberIdsForPackingList(id);
   (list as any).member_ids = memberIds;
-  return res.json({ list, items: sanitizedItems, checks, not_needed_rows: notNeededRows, template_ids: templateIds });
+  const listWithNotes = { ...(list as any), notes: typeof (list as any).notes === 'string' ? (list as any).notes : null };
+  return res.json({ list: listWithNotes, items: sanitizedItems, checks, not_needed_rows: notNeededRows, template_ids: templateIds });
   } catch (error) {
     console.error('Error fetching packing list:', error);
     return res.status(500).json({ error: 'Failed to fetch packing list' });
@@ -840,6 +842,9 @@ router.put('/packing-lists/:id', authMiddleware, async (req: Request, res: Respo
     const existing = await packingListRepo.findById(id);
     if (!existing) return res.status(404).json({ error: 'Packing list not found' });
     if (req.user?.role !== 'SystemAdmin' && req.user?.familyId !== existing.family_id) return res.status(403).json({ error: 'Forbidden' });
+    if (Object.prototype.hasOwnProperty.call(updates, 'notes') && typeof updates.notes !== 'string') {
+      return res.status(400).json({ error: 'notes must be a string' });
+    }
     // If templateIds provided, persist assignments. Optionally remove associated items for removed templates.
     if (Array.isArray(updates.templateIds)) {
       const before = await snapshotPackingListItemsForAudit(id);

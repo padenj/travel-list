@@ -12,7 +12,7 @@ import PackingListItemAuditModal from './PackingListItemAuditModal';
 import { useActivePackingList } from '../contexts/ActivePackingListContext';
 import { useListEditDrawer } from '../contexts/ListEditDrawerContext';
 import { useImpersonation } from '../contexts/ImpersonationContext';
-import { getCurrentUserProfile, getItems, getPackingList, togglePackingListItemCheck, addItemToPackingList, setPackingListItemNotNeeded, setPackingListItemNotNeededForMember } from '../api';
+import { getCurrentUserProfile, getItems, getPackingList, togglePackingListItemCheck, addItemToPackingList, setPackingListItemNotNeeded, setPackingListItemNotNeededForMember, updatePackingList } from '../api';
 
 export default function Dashboard(): React.ReactElement {
   const { activeListId, requestOpenEdit, availableLists } = useActivePackingList();
@@ -41,6 +41,80 @@ export default function Dashboard(): React.ReactElement {
   const [itemAuditOpened, setItemAuditOpened] = useState(false);
   const [itemAuditPliId, setItemAuditPliId] = useState<string | null>(null);
   const [itemAuditName, setItemAuditName] = useState<string>('');
+  const [notesExpanded, setNotesExpanded] = useState(false);
+  const [notesDraft, setNotesDraft] = useState('');
+  const [loadedNotes, setLoadedNotes] = useState('');
+  const activeListIdRef = React.useRef<string | null>(activeListId);
+  const notesSaveTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const notesGenerationByListRef = React.useRef<Map<string, number>>(new Map());
+  const notesLatestDispatchedSequenceByListRef = React.useRef<Map<string, number>>(new Map());
+  const notesLoadRequestTokenRef = React.useRef(0);
+  const notesEditingRef = React.useRef(false);
+
+  const getNotesGeneration = useCallback((listId: string) => {
+    return notesGenerationByListRef.current.get(listId) ?? 0;
+  }, []);
+
+  const clearNotesSaveTimer = useCallback(() => {
+    if (notesSaveTimerRef.current) {
+      clearTimeout(notesSaveTimerRef.current);
+      notesSaveTimerRef.current = null;
+    }
+  }, []);
+
+  const saveNotes = useCallback(async (listId: string, notes: string, generation: number) => {
+    if (generation !== getNotesGeneration(listId)) return;
+    const requestSequence = (notesLatestDispatchedSequenceByListRef.current.get(listId) ?? 0) + 1;
+    notesLatestDispatchedSequenceByListRef.current.set(listId, requestSequence);
+    try {
+      const result = await updatePackingList(listId, { notes });
+      if (!result.response.ok) {
+        showNotification({ title: 'Save failed', message: 'Could not save trip notes', color: 'yellow' });
+        return;
+      }
+      if (activeListIdRef.current !== listId) return;
+      if (generation !== getNotesGeneration(listId)) return;
+      const latestDispatchedSequenceForList = notesLatestDispatchedSequenceByListRef.current.get(listId) ?? 0;
+      if (requestSequence !== latestDispatchedSequenceForList) return;
+      setLoadedNotes(notes);
+      if (!notesEditingRef.current) setNotesDraft(notes);
+    } catch (err) {
+      showNotification({ title: 'Save failed', message: 'Could not save trip notes', color: 'yellow' });
+    }
+  }, [getNotesGeneration]);
+
+  const queueNotesSave = useCallback((nextNotes: string) => {
+    if (!activeListId) return;
+    const generation = getNotesGeneration(activeListId);
+    clearNotesSaveTimer();
+    notesSaveTimerRef.current = setTimeout(() => {
+      notesSaveTimerRef.current = null;
+      void saveNotes(activeListId, nextNotes, generation);
+    }, 500);
+  }, [activeListId, clearNotesSaveTimer, getNotesGeneration, saveNotes]);
+
+  useEffect(() => {
+    activeListIdRef.current = activeListId;
+  }, [activeListId]);
+
+  useEffect(() => {
+    clearNotesSaveTimer();
+    notesEditingRef.current = false;
+    if (activeListId) {
+      const nextGeneration = getNotesGeneration(activeListId) + 1;
+      notesGenerationByListRef.current.set(activeListId, nextGeneration);
+      notesLatestDispatchedSequenceByListRef.current.set(activeListId, 0);
+    }
+    setNotesExpanded(false);
+    setNotesDraft('');
+    setLoadedNotes('');
+  }, [activeListId, clearNotesSaveTimer, getNotesGeneration]);
+
+  useEffect(() => {
+    return () => {
+      clearNotesSaveTimer();
+    };
+  }, [clearNotesSaveTimer]);
 
   // Increment counter whenever activeListId changes to force refresh
   useEffect(() => {
@@ -92,6 +166,8 @@ export default function Dashboard(): React.ReactElement {
   const { impersonatingFamilyId } = useImpersonation();
 
   useEffect(() => {
+    const notesLoadRequestToken = ++notesLoadRequestTokenRef.current;
+    const notesLoadListId = activeListId;
     
     (async () => {
       try {
@@ -118,12 +194,16 @@ export default function Dashboard(): React.ReactElement {
         if (!fid) {
           setUserLists([]);
           setWholeFamilyItems([]);
+          setNotesDraft('');
+          setLoadedNotes('');
           return;
         }
         // If no active list is selected, show a placeholder message rather than auto-loading
         if (!activeListId) {
           setUserLists([]);
           setWholeFamilyItems([]);
+          setNotesDraft('');
+          setLoadedNotes('');
           return;
         }
         
@@ -138,6 +218,15 @@ export default function Dashboard(): React.ReactElement {
         }
   const listItems = listRes.data.items || [];
         const checks = listRes.data.checks || [];
+  const fetchedNotes = typeof (listRes.data?.list?.notes ?? listRes.data?.notes) === 'string'
+    ? (listRes.data.list?.notes ?? listRes.data.notes)
+    : '';
+  if (notesLoadRequestToken === notesLoadRequestTokenRef.current && notesLoadListId && activeListIdRef.current === notesLoadListId) {
+    setLoadedNotes(fetchedNotes);
+    if (!notesEditingRef.current) {
+      setNotesDraft(fetchedNotes);
+    }
+  }
 
         // Extract per-list member selection (if present) and apply it to effectiveMembers
         const listMemberIds: string[] = Array.isArray(listRes.data.list?.member_ids) ? listRes.data.list.member_ids : (Array.isArray(listRes.data.member_ids) ? listRes.data.member_ids : []);
@@ -278,11 +367,34 @@ export default function Dashboard(): React.ReactElement {
         console.error('Failed to load dashboard packing lists', err);
         setUserLists([]);
         setWholeFamilyItems([]);
+        setNotesDraft('');
+        setLoadedNotes('');
       } finally {
         // no loading state maintained on dashboard
       }
     })();
   }, [activeListId, listSelectionCount]);
+
+  const handleNotesChange = useCallback((event: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const nextNotes = event.target.value;
+    notesEditingRef.current = true;
+    setNotesDraft(nextNotes);
+    queueNotesSave(nextNotes);
+  }, [queueNotesSave]);
+
+  const handleNotesBlur = useCallback(() => {
+    notesEditingRef.current = false;
+    if (!activeListId) return;
+    const generation = getNotesGeneration(activeListId);
+    if (notesSaveTimerRef.current) {
+      clearNotesSaveTimer();
+      void saveNotes(activeListId, notesDraft, generation);
+      return;
+    }
+    if (notesDraft !== loadedNotes) {
+      void saveNotes(activeListId, notesDraft, generation);
+    }
+  }, [activeListId, clearNotesSaveTimer, getNotesGeneration, loadedNotes, notesDraft, saveNotes]);
 
   const handleCheckItem = useCallback(async (userId: string | null, itemId: string, checked: boolean) => {
     if (!activeListId) return;
@@ -518,21 +630,52 @@ export default function Dashboard(): React.ReactElement {
               </div>
             </div>
             ) : (
-            <PackingListsSideBySide
-              userLists={userLists}
-              wholeFamilyItems={wholeFamilyItems}
-              onCheckItem={handleCheckItem}
-              onItemNameClick={handleItemNameClick}
-              notNeededByUser={notNeededByUser}
-              notNeededWhole={notNeededWhole}
-              onToggleNotNeeded={toggleNotNeeded}
-              onOpenAddDrawer={openAddDrawerFor}
-              showWhole={!!activeListId}
-              activeListId={activeListId}
-              familyId={familyId}
-              onRefresh={() => setListSelectionCount(prev => prev + 1)}
-              currentUserId={currentUserId}
-            />
+              <>
+                <div style={{ border: '1px solid #dee2e6', borderRadius: 8, padding: 12 }}>
+                  <Group justify="space-between" gap="sm">
+                    <Text fw={600}>Trip Notes</Text>
+                    <Button
+                      size="xs"
+                      variant="subtle"
+                      aria-label={notesExpanded ? 'Collapse notes' : 'Expand notes'}
+                      onClick={() => setNotesExpanded(prev => !prev)}
+                    >
+                      {notesExpanded ? 'Collapse' : 'Expand'}
+                    </Button>
+                  </Group>
+                  {notesExpanded ? (
+                    <textarea
+                      aria-label="Trip notes editor"
+                      value={notesDraft}
+                      onChange={handleNotesChange}
+                      onBlur={handleNotesBlur}
+                      rows={6}
+                      style={{ width: '100%', marginTop: 8, resize: 'vertical' }}
+                    />
+                  ) : (
+                    <div style={{ marginTop: 8, whiteSpace: 'pre-wrap' }}>
+                      {notesDraft.trim()
+                        ? notesDraft.split(/\r?\n/).slice(0, 3).join('\n')
+                        : 'Add reminders for future trips…'}
+                    </div>
+                  )}
+                </div>
+                <PackingListsSideBySide
+                  userLists={userLists}
+                  wholeFamilyItems={wholeFamilyItems}
+                  onCheckItem={handleCheckItem}
+                  onItemNameClick={handleItemNameClick}
+                  notNeededByUser={notNeededByUser}
+                  notNeededWhole={notNeededWhole}
+                  onToggleNotNeeded={toggleNotNeeded}
+                  onOpenAddDrawer={openAddDrawerFor}
+                  showWhole={!!activeListId}
+                  activeListId={activeListId}
+                  familyId={familyId}
+                  onRefresh={() => setListSelectionCount(prev => prev + 1)}
+                  currentUserId={currentUserId}
+                />
+              </>
           )}
 
           <PackingListAuditPanel
