@@ -44,10 +44,16 @@ export default function Dashboard(): React.ReactElement {
   const [notesExpanded, setNotesExpanded] = useState(false);
   const [notesDraft, setNotesDraft] = useState('');
   const [loadedNotes, setLoadedNotes] = useState('');
+  const activeListIdRef = React.useRef<string | null>(activeListId);
   const notesSaveTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const notesGenerationByListRef = React.useRef<Map<string, number>>(new Map());
   const notesSaveSequenceByListRef = React.useRef<Map<string, number>>(new Map());
   const notesLastAppliedSequenceByListRef = React.useRef<Map<string, number>>(new Map());
   const notesEditingRef = React.useRef(false);
+
+  const getNotesGeneration = useCallback((listId: string) => {
+    return notesGenerationByListRef.current.get(listId) ?? 0;
+  }, []);
 
   const clearNotesSaveTimer = useCallback(() => {
     if (notesSaveTimerRef.current) {
@@ -56,7 +62,8 @@ export default function Dashboard(): React.ReactElement {
     }
   }, []);
 
-  const saveNotes = useCallback(async (listId: string, notes: string) => {
+  const saveNotes = useCallback(async (listId: string, notes: string, generation: number) => {
+    if (generation !== getNotesGeneration(listId)) return;
     const requestSequence = (notesSaveSequenceByListRef.current.get(listId) ?? 0) + 1;
     notesSaveSequenceByListRef.current.set(listId, requestSequence);
     try {
@@ -65,7 +72,8 @@ export default function Dashboard(): React.ReactElement {
         showNotification({ title: 'Save failed', message: 'Could not save trip notes', color: 'yellow' });
         return;
       }
-      if (activeListId !== listId) return;
+      if (activeListIdRef.current !== listId) return;
+      if (generation !== getNotesGeneration(listId)) return;
       const lastAppliedSequenceForList = notesLastAppliedSequenceByListRef.current.get(listId) ?? 0;
       if (requestSequence < lastAppliedSequenceForList) return;
       notesLastAppliedSequenceByListRef.current.set(listId, requestSequence);
@@ -74,28 +82,35 @@ export default function Dashboard(): React.ReactElement {
     } catch (err) {
       showNotification({ title: 'Save failed', message: 'Could not save trip notes', color: 'yellow' });
     }
-  }, [activeListId]);
+  }, [getNotesGeneration]);
 
   const queueNotesSave = useCallback((nextNotes: string) => {
     if (!activeListId) return;
+    const generation = getNotesGeneration(activeListId);
     clearNotesSaveTimer();
     notesSaveTimerRef.current = setTimeout(() => {
       notesSaveTimerRef.current = null;
-      void saveNotes(activeListId, nextNotes);
+      void saveNotes(activeListId, nextNotes, generation);
     }, 500);
-  }, [activeListId, clearNotesSaveTimer, saveNotes]);
+  }, [activeListId, clearNotesSaveTimer, getNotesGeneration, saveNotes]);
+
+  useEffect(() => {
+    activeListIdRef.current = activeListId;
+  }, [activeListId]);
 
   useEffect(() => {
     clearNotesSaveTimer();
     notesEditingRef.current = false;
     if (activeListId) {
+      const nextGeneration = getNotesGeneration(activeListId) + 1;
+      notesGenerationByListRef.current.set(activeListId, nextGeneration);
       notesSaveSequenceByListRef.current.set(activeListId, 0);
       notesLastAppliedSequenceByListRef.current.set(activeListId, 0);
     }
     setNotesExpanded(false);
     setNotesDraft('');
     setLoadedNotes('');
-  }, [activeListId, clearNotesSaveTimer]);
+  }, [activeListId, clearNotesSaveTimer, getNotesGeneration]);
 
   useEffect(() => {
     return () => {
@@ -368,15 +383,16 @@ export default function Dashboard(): React.ReactElement {
   const handleNotesBlur = useCallback(() => {
     notesEditingRef.current = false;
     if (!activeListId) return;
+    const generation = getNotesGeneration(activeListId);
     if (notesSaveTimerRef.current) {
       clearNotesSaveTimer();
-      void saveNotes(activeListId, notesDraft);
+      void saveNotes(activeListId, notesDraft, generation);
       return;
     }
     if (notesDraft !== loadedNotes) {
-      void saveNotes(activeListId, notesDraft);
+      void saveNotes(activeListId, notesDraft, generation);
     }
-  }, [activeListId, clearNotesSaveTimer, loadedNotes, notesDraft, saveNotes]);
+  }, [activeListId, clearNotesSaveTimer, getNotesGeneration, loadedNotes, notesDraft, saveNotes]);
 
   const handleCheckItem = useCallback(async (userId: string | null, itemId: string, checked: boolean) => {
     if (!activeListId) return;

@@ -180,7 +180,7 @@ if (!hasTestingLibs) {
       expect(api.updatePackingList).toHaveBeenCalledTimes(1);
     });
 
-    it('ignores old-list save responses and still applies new-list saves after switching lists', async () => {
+    it('ignores stale save responses after switch-away/switch-back for the same list', async () => {
       const pendingByList: Record<string, Array<(value: any) => void>> = {};
       (api.updatePackingList as any).mockImplementation((listId: string) => new Promise(resolve => {
         if (!pendingByList[listId]) pendingByList[listId] = [];
@@ -216,6 +216,23 @@ if (!hasTestingLibs) {
       fireEvent.blur(textarea);
       expect(api.updatePackingList).toHaveBeenNthCalledWith(3, 'list-2', { notes: 'new-list-notes' });
 
+      activeListState.id = 'list-1';
+      view.rerender(
+        <MemoryRouter>
+          <Dashboard />
+        </MemoryRouter>
+      );
+      await Promise.resolve();
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Expand notes' }));
+      textarea = await screen.findByRole('textbox', { name: 'Trip notes editor' });
+      fireEvent.change(textarea, { target: { value: 'switchback-fresh' } });
+      fireEvent.blur(textarea);
+      expect(api.updatePackingList).toHaveBeenNthCalledWith(4, 'list-1', { notes: 'switchback-fresh' });
+
+      pendingByList['list-1'][2]({ response: { ok: true }, data: {} });
+      await Promise.resolve();
+      await Promise.resolve();
       pendingByList['list-1'][1]({ response: { ok: true }, data: {} });
       await Promise.resolve();
       await Promise.resolve();
@@ -223,8 +240,9 @@ if (!hasTestingLibs) {
       await Promise.resolve();
       await Promise.resolve();
 
+      expect((textarea as HTMLTextAreaElement).value).toBe('switchback-fresh');
       fireEvent.blur(textarea);
-      expect(api.updatePackingList).toHaveBeenCalledTimes(3);
+      expect(api.updatePackingList).toHaveBeenCalledTimes(4);
     });
   });
 }
