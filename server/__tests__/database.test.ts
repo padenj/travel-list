@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { getDb, closeDb } from '../db';
 import { Database } from 'sqlite';
+import addPackingListNotesMigration from '../migrations/migrations/20260711_01_add_packing_list_notes.cjs';
 
 describe('Database', () => {
   let db: Database;
@@ -65,6 +66,14 @@ describe('Database', () => {
       expect(columnNames).toContain('action');
       expect(columnNames).toContain('details');
       expect(columnNames).toContain('timestamp');
+    });
+
+    it('should include notes column on packing_lists', async () => {
+      await addPackingListNotesMigration.up({ db });
+      const tableInfo = await db.all("PRAGMA table_info(packing_lists)");
+      const columnNames = tableInfo.map((col: any) => col.name);
+
+      expect(columnNames).toContain('notes');
     });
 
     it('should not create template_categories table', async () => {
