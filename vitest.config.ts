@@ -11,6 +11,8 @@ export default defineConfig({
     include: [
       'client/src/__tests__/GlobalListEditDrawer.test.tsx', // Targeted client regression coverage
       'client/src/__tests__/Dashboard.test.tsx', // Dashboard edit-list regression coverage
+      'client/src/__tests__/ActivePackingListContext.test.tsx', // Active packing list context coverage
+      'client/src/__tests__/ManagePackingLists.test.tsx', // Manage packing lists active-list coverage
       'src/**/*.test.{ts,tsx}',           // Frontend unit tests
       'server/**/*.test.ts',              // Backend unit tests
       'tests/integration/**/*.test.ts',   // Integration tests

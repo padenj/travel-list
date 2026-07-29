@@ -4,5 +4,15 @@
   "20251016_02_drop_item_categories_table.js",
   "20251017_01_assign_uncategorized_items_to_first_category.js",
   "20251227_add_packing_list_members.js",
-  "20260101_01_rename_templates_to_item_groups.js"
+  "20260101_01_rename_templates_to_item_groups.js",
+  "20251008_fix_packing_list_item_checks_fk.cjs",
+  "20251016_01_migrate_item_categories_to_items_categoryId.cjs",
+  "20251016_02_drop_item_categories_table.cjs",
+  "20251017_01_assign_uncategorized_items_to_first_category.cjs",
+  "20251227_add_packing_list_members.cjs",
+  "20260101_01_rename_templates_to_item_groups.cjs",
+  "20260613_01_migrate_group_categories_to_items.cjs",
+  "20260613_02_add_notes_to_templates.cjs",
+  "20260711_01_add_packing_list_notes.cjs",
+  "20260729_01_add_active_packing_list_to_families.cjs"
 ]
