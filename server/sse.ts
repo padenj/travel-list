@@ -1,7 +1,7 @@
 import { Response, Request } from 'express';
 import crypto from 'crypto';
 
-type EventPayload = { type: string; listId?: string; data?: any };
+type EventPayload = { type: string; listId?: string; familyId?: string; data?: any };
 
 type SseClient = {
   id: string;
@@ -10,6 +10,9 @@ type SseClient = {
   ua?: string;
   connectedAt: number;
   lastWriteAt?: number;
+  userId?: string;
+  familyId?: string | null;
+  role?: string;
 };
 
 
@@ -51,7 +54,7 @@ export function addClient(res: Response, req?: Request) {
   const ipRaw = req ? (req.ip || (req.headers['x-forwarded-for'] as string) || req.socket?.remoteAddress) : undefined;
   const ip = normalizeIp(ipRaw as string | undefined);
   const ua = req ? (req.headers['user-agent'] as string | undefined) : undefined;
-  const client: SseClient & { remotePort?: number; userId?: string } = {
+  const client: SseClient & { remotePort?: number; clientId?: string } = {
     id,
     res,
     ip,
@@ -65,7 +68,9 @@ export function addClient(res: Response, req?: Request) {
     }
     // If auth middleware attached a user, record user id
     if (req && (req as any).user && (req as any).user.id) {
-      (client as any).userId = (req as any).user.id;
+      client.userId = (req as any).user.id;
+      client.familyId = (req as any).user.familyId ?? null;
+      client.role = (req as any).user.role;
     }
   } catch (e) {}
   
@@ -127,7 +132,17 @@ export function removeClient(res: Response) {
 }
 
 export function getClients() {
-  return clients.map(c => ({ id: c.id, ip: c.ip, ua: c.ua, connectedAt: c.connectedAt, lastWriteAt: c.lastWriteAt, remotePort: (c as any).remotePort, userId: (c as any).userId }));
+  return clients.map(c => ({
+    id: c.id,
+    ip: c.ip,
+    ua: c.ua,
+    connectedAt: c.connectedAt,
+    lastWriteAt: c.lastWriteAt,
+    remotePort: (c as any).remotePort,
+    userId: c.userId,
+    familyId: c.familyId,
+    role: c.role,
+  }));
 }
 
 export function broadcastEvent(ev: EventPayload) {
@@ -135,6 +150,9 @@ export function broadcastEvent(ev: EventPayload) {
   try { sseLog('[SSE] broadcasting event to', clients.length, 'clients', ev); } catch (e) {}
   // Use setImmediate for each write so a slow client cannot block the event loop
   for (const client of clients.slice()) {
+    if (ev.familyId && client.familyId !== ev.familyId && client.role !== 'SystemAdmin') {
+      continue;
+    }
     try {
       setImmediate(() => {
         try {

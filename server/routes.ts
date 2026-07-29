@@ -1197,6 +1197,11 @@ router.patch('/families/:familyId/active-packing-list', authMiddleware, familyAc
     const list = await packingListRepo.findById(listId);
     if (!list || list.family_id !== familyId) return res.status(404).json({ error: 'Packing list not found for this family' });
     await familyRepo.update(familyId, { active_packing_list_id: listId });
+    broadcastEvent({
+      type: 'family_active_list_changed',
+      familyId,
+      listId,
+    });
     return res.json({ message: 'Active packing list updated' });
   } catch (error) {
     console.error('Error setting active packing list:', error);
