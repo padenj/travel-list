@@ -161,8 +161,8 @@ module.exports.up = async function up({ db }) {
       label TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       FOREIGN KEY (element_id) REFERENCES trip_elements(id) ON DELETE CASCADE,
-      FOREIGN KEY (leg_id) REFERENCES flight_legs(id),
-      FOREIGN KEY (participant_id) REFERENCES trip_participants(id)
+      FOREIGN KEY (leg_id) REFERENCES flight_legs(id) ON DELETE CASCADE,
+      FOREIGN KEY (participant_id) REFERENCES trip_participants(id) ON DELETE CASCADE
     );
   `);
   await db.exec(`CREATE INDEX IF NOT EXISTS idx_trip_element_confirmations_element ON trip_element_confirmations(element_id);`);
