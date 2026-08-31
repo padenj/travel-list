@@ -8,7 +8,9 @@ const MANUAL_ADDED_THRESHOLD_MS = 100; // 100ms
 import { broadcastEvent } from './sse';
 import { User, Family, Category, Item, ItemCategory, ItemMember, ItemWholeFamily, ItemWithCategoryName } from './server-types';
 import { TripRepository } from './repositories/tripRepository';
+import { TripElementRepository } from './repositories/tripElementRepository';
 export type { Trip } from './repositories/tripRepository';
+export type { TripElement, FlightLeg, HotelDetails, CarRentalDetails, ActivityDetails } from './repositories/tripElementRepository';
 
 interface CreateUserData extends Omit<User, 'password_hash'> {
   password: string;
@@ -1326,3 +1328,4 @@ export class ItemRepository {
   }
 
 export { TripRepository };
+export { TripElementRepository };

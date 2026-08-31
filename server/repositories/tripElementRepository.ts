@@ -144,13 +144,19 @@ export class TripElementRepository {
          element.typeSpecificData.prepaidPrice || null, element.typeSpecificData.atCounterPrice || null]
       );
     } else if (element.elementType === 'activity' && element.typeSpecificData) {
+      let activityDate = null;
+      let activityTime = null;
+      if (element.typeSpecificData.activityDatetime) {
+        const parts = element.typeSpecificData.activityDatetime.split('T');
+        activityDate = parts[0];
+        if (parts[1]) {
+          activityTime = parts[1].replace(/Z$/, ''); // Remove trailing Z if present
+        }
+      }
       await db.run(
         `INSERT INTO activity_element_details (element_id, venue_name, activity_date, activity_time, num_tickets, ticket_type, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
-        [id, element.typeSpecificData.venue || null, 
-         // If activityDatetime is provided, try to split it into date and time
-         element.typeSpecificData.activityDatetime ? element.typeSpecificData.activityDatetime.split('T')[0] : null,
-         element.typeSpecificData.activityDatetime ? element.typeSpecificData.activityDatetime.split('T')[1] : null,
+        [id, element.typeSpecificData.venue || null, activityDate, activityTime,
          element.typeSpecificData.numTickets || null,
          element.typeSpecificData.ticketType || null]
       );
