@@ -266,7 +266,7 @@ export class TripElementRepository {
 
     for (const [key, dbKey] of Object.entries(fieldMap)) {
       if (key in updates) {
-        dbUpdates[dbKey] = (updates as any)[key] || null;
+        dbUpdates[dbKey] = (updates as any)[key] ?? null;
       }
     }
 

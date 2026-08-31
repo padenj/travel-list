@@ -372,6 +372,23 @@ describe('TripElementRepository', () => {
       expect(updated.totalCash).toBe(500);
       expect(updated.totalPoints).toBe(10000);
     });
+
+    it('should preserve falsy numeric values like 0', async () => {
+      const created = await repo.createElement(tripId, {
+        elementType: 'flight',
+        name: 'Flight',
+        priceCash: 100,
+        pricePoints: 5000
+      });
+
+      const updated = await repo.updateElement(created.id, {
+        priceCash: 0,
+        pricePoints: 0
+      });
+
+      expect(updated.priceCash).toBe(0);
+      expect(updated.pricePoints).toBe(0);
+    });
   });
 
   describe('deleteElement', () => {
