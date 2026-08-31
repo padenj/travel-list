@@ -189,8 +189,13 @@ tripRouter.put('/:tripId/elements/:elementId/confirmations/:confirmationId', aut
     if (!element || element.tripId !== req.trip!.id) {
       return res.status(404).json({ error: 'Element not found' });
     }
-    const conf = await tripElementConfirmationRepository.updateConfirmation(req.params.confirmationId, req.body);
-    res.json(conf);
+    const confirmations = await tripElementConfirmationRepository.getConfirmationsForElement(req.params.elementId);
+    const confirmation = confirmations.find(c => c.id === req.params.confirmationId);
+    if (!confirmation) {
+      return res.status(404).json({ error: 'Confirmation not found' });
+    }
+    const updated = await tripElementConfirmationRepository.updateConfirmation(req.params.confirmationId, req.body);
+    res.json(updated);
   } catch (error) {
     res.status(500).json({ error: 'Failed to update confirmation' });
   }
@@ -202,6 +207,11 @@ tripRouter.delete('/:tripId/elements/:elementId/confirmations/:confirmationId', 
     const element = await tripElementRepository.getElementById(req.params.elementId);
     if (!element || element.tripId !== req.trip!.id) {
       return res.status(404).json({ error: 'Element not found' });
+    }
+    const confirmations = await tripElementConfirmationRepository.getConfirmationsForElement(req.params.elementId);
+    const confirmation = confirmations.find(c => c.id === req.params.confirmationId);
+    if (!confirmation) {
+      return res.status(404).json({ error: 'Confirmation not found' });
     }
     await tripElementConfirmationRepository.deleteConfirmation(req.params.confirmationId);
     res.status(204).send();
