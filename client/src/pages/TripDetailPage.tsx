@@ -98,9 +98,9 @@ export function TripDetailPage() {
                         <span className="points">{item.pricePoints} points</span>
                       )}
                     </div>
-                    <a href={`/trips/${tripId}/elements/${item.id}`} className="edit-link">
-                      View/Edit →
-                    </a>
+                    <span className="edit-link placeholder" title="Element editing coming soon">
+                      View/Edit → (coming soon)
+                    </span>
                   </div>
                 ))}
               </div>

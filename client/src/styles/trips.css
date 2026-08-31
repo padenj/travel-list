@@ -233,9 +233,16 @@
   transition: all 0.2s;
 }
 
-.edit-link:hover {
+.edit-link:hover:not(.placeholder) {
   text-decoration: underline;
   color: #e8b7f7;
+}
+
+.edit-link.placeholder {
+  color: var(--ctp-mocha-subtext);
+  cursor: default;
+  font-style: italic;
+  opacity: 0.7;
 }
 
 .no-elements {

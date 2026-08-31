@@ -28,6 +28,7 @@ import {
   IconShield,
   IconHelp,
   IconLogout,
+  IconPlane,
 } from '@tabler/icons-react';
 import { useImpersonation } from '../contexts/ImpersonationContext';
 import VersionText from './VersionText';
@@ -50,6 +51,7 @@ interface SplitRailLayoutProps {
 const railItems = [
   { id: 'dashboard', icon: IconHome, label: 'Dashboard', path: '/' },
   { id: 'lists', icon: IconList, label: 'Packing Lists', path: '/packing-lists' },
+  { id: 'trips', icon: IconPlane, label: 'Trips', path: '/trips' },
   { id: 'categories', icon: IconCategory, label: 'Categories', path: '/categories' },
   { id: 'templates', icon: IconTemplate, label: 'Item Groups', path: '/templates' },
   { id: 'settings', icon: IconSettings, label: 'Settings', path: '/settings' },
