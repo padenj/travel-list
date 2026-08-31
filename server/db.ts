@@ -221,6 +221,25 @@ const SCHEMAS = {
 
     CREATE INDEX IF NOT EXISTS idx_packing_list_audit_log_packing_list_id_id ON packing_list_audit_log(packing_list_id, id DESC);
     CREATE INDEX IF NOT EXISTS idx_packing_list_audit_log_packing_list_item_id_id ON packing_list_audit_log(packing_list_id, packing_list_item_id, id DESC);
+    
+    CREATE INDEX IF NOT EXISTS idx_trips_family ON trips(family_id);
+    CREATE INDEX IF NOT EXISTS idx_trips_deleted ON trips(deleted_at);
+  `,
+  trips: `
+    CREATE TABLE IF NOT EXISTS trips (
+      id TEXT PRIMARY KEY,
+      family_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      description TEXT,
+      trip_type TEXT,
+      start_date TEXT,
+      end_date TEXT,
+      status TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      deleted_at TEXT,
+      FOREIGN KEY (family_id) REFERENCES families(id) ON DELETE CASCADE
+    )
   `
 };
 
@@ -243,6 +262,7 @@ async function initializeDatabase(db: Database): Promise<void> {
       await db.exec(SCHEMAS.users);
       await db.exec(SCHEMAS.audit_log);
       await db.exec(SCHEMAS.packing_list_audit_log);
+      await db.exec(SCHEMAS.trips);
       await db.exec(SCHEMAS.indexes);
 
       // Migration: ensure expected columns exist on legacy databases

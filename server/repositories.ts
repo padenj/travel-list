@@ -7,6 +7,8 @@ import crypto from 'crypto';
 const MANUAL_ADDED_THRESHOLD_MS = 100; // 100ms
 import { broadcastEvent } from './sse';
 import { User, Family, Category, Item, ItemCategory, ItemMember, ItemWholeFamily, ItemWithCategoryName } from './server-types';
+import { TripRepository } from './repositories/tripRepository';
+export type { Trip } from './repositories/tripRepository';
 
 interface CreateUserData extends Omit<User, 'password_hash'> {
   password: string;
@@ -1322,3 +1324,5 @@ export class ItemRepository {
       }
     }
   }
+
+export { TripRepository };
