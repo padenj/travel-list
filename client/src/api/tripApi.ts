@@ -1,6 +1,15 @@
 import { Trip, TripElement, TripElementConfirmation, TripAttachment } from '../types/trip';
+import { getAuthToken } from '../api';
 
 const API_BASE = '/api/trips';
+
+function authHeaders(extra: Record<string, string> = {}): Record<string, string> {
+  const token = getAuthToken();
+  return {
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...extra,
+  };
+}
 
 function handleResponse(response: Response) {
   if (!response.ok) {
@@ -12,19 +21,19 @@ function handleResponse(response: Response) {
 export const tripApi = {
   // Trip CRUD
   listTrips: async (): Promise<Trip[]> => {
-    const response = await fetch(`${API_BASE}`);
+    const response = await fetch(`${API_BASE}`, { headers: authHeaders() });
     return handleResponse(response);
   },
 
   getTrip: async (tripId: string): Promise<Trip> => {
-    const response = await fetch(`${API_BASE}/${tripId}`);
+    const response = await fetch(`${API_BASE}/${tripId}`, { headers: authHeaders() });
     return handleResponse(response);
   },
 
   createTrip: async (trip: Partial<Trip>): Promise<Trip> => {
     const response = await fetch(`${API_BASE}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(trip),
     });
     return handleResponse(response);
@@ -33,14 +42,14 @@ export const tripApi = {
   updateTrip: async (tripId: string, updates: Partial<Trip>): Promise<Trip> => {
     const response = await fetch(`${API_BASE}/${tripId}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(updates),
     });
     return handleResponse(response);
   },
 
   deleteTrip: async (tripId: string): Promise<void> => {
-    const response = await fetch(`${API_BASE}/${tripId}`, { method: 'DELETE' });
+    const response = await fetch(`${API_BASE}/${tripId}`, { method: 'DELETE', headers: authHeaders() });
     if (!response.ok) {
       throw new Error(`Failed to delete trip: ${response.status}`);
     }
@@ -48,19 +57,19 @@ export const tripApi = {
 
   // Element CRUD
   listElements: async (tripId: string): Promise<TripElement[]> => {
-    const response = await fetch(`${API_BASE}/${tripId}/elements`);
+    const response = await fetch(`${API_BASE}/${tripId}/elements`, { headers: authHeaders() });
     return handleResponse(response);
   },
 
   getElement: async (tripId: string, elementId: string): Promise<TripElement> => {
-    const response = await fetch(`${API_BASE}/${tripId}/elements/${elementId}`);
+    const response = await fetch(`${API_BASE}/${tripId}/elements/${elementId}`, { headers: authHeaders() });
     return handleResponse(response);
   },
 
   createElement: async (tripId: string, element: Partial<TripElement>): Promise<TripElement> => {
     const response = await fetch(`${API_BASE}/${tripId}/elements`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(element),
     });
     return handleResponse(response);
@@ -69,14 +78,14 @@ export const tripApi = {
   updateElement: async (tripId: string, elementId: string, updates: Partial<TripElement>): Promise<TripElement> => {
     const response = await fetch(`${API_BASE}/${tripId}/elements/${elementId}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(updates),
     });
     return handleResponse(response);
   },
 
   deleteElement: async (tripId: string, elementId: string): Promise<void> => {
-    const response = await fetch(`${API_BASE}/${tripId}/elements/${elementId}`, { method: 'DELETE' });
+    const response = await fetch(`${API_BASE}/${tripId}/elements/${elementId}`, { method: 'DELETE', headers: authHeaders() });
     if (!response.ok) {
       throw new Error(`Failed to delete element: ${response.status}`);
     }
@@ -84,14 +93,14 @@ export const tripApi = {
 
   // Confirmations
   listConfirmations: async (tripId: string, elementId: string): Promise<TripElementConfirmation[]> => {
-    const response = await fetch(`${API_BASE}/${tripId}/elements/${elementId}/confirmations`);
+    const response = await fetch(`${API_BASE}/${tripId}/elements/${elementId}/confirmations`, { headers: authHeaders() });
     return handleResponse(response);
   },
 
   addConfirmation: async (tripId: string, elementId: string, confirmation: Partial<TripElementConfirmation>): Promise<TripElementConfirmation> => {
     const response = await fetch(`${API_BASE}/${tripId}/elements/${elementId}/confirmations`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(confirmation),
     });
     return handleResponse(response);
@@ -100,14 +109,14 @@ export const tripApi = {
   updateConfirmation: async (tripId: string, elementId: string, confirmationId: string, updates: Partial<TripElementConfirmation>): Promise<TripElementConfirmation> => {
     const response = await fetch(`${API_BASE}/${tripId}/elements/${elementId}/confirmations/${confirmationId}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(updates),
     });
     return handleResponse(response);
   },
 
   deleteConfirmation: async (tripId: string, elementId: string, confirmationId: string): Promise<void> => {
-    const response = await fetch(`${API_BASE}/${tripId}/elements/${elementId}/confirmations/${confirmationId}`, { method: 'DELETE' });
+    const response = await fetch(`${API_BASE}/${tripId}/elements/${elementId}/confirmations/${confirmationId}`, { method: 'DELETE', headers: authHeaders() });
     if (!response.ok) {
       throw new Error(`Failed to delete confirmation: ${response.status}`);
     }
