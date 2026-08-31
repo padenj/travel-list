@@ -9,8 +9,10 @@ import { broadcastEvent } from './sse';
 import { User, Family, Category, Item, ItemCategory, ItemMember, ItemWholeFamily, ItemWithCategoryName } from './server-types';
 import { TripRepository } from './repositories/tripRepository';
 import { TripElementRepository } from './repositories/tripElementRepository';
+import { TripElementConfirmationRepository } from './repositories/tripElementConfirmationRepository';
 export type { Trip } from './repositories/tripRepository';
 export type { TripElement, FlightLeg, HotelDetails, CarRentalDetails, ActivityDetails } from './repositories/tripElementRepository';
+export type { TripElementConfirmation } from './repositories/tripElementConfirmationRepository';
 
 interface CreateUserData extends Omit<User, 'password_hash'> {
   password: string;
@@ -1329,3 +1331,4 @@ export class ItemRepository {
 
 export { TripRepository };
 export { TripElementRepository };
+export { TripElementConfirmationRepository };
