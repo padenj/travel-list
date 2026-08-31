@@ -23,7 +23,7 @@ export const tripAccessMiddleware = async (req: Request, res: Response, next: Ne
     return res.status(400).json({ error: 'Missing tripId or familyId' });
   }
 
-  const db = getDb();
+  const db = await getDb();
   const trip = await db.get(
     `SELECT * FROM trips WHERE id = ? AND family_id = ? AND deleted_at IS NULL`,
     [tripId, familyId]

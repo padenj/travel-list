@@ -14,6 +14,8 @@ import PackingListPage from './pages/PackingListPage';
 import CategoryManagementPage from './pages/CategoryManagementPage';
 import TemplateManager from './components/TemplateManager';
 import UserDocsPage from './pages/UserDocsPage';
+import { TripsPage } from './pages/TripsPage';
+import { TripDetailPage } from './pages/TripDetailPage';
 
 interface User {
   username?: string;
@@ -177,6 +179,14 @@ export default function AppRoutes(): React.ReactElement {
         <Route 
           path="/help" 
           element={<UserDocsPage />} 
+        />
+        <Route 
+          path="/trips" 
+          element={<TripsPage />} 
+        />
+        <Route 
+          path="/trips/:tripId" 
+          element={<TripDetailPage />} 
         />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

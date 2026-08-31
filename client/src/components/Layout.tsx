@@ -132,6 +132,10 @@ export default function Layout({ children, user, onLogout }: LayoutProps): React
                   Packing Lists
                 </Link>
 
+                <Link to="/trips" style={linkStyle('/trips')}>
+                  Trips
+                </Link>
+
                 <Link to="/categories" style={linkStyle('/categories')}>
                   Manage Categories
                 </Link>
