@@ -5,6 +5,10 @@
 */
 module.exports = {
   up: async ({ db }) => {
+    const columns = await db.all(`PRAGMA table_info(templates)`);
+    const hasNotes = columns.some((column) => column.name === 'notes');
+    if (hasNotes) return;
+    
     await db.exec(`ALTER TABLE templates ADD COLUMN notes TEXT;`);
   },
   down: async ({ db }) => {
