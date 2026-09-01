@@ -4,6 +4,7 @@ import { TripElementRepository } from '../repositories/tripElementRepository';
 import { TripElementConfirmationRepository } from '../repositories/tripElementConfirmationRepository';
 import { authMiddleware } from '../middleware';
 import { tripAccessMiddleware } from '../middleware/tripAccessMiddleware';
+import { lookupFlightStatsAutofill } from '../services/flightStatsLookupService';
 
 export const tripRouter = Router();
 
@@ -74,6 +75,26 @@ tripRouter.get('/:tripId/elements', authMiddleware, tripAccessMiddleware, async 
     res.json(elements);
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch elements' });
+  }
+});
+
+// Lookup flight details from FlightStats (POC)
+tripRouter.post('/:tripId/flight-autofill', authMiddleware, tripAccessMiddleware, async (req: Request, res: Response) => {
+  try {
+    const { airlineCode, flightNumber, flightDate } = req.body || {};
+    if (!airlineCode || !flightNumber || !flightDate) {
+      return res.status(400).json({ error: 'Missing required fields: airlineCode, flightNumber, flightDate' });
+    }
+
+    const details = await lookupFlightStatsAutofill({
+      airlineCode: String(airlineCode),
+      flightNumber: String(flightNumber),
+      flightDate: String(flightDate),
+    });
+    return res.json(details);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Flight lookup failed';
+    return res.status(502).json({ error: message });
   }
 });
 

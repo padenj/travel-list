@@ -1,7 +1,11 @@
-import { Trip, TripElement, TripElementConfirmation, TripAttachment } from '../types/trip';
+import { Trip, TripElement, TripElementConfirmation, TripAttachment, FlightAutofillLookupInput, FlightAutofillDetails } from '../types/trip';
 import { getAuthToken } from '../api';
 
 const API_BASE = '/api/trips';
+
+type TripElementWritePayload = Partial<TripElement> & {
+  typeSpecificData?: Record<string, unknown>;
+};
 
 function authHeaders(extra: Record<string, string> = {}): Record<string, string> {
   const token = getAuthToken();
@@ -66,7 +70,7 @@ export const tripApi = {
     return handleResponse(response);
   },
 
-  createElement: async (tripId: string, element: Partial<TripElement>): Promise<TripElement> => {
+  createElement: async (tripId: string, element: TripElementWritePayload): Promise<TripElement> => {
     const response = await fetch(`${API_BASE}/${tripId}/elements`, {
       method: 'POST',
       headers: authHeaders({ 'Content-Type': 'application/json' }),
@@ -75,7 +79,7 @@ export const tripApi = {
     return handleResponse(response);
   },
 
-  updateElement: async (tripId: string, elementId: string, updates: Partial<TripElement>): Promise<TripElement> => {
+  updateElement: async (tripId: string, elementId: string, updates: TripElementWritePayload): Promise<TripElement> => {
     const response = await fetch(`${API_BASE}/${tripId}/elements/${elementId}`, {
       method: 'PUT',
       headers: authHeaders({ 'Content-Type': 'application/json' }),
@@ -89,6 +93,15 @@ export const tripApi = {
     if (!response.ok) {
       throw new Error(`Failed to delete element: ${response.status}`);
     }
+  },
+
+  lookupFlightAutofill: async (tripId: string, payload: FlightAutofillLookupInput): Promise<FlightAutofillDetails> => {
+    const response = await fetch(`${API_BASE}/${tripId}/flight-autofill`, {
+      method: 'POST',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(payload),
+    });
+    return handleResponse(response);
   },
 
   // Confirmations

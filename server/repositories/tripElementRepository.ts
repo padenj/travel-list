@@ -108,21 +108,28 @@ export class TripElementRepository {
       `INSERT INTO trip_elements (id, trip_id, element_type, name, booking_reference, booking_url, price_cash, price_points, loyalty_program, total_cash, total_points, notes, sort_position, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
       [id, tripId, element.elementType, element.name, element.bookingReference || null, element.bookingUrl || null,
-       element.priceCash || null, element.pricePoints || null, element.loyaltyProgram || null,
-       element.totalCash || null, element.totalPoints || null, element.notes || null, sortPos]
+       element.priceCash ?? null, element.pricePoints ?? null, element.loyaltyProgram || null,
+       element.totalCash ?? null, element.totalPoints ?? null, element.notes || null, sortPos]
     );
 
     // Insert type-specific data
     if (element.elementType === 'flight' && element.typeSpecificData?.legs) {
-      for (const leg of element.typeSpecificData.legs) {
+      for (const [index, leg] of element.typeSpecificData.legs.entries()) {
+        const fallbackDate = typeof leg.flightDate === 'string' && leg.flightDate
+          ? `${leg.flightDate}T00:00:00Z`
+          : null;
+        const departureDatetime = leg.departureDatetime || fallbackDate || new Date().toISOString();
+        const arrivalDatetime = leg.arrivalDatetime || departureDatetime;
+        const departureAirport = leg.departureAirport || 'TBD';
+        const arrivalAirport = leg.arrivalAirport || 'TBD';
         const legId = uuidv4();
         await db.run(
           `INSERT INTO flight_legs (id, element_id, leg_order, departure_airport, departure_datetime, arrival_airport, arrival_datetime, airline, flight_number, seat_numbers, price_cash, price_points, loyalty_program, confirmation_number, check_price_url, layover_minutes_after, created_at, updated_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
-          [legId, id, leg.legOrder, leg.departureAirport, leg.departureDatetime, leg.arrivalAirport, leg.arrivalDatetime,
-           leg.airline || null, leg.flightNumber || null, leg.seatNumbers || null, leg.priceCash || null,
-           leg.pricePoints || null, leg.loyaltyProgram || null, leg.confirmationNumber || null,
-           leg.checkPriceUrl || null, leg.layoverMinutesAfter || null]
+          [legId, id, leg.legOrder ?? index + 1, departureAirport, departureDatetime, arrivalAirport, arrivalDatetime,
+           leg.airline || null, leg.flightNumber || null, leg.seatNumbers || null, leg.priceCash ?? null,
+           leg.pricePoints ?? null, leg.loyaltyProgram || null, leg.confirmationNumber || null,
+           leg.checkPriceUrl || null, leg.layoverMinutesAfter ?? null]
         );
       }
     } else if (element.elementType === 'hotel' && element.typeSpecificData) {

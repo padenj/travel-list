@@ -127,3 +127,21 @@ export interface TripAttachment {
   fileSize: number;
   createdAt: string;
 }
+
+export interface FlightAutofillLookupInput {
+  airlineCode: string;
+  flightNumber: string;
+  flightDate: string;
+}
+
+export interface FlightAutofillDetails {
+  airlineCode: string;
+  flightNumber: string;
+  flightDate: string;
+  departureAirport?: string;
+  arrivalAirport?: string;
+  departureDatetime?: string;
+  arrivalDatetime?: string;
+  statusText?: string;
+  sourceUrl: string;
+}
