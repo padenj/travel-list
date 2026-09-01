@@ -18,7 +18,7 @@ type TripElementPayload = Partial<TripElement> & {
       flightNumber?: string;
       airline?: string;
     }>;
-    };
+  };
 };
 
 function parseNumberInput(value: string): number | undefined {
