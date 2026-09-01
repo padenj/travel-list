@@ -3234,7 +3234,6 @@ Note: flight elements now get pricing and a booking reference exclusively throug
       {tripId && (
         <TripParticipantsPanel
           tripId={tripId}
-          participants={participants}
           onParticipantsChanged={setParticipants}
         />
       )}
