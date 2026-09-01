@@ -127,5 +127,29 @@ Searchable item-group manager using a Mantine `Select` picker, an item-only list
 ### PackingListItemAuditModal
 **Used in:**
   - `Dashboard`
+
+### TripParticipantsPanel
+**Used in:**
+  - `pages/TripDetailPage.tsx`
+
+Lists/add/removes trip travelers (family members and outside guests). Exports `findOrCreateParticipant` helper used by `BookingCard` for inline traveler creation.
+
+### BookingCard
+**Used in:**
+  - `pages/TripDetailPage.tsx` (once per flight-type `TripElement`)
+
+Displays existing bookings (confirmation number, per-person advertised price, actual total from transactions, "Also covers" links to other linked elements) and a form to create a new booking with traveler multi-select, inline new-traveler creation, and multi-element linking. Renders `BookingTransactionList` per booking.
+
+### BookingTransactionList
+**Used in:**
+  - `BookingCard`
+
+Lists/add/removes transactions for a single booking with a running total; supports recording price-drop rebookings (negative amount + new confirmation number) and free-text fee/tax breakdown notes.
+
+### FlightSeatGrid
+**Used in:**
+  - `pages/TripDetailPage.tsx` (once per flight leg)
+
+Inline-editable seat number per trip traveler.
 ---
 **Note:** This file lists current supporting components only; deleted components were removed from the project and are not included here.
