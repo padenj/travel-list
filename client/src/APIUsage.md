@@ -95,6 +95,21 @@ Keep this checklist updated as you complete migration verification and removal s
 - `getCategoriesForItem`:
   - client/src/components/ItemEditDrawer.tsx
 
+### Trip tracking (`client/src/api/tripApi.ts`)
+- `getTrips`, `getTrip`, `createTrip`, `updateTrip`, `deleteTrip`, `listElements`, `getElement`, `createElement`, `updateElement`, `deleteElement`, `lookupFlightAutofill`, `addConfirmation`, `listConfirmations`, `updateConfirmation`, `deleteConfirmation`:
+  - client/src/pages/TripsPage.tsx
+  - client/src/pages/TripDetailPage.tsx
+- `listParticipants`, `createParticipant`, `updateParticipant`, `deleteParticipant`:
+  - client/src/pages/TripDetailPage.tsx
+  - client/src/components/TripParticipantsPanel.tsx
+  - client/src/components/BookingCard.tsx (inline "+ New traveler" creation)
+- `listBookings`, `getBooking`, `createBooking`, `updateBooking`, `deleteBooking`, `linkBookingElement`, `unlinkBookingElement`, `addBookingTraveler`, `removeBookingTraveler`:
+  - client/src/components/BookingCard.tsx
+- `listBookingTransactions`, `addBookingTransaction`, `updateBookingTransaction`, `deleteBookingTransaction`:
+  - client/src/components/BookingTransactionList.tsx (rendered inside `BookingCard.tsx`)
+- `listSeatsForLeg`, `assignSeat`, `removeSeat`:
+  - client/src/components/FlightSeatGrid.tsx (rendered in `pages/TripDetailPage.tsx`, once per flight leg)
+
 ---
 
 Direct `fetch` uses (bypass `api.ts`):
