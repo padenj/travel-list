@@ -96,6 +96,11 @@ describe('BookingTransactionRepository', () => {
       expect(updated.amountCash).toBe(79.5);
       expect(updated.notes).toBe('corrected');
     });
+
+    it('rejects reducing both amounts to zero', async () => {
+      const txn = await repo.addTransaction(bookingId, { amountCash: 78.98, transactionDate: '2026-01-15' });
+      await expect(repo.updateTransaction(txn.id, { amountCash: 0 })).rejects.toThrow(/non-zero/);
+    });
   });
 
   describe('deleteTransaction', () => {

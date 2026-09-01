@@ -230,13 +230,17 @@ export function TripDetailPage() {
     try {
       setSavingEdit(true);
       setError(null);
-      await tripApi.updateElement(tripId, elementId, {
+      const editingElement = elements.find(e => e.id === elementId);
+      const payload: Partial<TripElement> = {
         name: editingName.trim(),
         notes: editingNotes.trim() || undefined,
-        bookingReference: editingBookingReference.trim() || undefined,
-        priceCash: parseNumberInput(editingPriceCash),
-        pricePoints: parseNumberInput(editingPricePoints),
-      });
+      };
+      if (editingElement?.elementType !== 'flight') {
+        payload.bookingReference = editingBookingReference.trim() || undefined;
+        payload.priceCash = parseNumberInput(editingPriceCash);
+        payload.pricePoints = parseNumberInput(editingPricePoints);
+      }
+      await tripApi.updateElement(tripId, elementId, payload);
       cancelEditingElement();
       await loadTripData(tripId);
     } catch (err) {
@@ -499,38 +503,41 @@ export function TripDetailPage() {
                             onChange={(e) => setEditingName(e.target.value)}
                           />
                         </div>
-                        <div className="create-element-field">
-                          <label htmlFor={`edit-booking-reference-${item.id}`}>Booking or itinerary reference</label>
-                          <input
-                            id={`edit-booking-reference-${item.id}`}
-                            type="text"
-                            value={editingBookingReference}
-                            onChange={(e) => setEditingBookingReference(e.target.value)}
-                          />
-                        </div>
-                        <div className="create-element-field">
-                          <label htmlFor={`edit-price-cash-${item.id}`}>Price cash</label>
-                          <input
-                            id={`edit-price-cash-${item.id}`}
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            value={editingPriceCash}
-                            onChange={(e) => setEditingPriceCash(e.target.value)}
-                          />
-                        </div>
-                        <div className="create-element-field">
-                          <label htmlFor={`edit-price-points-${item.id}`}>Price points</label>
-                          <input
-                            id={`edit-price-points-${item.id}`}
-                            type="number"
-                            min="0"
-                            step="1"
-                            value={editingPricePoints}
-                            onChange={(e) => setEditingPricePoints(e.target.value)}
-                          />
-                        </div>
-                        <div className="create-element-field edit-notes-field">
+                        {item.elementType !== 'flight' && (
+                          <>
+                            <div className="create-element-field">
+                              <label htmlFor={`edit-booking-reference-${item.id}`}>Booking or itinerary reference</label>
+                              <input
+                                id={`edit-booking-reference-${item.id}`}
+                                type="text"
+                                value={editingBookingReference}
+                                onChange={(e) => setEditingBookingReference(e.target.value)}
+                              />
+                            </div>
+                            <div className="create-element-field">
+                              <label htmlFor={`edit-price-cash-${item.id}`}>Price cash</label>
+                              <input
+                                id={`edit-price-cash-${item.id}`}
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                value={editingPriceCash}
+                                onChange={(e) => setEditingPriceCash(e.target.value)}
+                              />
+                            </div>
+                            <div className="create-element-field">
+                              <label htmlFor={`edit-price-points-${item.id}`}>Price points</label>
+                              <input
+                                id={`edit-price-points-${item.id}`}
+                                type="number"
+                                min="0"
+                                step="1"
+                                value={editingPricePoints}
+                                onChange={(e) => setEditingPricePoints(e.target.value)}
+                              />
+                            </div>
+                          </>
+                        )}                        <div className="create-element-field edit-notes-field">
                           <label htmlFor={`edit-notes-${item.id}`}>Notes</label>
                           <input
                             id={`edit-notes-${item.id}`}

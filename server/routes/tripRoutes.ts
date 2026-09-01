@@ -503,7 +503,8 @@ tripRouter.patch('/:tripId/bookings/:bookingId/transactions/:id', authMiddleware
     const updated = await bookingTransactionRepository.updateTransaction(req.params.id, req.body);
     res.json(updated);
   } catch (error) {
-    res.status(500).json({ error: 'Failed to update transaction' });
+    const message = error instanceof Error ? error.message : 'Failed to update transaction';
+    res.status(400).json({ error: message });
   }
 });
 

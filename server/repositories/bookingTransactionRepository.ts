@@ -62,6 +62,16 @@ export class BookingTransactionRepository {
     confirmationNumber?: string | null;
     notes?: string | null;
   }): Promise<BookingTransaction> {
+    if ('amountCash' in updates || 'amountPoints' in updates) {
+      const existing = await this.getTransactionById(id);
+      if (existing) {
+        const finalCash = 'amountCash' in updates ? (updates.amountCash ?? 0) : existing.amountCash;
+        const finalPoints = 'amountPoints' in updates ? (updates.amountPoints ?? 0) : existing.amountPoints;
+        if (finalCash === 0 && finalPoints === 0) {
+          throw new Error('Transaction must have a non-zero amountCash or amountPoints');
+        }
+      }
+    }
     const fieldMap: Record<string, string> = {
       amountCash: 'amount_cash',
       amountPoints: 'amount_points',
