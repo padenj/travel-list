@@ -1,7 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
-import { Trip, TripElement } from '../types/trip';
+import { Trip, TripElement, TripParticipant } from '../types/trip';
 import { tripApi } from '../api/tripApi';
+import { TripParticipantsPanel } from '../components/TripParticipantsPanel';
+import { BookingCard } from '../components/BookingCard';
+import { FlightSeatGrid } from '../components/FlightSeatGrid';
 import '../styles/trips.css';
 
 type TripElementPayload = Partial<TripElement> & {
@@ -14,9 +17,8 @@ type TripElementPayload = Partial<TripElement> & {
       arrivalDatetime?: string;
       flightNumber?: string;
       airline?: string;
-      confirmationNumber?: string;
     }>;
-  };
+    };
 };
 
 function parseNumberInput(value: string): number | undefined {
@@ -50,13 +52,14 @@ export function TripDetailPage() {
   const [newFlightDate, setNewFlightDate] = useState('');
   const [newFlightAirlineCode, setNewFlightAirlineCode] = useState('');
   const [newFlightNumber, setNewFlightNumber] = useState('');
-  const [newFlightConfirmationNumber, setNewFlightConfirmationNumber] = useState('');
   const [newFlightDepartureAirport, setNewFlightDepartureAirport] = useState('');
   const [newFlightArrivalAirport, setNewFlightArrivalAirport] = useState('');
   const [newFlightDepartureDatetime, setNewFlightDepartureDatetime] = useState('');
   const [newFlightArrivalDatetime, setNewFlightArrivalDatetime] = useState('');
   const [flightAutofillStatus, setFlightAutofillStatus] = useState('');
   const [flightAutofillLoading, setFlightAutofillLoading] = useState(false);
+  const [nameManuallyEdited, setNameManuallyEdited] = useState(false);
+  const [participants, setParticipants] = useState<TripParticipant[]>([]);
   const [editingElementId, setEditingElementId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
   const [editingNotes, setEditingNotes] = useState('');
@@ -71,12 +74,14 @@ export function TripDetailPage() {
     try {
       setLoading(true);
       setError(null);
-      const [tripData, elementsData] = await Promise.all([
+      const [tripData, elementsData, participantsData] = await Promise.all([
         tripApi.getTrip(id),
         tripApi.listElements(id),
+        tripApi.listParticipants(id),
       ]);
       setTrip(tripData);
       setElements(elementsData);
+      setParticipants(participantsData);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load trip');
     } finally {
@@ -88,6 +93,15 @@ export function TripDetailPage() {
     if (!tripId) return;
     loadTripData(tripId);
   }, [tripId]);
+
+  useEffect(() => {
+    if (newElementType !== 'flight' || nameManuallyEdited) return;
+    const dep = newFlightDepartureAirport.trim();
+    const arr = newFlightArrivalAirport.trim();
+    if (dep && arr) {
+      setNewElementName(`${dep} → ${arr}`);
+    }
+  }, [newElementType, newFlightDepartureAirport, newFlightArrivalAirport, nameManuallyEdited]);
 
   const createElement = async () => {
     if (!tripId) return;
@@ -107,11 +121,14 @@ export function TripDetailPage() {
       const payload: TripElementPayload = {
         elementType: newElementType,
         name: newElementName.trim(),
-        bookingReference: newBookingReference.trim() || undefined,
-        priceCash: parseNumberInput(newPriceCash),
-        pricePoints: parseNumberInput(newPricePoints),
         notes: newElementNotes.trim() || undefined,
       };
+
+      if (newElementType !== 'flight') {
+        payload.bookingReference = newBookingReference.trim() || undefined;
+        payload.priceCash = parseNumberInput(newPriceCash);
+        payload.pricePoints = parseNumberInput(newPricePoints);
+      }
 
       if (newElementType === 'flight') {
         payload.typeSpecificData = {
@@ -124,7 +141,6 @@ export function TripDetailPage() {
               arrivalDatetime: newFlightArrivalDatetime || isoDateAtMidnight(newFlightDate.trim()),
               airline: newFlightAirlineCode.trim().toUpperCase() || undefined,
               flightNumber: newFlightNumber.trim() || undefined,
-              confirmationNumber: newFlightConfirmationNumber.trim() || undefined,
             },
           ],
         };
@@ -139,12 +155,12 @@ export function TripDetailPage() {
       setNewFlightDate('');
       setNewFlightAirlineCode('');
       setNewFlightNumber('');
-      setNewFlightConfirmationNumber('');
       setNewFlightDepartureAirport('');
       setNewFlightArrivalAirport('');
       setNewFlightDepartureDatetime('');
       setNewFlightArrivalDatetime('');
       setFlightAutofillStatus('');
+      setNameManuallyEdited(false);
       setNewElementType('flight');
       setShowAddElementForm(false);
       await loadTripData(tripId);
@@ -276,6 +292,13 @@ export function TripDetailPage() {
         </button>
       </div>
 
+      {tripId && (
+        <TripParticipantsPanel
+          tripId={tripId}
+          onParticipantsChanged={setParticipants}
+        />
+      )}
+
       {showAddElementForm && (
         <div className="create-element-form">
           <div className="create-element-field">
@@ -297,7 +320,10 @@ export function TripDetailPage() {
               id="element-name"
               type="text"
               value={newElementName}
-              onChange={(e) => setNewElementName(e.target.value)}
+              onChange={(e) => {
+                setNewElementName(e.target.value);
+                setNameManuallyEdited(true);
+              }}
               placeholder="e.g. Southwest Flight 1234"
             />
           </div>
@@ -311,40 +337,44 @@ export function TripDetailPage() {
               placeholder="Optional"
             />
           </div>
-          <div className="create-element-field">
-            <label htmlFor="element-booking-reference">Booking or itinerary reference</label>
-            <input
-              id="element-booking-reference"
-              type="text"
-              value={newBookingReference}
-              onChange={(e) => setNewBookingReference(e.target.value)}
-              placeholder="e.g. Expedia itinerary # 12345"
-            />
-          </div>
-          <div className="create-element-field">
-            <label htmlFor="element-price-cash">Price cash</label>
-            <input
-              id="element-price-cash"
-              type="number"
-              min="0"
-              step="0.01"
-              value={newPriceCash}
-              onChange={(e) => setNewPriceCash(e.target.value)}
-              placeholder="Optional"
-            />
-          </div>
-          <div className="create-element-field">
-            <label htmlFor="element-price-points">Price points</label>
-            <input
-              id="element-price-points"
-              type="number"
-              min="0"
-              step="1"
-              value={newPricePoints}
-              onChange={(e) => setNewPricePoints(e.target.value)}
-              placeholder="Optional"
-            />
-          </div>
+          {newElementType !== 'flight' && (
+            <>
+              <div className="create-element-field">
+                <label htmlFor="element-booking-reference">Booking or itinerary reference</label>
+                <input
+                  id="element-booking-reference"
+                  type="text"
+                  value={newBookingReference}
+                  onChange={(e) => setNewBookingReference(e.target.value)}
+                  placeholder="e.g. Expedia itinerary # 12345"
+                />
+              </div>
+              <div className="create-element-field">
+                <label htmlFor="element-price-cash">Price cash</label>
+                <input
+                  id="element-price-cash"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={newPriceCash}
+                  onChange={(e) => setNewPriceCash(e.target.value)}
+                  placeholder="Optional"
+                />
+              </div>
+              <div className="create-element-field">
+                <label htmlFor="element-price-points">Price points</label>
+                <input
+                  id="element-price-points"
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={newPricePoints}
+                  onChange={(e) => setNewPricePoints(e.target.value)}
+                  placeholder="Optional"
+                />
+              </div>
+            </>
+          )}
           {newElementType === 'flight' && (
             <>
               <div className="create-element-field">
@@ -386,16 +416,9 @@ export function TripDetailPage() {
                   {flightAutofillLoading ? 'Looking up...' : 'Auto-fill flight details (POC)'}
                 </button>
               </div>
-              <div className="create-element-field">
-                <label htmlFor="flight-confirmation-number">Confirmation number</label>
-                <input
-                  id="flight-confirmation-number"
-                  type="text"
-                  value={newFlightConfirmationNumber}
-                  onChange={(e) => setNewFlightConfirmationNumber(e.target.value)}
-                  placeholder="Optional"
-                />
-              </div>
+              <p className="element-notes">
+                Confirmation number, pricing, and travelers are entered per-booking below after saving this element.
+              </p>
               {(newFlightDepartureAirport || newFlightArrivalAirport || flightAutofillStatus) && (
                 <div className="flight-autofill-preview">
                   <strong>Lookup result:</strong>{' '}
@@ -425,7 +448,7 @@ export function TripDetailPage() {
                   <div key={item.id} className="element-card">
                     <div className="element-header">
                       <h3>{item.name}</h3>
-                      {item.bookingReference && (
+                      {item.elementType !== 'flight' && item.bookingReference && (
                         <span className="booking-ref">{item.bookingReference}</span>
                       )}
                     </div>
@@ -435,18 +458,33 @@ export function TripDetailPage() {
                           <span>Date: {displayDateOnly(item.legs[0].departureDatetime)}</span>
                         )}
                         {item.legs[0].flightNumber && <span>Flight: {item.legs[0].flightNumber}</span>}
-                        {item.legs[0].confirmationNumber && <span>Confirmation: {item.legs[0].confirmationNumber}</span>}
                       </div>
                     )}
                     {item.notes && <p className="element-notes">{item.notes}</p>}
-                    <div className="element-pricing">
-                      {item.priceCash !== undefined && item.priceCash !== null && (
-                        <span className="price">${item.priceCash.toFixed(2)}</span>
-                      )}
-                      {item.pricePoints !== undefined && item.pricePoints !== null && (
-                        <span className="points">{item.pricePoints} points</span>
-                      )}
-                    </div>
+                    {item.elementType !== 'flight' && (
+                      <div className="element-pricing">
+                        {item.priceCash !== undefined && item.priceCash !== null && (
+                          <span className="price">${item.priceCash.toFixed(2)}</span>
+                        )}
+                        {item.pricePoints !== undefined && item.pricePoints !== null && (
+                          <span className="points">{item.pricePoints} points</span>
+                        )}
+                      </div>
+                    )}
+                    {item.elementType === 'flight' && tripId && (
+                      <>
+                        {item.legs?.map(leg => (
+                          <FlightSeatGrid key={leg.id} tripId={tripId} legId={leg.id} travelers={participants} />
+                        ))}
+                        <BookingCard
+                          tripId={tripId}
+                          elementId={item.id}
+                          elements={elements}
+                          participants={participants}
+                          onParticipantsChanged={setParticipants}
+                        />
+                      </>
+                    )}
                     <button className="edit-link" type="button" onClick={() => startEditingElement(item)}>
                       View/Edit
                     </button>
