@@ -296,4 +296,17 @@ export class TripElementRepository {
       [elementId]
     );
   }
+
+  async getLegOwnership(legId: string): Promise<{ elementId: string; tripId: string } | null> {
+    const db = await this.db;
+    const row = await db.get(
+      `SELECT fl.element_id as elementId, te.trip_id as tripId
+       FROM flight_legs fl
+       JOIN trip_elements te ON te.id = fl.element_id
+       WHERE fl.id = ?`,
+      [legId]
+    );
+
+    return row ? { elementId: row.elementId, tripId: row.tripId } : null;
+  }
 }

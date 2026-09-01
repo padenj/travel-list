@@ -527,4 +527,34 @@ describe('TripElementRepository', () => {
       expect(details.numTickets).toBe(4);
     });
   });
+
+  describe('getLegOwnership', () => {
+    it('returns the element and trip id that own a leg', async () => {
+      const element = await repo.createElement(tripId, {
+        elementType: 'flight',
+        name: 'Test Flight',
+        typeSpecificData: {
+          legs: [
+            {
+              legOrder: 1,
+              departureAirport: 'DEN',
+              departureDatetime: '2026-06-01T08:00:00Z',
+              arrivalAirport: 'LAX',
+              arrivalDatetime: '2026-06-01T11:00:00Z'
+            }
+          ]
+        }
+      });
+
+      const legId = element.legs![0].id;
+      const ownership = await repo.getLegOwnership(legId);
+
+      expect(ownership).toEqual({ elementId: element.id, tripId });
+    });
+
+    it('returns null for a non-existent leg', async () => {
+      const ownership = await repo.getLegOwnership('does-not-exist');
+      expect(ownership).toBeNull();
+    });
+  });
 });
