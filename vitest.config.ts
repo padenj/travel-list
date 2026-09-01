@@ -13,6 +13,10 @@ export default defineConfig({
       'client/src/__tests__/Dashboard.test.tsx', // Dashboard edit-list regression coverage
       'client/src/__tests__/TripsPage.test.tsx', // Trips page create action coverage
       'client/src/__tests__/TripDetailPage.test.tsx', // Trip detail add actions coverage
+      'client/src/__tests__/TripParticipantsPanel.test.tsx', // Trip traveler management coverage
+      'client/src/__tests__/BookingTransactionList.test.tsx', // Booking transaction ledger coverage
+      'client/src/__tests__/FlightSeatGrid.test.tsx', // Per-leg seat assignment coverage
+      'client/src/__tests__/BookingCard.test.tsx', // Booking creation/display coverage
       'src/**/*.test.{ts,tsx}',           // Frontend unit tests
       'server/**/*.test.ts',              // Backend unit tests
       'tests/integration/**/*.test.ts',   // Integration tests
