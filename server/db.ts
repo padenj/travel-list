@@ -336,6 +336,59 @@ const SCHEMAS = {
       FOREIGN KEY (element_id) REFERENCES trip_elements(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS bookings (
+      id TEXT PRIMARY KEY,
+      trip_id TEXT NOT NULL,
+      confirmation_number TEXT,
+      advertised_price_cash DECIMAL,
+      advertised_price_points INTEGER,
+      loyalty_program TEXT,
+      notes TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (trip_id) REFERENCES trips(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS booking_links (
+      booking_id TEXT NOT NULL,
+      element_id TEXT NOT NULL,
+      PRIMARY KEY (booking_id, element_id),
+      FOREIGN KEY (booking_id) REFERENCES bookings(id) ON DELETE CASCADE,
+      FOREIGN KEY (element_id) REFERENCES trip_elements(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS booking_travelers (
+      booking_id TEXT NOT NULL,
+      participant_id TEXT NOT NULL,
+      PRIMARY KEY (booking_id, participant_id),
+      FOREIGN KEY (booking_id) REFERENCES bookings(id) ON DELETE CASCADE,
+      FOREIGN KEY (participant_id) REFERENCES trip_participants(id) ON DELETE RESTRICT
+    );
+
+    CREATE TABLE IF NOT EXISTS booking_transactions (
+      id TEXT PRIMARY KEY,
+      booking_id TEXT NOT NULL,
+      amount_cash DECIMAL NOT NULL DEFAULT 0,
+      amount_points INTEGER NOT NULL DEFAULT 0,
+      transaction_date TEXT NOT NULL,
+      confirmation_number TEXT,
+      notes TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (booking_id) REFERENCES bookings(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS flight_traveler_seats (
+      id TEXT PRIMARY KEY,
+      leg_id TEXT NOT NULL,
+      participant_id TEXT NOT NULL,
+      seat_number TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE (leg_id, participant_id),
+      FOREIGN KEY (leg_id) REFERENCES flight_legs(id) ON DELETE CASCADE,
+      FOREIGN KEY (participant_id) REFERENCES trip_participants(id) ON DELETE CASCADE
+    );
+
     CREATE TABLE IF NOT EXISTS hotel_element_details (
       element_id TEXT PRIMARY KEY,
       address TEXT,
@@ -391,6 +444,11 @@ const SCHEMAS = {
     CREATE INDEX IF NOT EXISTS idx_trip_element_confirmations_participant ON trip_element_confirmations(participant_id);
     CREATE INDEX IF NOT EXISTS idx_trip_element_attachments_element ON trip_element_attachments(element_id);
     CREATE INDEX IF NOT EXISTS idx_flight_legs_element ON flight_legs(element_id);
+    CREATE INDEX IF NOT EXISTS idx_bookings_trip ON bookings(trip_id);
+    CREATE INDEX IF NOT EXISTS idx_booking_links_element ON booking_links(element_id);
+    CREATE INDEX IF NOT EXISTS idx_booking_travelers_participant ON booking_travelers(participant_id);
+    CREATE INDEX IF NOT EXISTS idx_booking_transactions_booking ON booking_transactions(booking_id);
+    CREATE INDEX IF NOT EXISTS idx_flight_traveler_seats_leg ON flight_traveler_seats(leg_id);
   `
 };
 
