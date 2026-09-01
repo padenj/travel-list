@@ -145,3 +145,58 @@ export interface FlightAutofillDetails {
   statusText?: string;
   sourceUrl: string;
 }
+
+export interface Booking {
+  id: string;
+  tripId: string;
+  confirmationNumber: string | null;
+  advertisedPriceCash: number | null;
+  advertisedPricePoints: number | null;
+  loyaltyProgram: string | null;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+  elementIds: string[];
+  travelerIds: string[];
+  currentConfirmationNumber: string | null;
+  actualTotalCash: number;
+  actualTotalPoints: number;
+}
+
+export interface CreateBookingPayload {
+  confirmationNumber?: string;
+  advertisedPriceCash?: number;
+  advertisedPricePoints?: number;
+  loyaltyProgram?: string;
+  notes?: string;
+  elementIds: string[];
+  travelerIds: string[];
+}
+
+export interface BookingTransaction {
+  id: string;
+  bookingId: string;
+  amountCash: number;
+  amountPoints: number;
+  transactionDate: string;
+  confirmationNumber: string | null;
+  notes: string | null;
+  createdAt: string;
+}
+
+export interface AddBookingTransactionPayload {
+  amountCash?: number;
+  amountPoints?: number;
+  transactionDate?: string;
+  confirmationNumber?: string;
+  notes?: string;
+}
+
+export interface FlightTravelerSeat {
+  id: string;
+  legId: string;
+  participantId: string;
+  seatNumber: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
