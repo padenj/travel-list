@@ -38,6 +38,33 @@ describe('FlightLegsEditor', () => {
     expect(last[0]).toMatchObject({ departureAirport: 'DEN', departureDatetime: '2026-11-10T08:00' });
   });
 
+  it('rewrites departure and arrival dates when the flight date changes', () => {
+    const spy = vi.fn();
+    render(
+      <Harness
+        spy={spy}
+        initial={[
+          { ...emptyLegDraft('2026-11-10'), departureAirport: 'DEN', arrivalAirport: 'LHR', departureDatetime: '2026-11-10T23:00', arrivalDatetime: '2026-11-11T05:00' },
+        ]}
+      />
+    );
+    fireEvent.change(screen.getByLabelText(/flight date/i), { target: { value: '2026-12-01' } });
+    const last = spy.mock.calls[spy.mock.calls.length - 1][0] as FlightLegDraft[];
+    expect(last[0]).toMatchObject({
+      flightDate: '2026-12-01',
+      departureDatetime: '2026-12-01T23:00',
+      arrivalDatetime: '2026-12-02T05:00',
+    });
+  });
+
+  it('leaves empty datetimes empty when the flight date changes', () => {
+    const spy = vi.fn();
+    render(<Harness spy={spy} />);
+    fireEvent.change(screen.getByLabelText(/flight date/i), { target: { value: '2026-12-01' } });
+    const last = spy.mock.calls[spy.mock.calls.length - 1][0] as FlightLegDraft[];
+    expect(last[0]).toMatchObject({ flightDate: '2026-12-01', departureDatetime: '', arrivalDatetime: '' });
+  });
+
   it('adds a connecting flight, shows the layover, and removes legs', () => {
     render(
       <Harness

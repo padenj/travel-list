@@ -15,6 +15,30 @@ interface FlightLegsEditorProps {
   idPrefix?: string;
 }
 
+function shiftDate(date: string, days: number): string {
+  const d = new Date(`${date}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+// Moves the departure/arrival dates to the new flight date, keeping times and the arrival day offset.
+function changeFlightDate(leg: FlightLegDraft, newDate: string): Partial<FlightLegDraft> {
+  const patch: Partial<FlightLegDraft> = { flightDate: newDate };
+  const depDate = leg.departureDatetime.slice(0, 10);
+  if (!newDate || !/^\d{4}-\d{2}-\d{2}$/.test(newDate)) return patch;
+  if (leg.departureDatetime) {
+    patch.departureDatetime = `${newDate}${leg.departureDatetime.slice(10)}`;
+  }
+  if (leg.arrivalDatetime) {
+    const arrDate = leg.arrivalDatetime.slice(0, 10);
+    const offset = /^\d{4}-\d{2}-\d{2}$/.test(depDate) && /^\d{4}-\d{2}-\d{2}$/.test(arrDate)
+      ? Math.round((Date.parse(arrDate) - Date.parse(depDate)) / 86400000)
+      : 0;
+    patch.arrivalDatetime = `${shiftDate(newDate, offset)}${leg.arrivalDatetime.slice(10)}`;
+  }
+  return patch;
+}
+
 type LookupStatus = { kind: 'ok' | 'empty' | 'error'; text: string; url?: string };
 
 export function FlightLegsEditor({ tripId, legs, onChange, idPrefix = 'leg' }: FlightLegsEditorProps) {
@@ -94,7 +118,7 @@ export function FlightLegsEditor({ tripId, legs, onChange, idPrefix = 'leg' }: F
               <h5>Flight {index + 1}</h5>
               <div className="create-element-field">
                 <label htmlFor={id('date')}>Flight date</label>
-                <input id={id('date')} type="date" value={leg.flightDate} onChange={(e) => update(index, { flightDate: e.target.value })} />
+                <input id={id('date')} type="date" value={leg.flightDate} onChange={(e) => update(index, changeFlightDate(leg, e.target.value))} />
               </div>
               <div className="create-element-field">
                 <label htmlFor={id('airline')}>Airline code</label>

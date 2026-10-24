@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { getDb, closeDb } from '../db';
 import { TripElementRepository, TripElement, FlightLeg, HotelDetails, CarRentalDetails, ActivityDetails } from './tripElementRepository';
 import { v4 as uuidv4 } from 'uuid';
@@ -615,6 +615,56 @@ describe('TripElementRepository', () => {
       await expect(repo.syncLegs(element.id, [])).rejects.toThrow(/at least one leg/i);
       const hotel = await repo.createElement(tripId, { elementType: 'hotel', name: 'Hotel' });
       await expect(repo.syncLegs(hotel.id, [{ ...baseLeg }])).rejects.toThrow(/flight element/i);
+    });
+
+    it('rejects non-object legs and unparseable datetimes', async () => {
+      const element = await createFlight();
+      await expect(repo.syncLegs(element.id, [null as any])).rejects.toThrow(/object/i);
+      await expect(repo.syncLegs(element.id, [{ ...baseLeg, departureDatetime: 'nope' }])).rejects.toThrow(/valid/i);
+      await expect(repo.syncLegs(element.id, [{ ...baseLeg, arrivalDatetime: 'nope' }])).rejects.toThrow(/valid/i);
+    });
+
+    it('allows a leg whose local arrival is before its local departure', async () => {
+      const element = await createFlight();
+      const legs = await repo.syncLegs(element.id, [
+        { ...baseLeg, departureAirport: 'SJD', arrivalAirport: 'DEN', departureDatetime: '2026-11-10T14:00', arrivalDatetime: '2026-11-10T13:00' },
+      ]);
+      expect(legs).toHaveLength(1);
+    });
+
+    it('rejects a leg that departs before the previous leg arrives', async () => {
+      const element = await createFlight();
+      await expect(
+        repo.syncLegs(element.id, [
+          { ...baseLeg },
+          { ...baseLeg, departureAirport: 'DAL', arrivalAirport: 'SJD', departureDatetime: '2026-11-10T09:00', arrivalDatetime: '2026-11-10T12:00' },
+        ])
+      ).rejects.toThrow(/before the previous leg/i);
+    });
+
+    it('leaves existing legs intact when the payload fails', async () => {
+      const element = await createFlight();
+      const original = (element as any).legs;
+      await expect(
+        repo.syncLegs(element.id, [{ ...baseLeg, departureDatetime: 'bad' }])
+      ).rejects.toThrow();
+      const after = ((await repo.getElementById(element.id)) as any).legs;
+      expect(after.map((l: any) => l.id)).toEqual(original.map((l: any) => l.id));
+    });
+
+    it('rolls back deletes and updates when a write fails midway', async () => {
+      const element = await createFlight();
+      const original = (element as any).legs;
+      const db: any = await (repo as any).db;
+      const realRun = db.run.bind(db);
+      const spy = vi.spyOn(db, 'run').mockImplementation(async (sql: string, ...args: any[]) => {
+        if (/^\s*INSERT INTO flight_legs/i.test(sql)) throw new Error('boom');
+        return realRun(sql, ...args);
+      });
+      await expect(repo.syncLegs(element.id, [{ ...baseLeg }])).rejects.toThrow('boom');
+      spy.mockRestore();
+      const after = ((await repo.getElementById(element.id)) as any).legs;
+      expect(after.map((l: any) => l.id)).toEqual(original.map((l: any) => l.id));
     });
   });
 });

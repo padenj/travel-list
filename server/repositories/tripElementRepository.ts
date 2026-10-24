@@ -326,51 +326,70 @@ export class TripElementRepository {
 
     const existingIds = new Set<string>(((element as any).legs ?? []).map((l: FlightLeg) => l.id));
     for (const leg of legs) {
+      if (!leg || typeof leg !== 'object') {
+        throw new Error('Each leg must be an object');
+      }
       if (!leg.departureAirport?.trim() || !leg.arrivalAirport?.trim()) {
         throw new Error('Each leg needs departure and arrival airports');
       }
       if (!leg.departureDatetime || !leg.arrivalDatetime) {
         throw new Error('Each leg needs departure and arrival times');
       }
+      if (!Number.isFinite(toEpochMinutes(leg.departureDatetime)) || !Number.isFinite(toEpochMinutes(leg.arrivalDatetime))) {
+        throw new Error('Each leg needs valid departure and arrival times');
+      }
       if (leg.id && !existingIds.has(leg.id)) {
         throw new Error('Leg does not belong to this element');
       }
     }
 
-    const keepIds = new Set(legs.filter(l => l.id).map(l => l.id as string));
-    for (const id of existingIds) {
-      if (!keepIds.has(id)) {
-        await db.run('DELETE FROM flight_legs WHERE id = ?', [id]);
+    for (let i = 1; i < legs.length; i++) {
+      if (toEpochMinutes(legs[i].departureDatetime) < toEpochMinutes(legs[i - 1].arrivalDatetime)) {
+        throw new Error(`Leg ${i + 1} departs before the previous leg arrives`);
       }
     }
 
-    for (const [index, leg] of legs.entries()) {
-      const values = [
-        leg.departureAirport.trim().toUpperCase(),
-        leg.departureDatetime,
-        leg.arrivalAirport.trim().toUpperCase(),
-        leg.arrivalDatetime,
-        leg.airline?.trim() || null,
-        leg.flightNumber?.trim() || null,
-        leg.checkPriceUrl?.trim() || null,
-      ];
-      if (leg.id) {
-        await db.run(
-          `UPDATE flight_legs SET leg_order = ?, departure_airport = ?, departure_datetime = ?, arrival_airport = ?, arrival_datetime = ?,
-                  airline = ?, flight_number = ?, check_price_url = ?, updated_at = datetime('now') WHERE id = ?`,
-          [index + 1, ...values, leg.id]
-        );
-      } else {
-        await db.run(
-          `INSERT INTO flight_legs (id, element_id, leg_order, departure_airport, departure_datetime, arrival_airport, arrival_datetime,
-                                    airline, flight_number, check_price_url, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
-          [uuidv4(), elementId, index + 1, ...values]
-        );
+    await db.run('BEGIN TRANSACTION');
+    try {
+      const keepIds = new Set(legs.filter(l => l.id).map(l => l.id as string));
+      for (const id of existingIds) {
+        if (!keepIds.has(id)) {
+          await db.run('DELETE FROM flight_legs WHERE id = ?', [id]);
+        }
       }
-    }
 
-    await this.recomputeLayovers(elementId);
+      for (const [index, leg] of legs.entries()) {
+        const values = [
+          leg.departureAirport.trim().toUpperCase(),
+          leg.departureDatetime,
+          leg.arrivalAirport.trim().toUpperCase(),
+          leg.arrivalDatetime,
+          leg.airline?.trim() || null,
+          leg.flightNumber?.trim() || null,
+          leg.checkPriceUrl?.trim() || null,
+        ];
+        if (leg.id) {
+          await db.run(
+            `UPDATE flight_legs SET leg_order = ?, departure_airport = ?, departure_datetime = ?, arrival_airport = ?, arrival_datetime = ?,
+                    airline = ?, flight_number = ?, check_price_url = ?, updated_at = datetime('now') WHERE id = ?`,
+            [index + 1, ...values, leg.id]
+          );
+        } else {
+          await db.run(
+            `INSERT INTO flight_legs (id, element_id, leg_order, departure_airport, departure_datetime, arrival_airport, arrival_datetime,
+                                      airline, flight_number, check_price_url, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+            [uuidv4(), elementId, index + 1, ...values]
+          );
+        }
+      }
+
+      await this.recomputeLayovers(elementId);
+      await db.run('COMMIT');
+    } catch (error) {
+      try { await db.run('ROLLBACK'); } catch (e) {}
+      throw error;
+    }
     return (((await this.getElementById(elementId)) as any)?.legs ?? []) as FlightLeg[];
   }
 
