@@ -1,10 +1,13 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useId } from 'react';
 import { BookingTransaction } from '../types/trip';
 import { tripApi } from '../api/tripApi';
+import { formatMoney } from '../utils/money';
 
 interface BookingTransactionListProps {
   tripId: string;
   bookingId: string;
+  originalConfirmationNumber?: string | null;
+  refreshKey?: number;
   onChanged: () => void;
 }
 
@@ -14,15 +17,7 @@ function parseAmount(value: string): number | undefined {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
-function formatCashTotal(amount: number): string {
-  const sign = amount < 0 ? '-' : '';
-  const absolute = Math.abs(amount);
-  const dollars = Math.trunc(absolute);
-  const cents = Math.round((absolute - dollars) * 100);
-  return `${sign}$${dollars}${cents !== 0 ? ` (${cents.toString().padStart(2, '0')}¢)` : ''}`;
-}
-
-export function BookingTransactionList({ tripId, bookingId, onChanged }: BookingTransactionListProps) {
+export function BookingTransactionList({ tripId, bookingId, originalConfirmationNumber = null, refreshKey = 0, onChanged }: BookingTransactionListProps) {
   const [transactions, setTransactions] = useState<BookingTransaction[]>([]);
   const [amountCash, setAmountCash] = useState('');
   const [amountPoints, setAmountPoints] = useState('');
@@ -31,6 +26,7 @@ export function BookingTransactionList({ tripId, bookingId, onChanged }: Booking
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const uid = useId();
 
   const load = useCallback(async () => {
     const data = await tripApi.listBookingTransactions(tripId, bookingId);
@@ -39,7 +35,13 @@ export function BookingTransactionList({ tripId, bookingId, onChanged }: Booking
 
   useEffect(() => {
     load();
-  }, [load]);
+  }, [load, refreshKey]);
+
+  let carriedConfirmation = originalConfirmationNumber;
+  const rows = transactions.map(t => {
+    if (t.confirmationNumber) carriedConfirmation = t.confirmationNumber;
+    return { transaction: t, confirmation: carriedConfirmation };
+  });
 
   const runningTotalCash = transactions.reduce((sum, t) => sum + t.amountCash, 0);
   const runningTotalPoints = transactions.reduce((sum, t) => sum + t.amountPoints, 0);
@@ -86,41 +88,41 @@ export function BookingTransactionList({ tripId, bookingId, onChanged }: Booking
       <h4>Transactions</h4>
       {error && <p className="error">{error}</p>}
       <ul>
-        {transactions.map(t => (
+        {rows.map(({ transaction: t, confirmation }) => (
           <li key={t.id}>
             <span>{t.transactionDate}</span>{' '}
-            <span>{t.amountCash !== 0 ? `$${t.amountCash.toFixed(2)}` : ''}</span>{' '}
-            <span>{t.amountPoints !== 0 ? `${t.amountPoints} pts` : ''}</span>{' '}
-            {t.confirmationNumber && <span>Conf: {t.confirmationNumber}</span>}{' '}
-            {t.notes && <span className="element-notes">{t.notes}</span>}
-            <button type="button" onClick={() => removeTransaction(t.id)}>Remove</button>
+            {t.amountCash !== 0 && <span>{formatMoney(t.amountCash)}</span>}{' '}
+            {t.amountPoints !== 0 && <span>{`${t.amountPoints} pts`}</span>}{' '}
+            {confirmation && <span>{`Conf: ${confirmation}`}</span>}{' '}
+            <button type="button" className="view-toggle-btn" onClick={() => removeTransaction(t.id)}>Remove</button>
+            {t.notes && <div className="txn-notes">{t.notes}</div>}
           </li>
         ))}
       </ul>
       <p className="booking-transaction-total">
-        Total paid: {formatCashTotal(runningTotalCash)}{runningTotalPoints !== 0 ? ` + ${runningTotalPoints} pts` : ''}
+        Total paid: {formatMoney(runningTotalCash)}{runningTotalPoints !== 0 ? ` + ${runningTotalPoints} pts` : ''}
       </p>
       <div className="create-element-field">
-        <label htmlFor={`txn-cash-${bookingId}`}>Amount (cash)</label>
-        <input id={`txn-cash-${bookingId}`} type="number" step="0.01" value={amountCash} onChange={(e) => setAmountCash(e.target.value)} />
+        <label htmlFor={`${uid}-cash`}>Amount (cash)</label>
+        <input id={`${uid}-cash`} type="number" step="0.01" value={amountCash} onChange={(e) => setAmountCash(e.target.value)} />
       </div>
       <div className="create-element-field">
-        <label htmlFor={`txn-points-${bookingId}`}>Amount (points)</label>
-        <input id={`txn-points-${bookingId}`} type="number" step="1" value={amountPoints} onChange={(e) => setAmountPoints(e.target.value)} />
+        <label htmlFor={`${uid}-points`}>Amount (points)</label>
+        <input id={`${uid}-points`} type="number" step="1" value={amountPoints} onChange={(e) => setAmountPoints(e.target.value)} />
       </div>
       <div className="create-element-field">
-        <label htmlFor={`txn-date-${bookingId}`}>Date</label>
-        <input id={`txn-date-${bookingId}`} type="date" value={transactionDate} onChange={(e) => setTransactionDate(e.target.value)} />
+        <label htmlFor={`${uid}-date`}>Date</label>
+        <input id={`${uid}-date`} type="date" value={transactionDate} onChange={(e) => setTransactionDate(e.target.value)} />
       </div>
       <div className="create-element-field">
-        <label htmlFor={`txn-conf-${bookingId}`}>New confirmation number</label>
-        <input id={`txn-conf-${bookingId}`} type="text" value={confirmationNumber} onChange={(e) => setConfirmationNumber(e.target.value)} placeholder="Optional, e.g. for rebooking" />
+        <label htmlFor={`${uid}-conf`}>New confirmation number</label>
+        <input id={`${uid}-conf`} type="text" value={confirmationNumber} onChange={(e) => setConfirmationNumber(e.target.value)} placeholder="Optional, e.g. for rebooking" />
       </div>
       <div className="create-element-field">
-        <label htmlFor={`txn-notes-${bookingId}`}>Notes</label>
-        <input id={`txn-notes-${bookingId}`} type="text" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Optional, e.g. fee/tax breakdown" />
+        <label htmlFor={`${uid}-notes`}>Notes</label>
+        <textarea id={`${uid}-notes`} rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Optional, e.g. paste the fee/tax breakdown" />
       </div>
-      <button type="button" onClick={addTransaction} disabled={saving}>
+      <button type="button" className="view-toggle-btn" onClick={addTransaction} disabled={saving}>
         {saving ? 'Saving...' : 'Add Transaction'}
       </button>
     </div>

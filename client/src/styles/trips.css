@@ -424,3 +424,20 @@
     padding: 1rem;
   }
 }
+
+.txn-notes {
+  white-space: pre-wrap;
+  margin: 0.25rem 0 0.75rem;
+  color: var(--ctp-mocha-subtext);
+  font-size: 0.9rem;
+}
+
+.booking-transaction-list textarea {
+  width: 100%;
+  background-color: var(--ctp-mocha-base);
+  color: inherit;
+  border: 1px solid var(--ctp-mocha-surface1);
+  border-radius: 6px;
+  padding: 0.5rem;
+  font: inherit;
+}
