@@ -53,7 +53,15 @@ tripRouter.post('/', authMiddleware, async (req: Request, res: Response) => {
 
 // Get trip detail
 tripRouter.get('/:tripId', authMiddleware, tripAccessMiddleware, async (req: Request, res: Response) => {
-  res.json(req.trip);
+  try {
+    const trip = await tripRepository.getTripById(req.trip!.id);
+    if (!trip) {
+      return res.status(404).json({ error: 'Trip not found' });
+    }
+    res.json(trip);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch trip' });
+  }
 });
 
 // Update trip

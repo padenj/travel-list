@@ -283,9 +283,11 @@ export function TripDetailPage() {
         {trip.description && <p className="trip-description">{trip.description}</p>}
         <div className="trip-metadata">
           {trip.tripType && <span className="trip-type">{trip.tripType}</span>}
-          <span className="trip-dates">
-            {trip.startDate} to {trip.endDate}
-          </span>
+          {trip.startDate && trip.endDate && (
+            <span className="trip-dates">
+              {trip.startDate} to {trip.endDate}
+            </span>
+          )}
         </div>
         <button
           className="create-trip-btn"
