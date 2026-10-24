@@ -168,6 +168,24 @@ tripRouter.put('/:tripId/elements/:elementId', authMiddleware, tripAccessMiddlew
   }
 });
 
+// Replace/update the legs of a flight element (update by id, insert new, delete missing)
+tripRouter.put('/:tripId/elements/:elementId/legs', authMiddleware, tripAccessMiddleware, async (req: Request, res: Response) => {
+  try {
+    const element = await tripElementRepository.getElementById(req.params.elementId);
+    if (!element || element.tripId !== req.trip!.id || element.elementType !== 'flight') {
+      return res.status(404).json({ error: 'Flight element not found' });
+    }
+    const legs = req.body?.legs;
+    if (!Array.isArray(legs)) {
+      return res.status(400).json({ error: 'legs array is required' });
+    }
+    const saved = await tripElementRepository.syncLegs(req.params.elementId, legs);
+    res.json(saved);
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : 'Failed to save legs' });
+  }
+});
+
 // Delete element
 tripRouter.delete('/:tripId/elements/:elementId', authMiddleware, tripAccessMiddleware, async (req: Request, res: Response) => {
   try {

@@ -1,6 +1,7 @@
 import {
   Trip, TripElement, TripElementConfirmation, TripAttachment, FlightAutofillLookupInput, FlightAutofillDetails,
   TripParticipant, Booking, CreateBookingPayload, BookingTransaction, AddBookingTransactionPayload, FlightTravelerSeat,
+  FlightLeg, FlightLegPayload,
 } from '../types/trip';
 import { getAuthToken } from '../api';
 
@@ -87,6 +88,15 @@ export const tripApi = {
       method: 'PUT',
       headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(updates),
+    });
+    return handleResponse(response);
+  },
+
+  syncLegs: async (tripId: string, elementId: string, legs: FlightLegPayload[]): Promise<FlightLeg[]> => {
+    const response = await fetch(`${API_BASE}/${tripId}/elements/${elementId}/legs`, {
+      method: 'PUT',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ legs }),
     });
     return handleResponse(response);
   },

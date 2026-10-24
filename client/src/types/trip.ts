@@ -200,3 +200,15 @@ export interface FlightTravelerSeat {
   createdAt: string;
   updatedAt: string;
 }
+
+export interface FlightLegPayload {
+  id?: string;
+  legOrder?: number;
+  departureAirport: string;
+  departureDatetime: string;
+  arrivalAirport: string;
+  arrivalDatetime: string;
+  airline?: string;
+  flightNumber?: string;
+  checkPriceUrl?: string;
+}

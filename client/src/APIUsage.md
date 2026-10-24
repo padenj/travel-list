@@ -96,7 +96,7 @@ Keep this checklist updated as you complete migration verification and removal s
   - client/src/components/ItemEditDrawer.tsx
 
 ### Trip tracking (`client/src/api/tripApi.ts`)
-- `getTrips`, `getTrip`, `createTrip`, `updateTrip`, `deleteTrip`, `listElements`, `getElement`, `createElement`, `updateElement`, `deleteElement`, `lookupFlightAutofill`, `addConfirmation`, `listConfirmations`, `updateConfirmation`, `deleteConfirmation`:
+- `getTrips`, `getTrip`, `createTrip`, `updateTrip`, `deleteTrip`, `listElements`, `getElement`, `createElement`, `updateElement`, `syncLegs`, `deleteElement`, `lookupFlightAutofill`, `addConfirmation`, `listConfirmations`, `updateConfirmation`, `deleteConfirmation`:
   - client/src/pages/TripsPage.tsx
   - client/src/pages/TripDetailPage.tsx
 - `listParticipants`, `createParticipant`, `updateParticipant`, `deleteParticipant`:
