@@ -78,6 +78,10 @@ function extractNextDataJson(html: string): Record<string, unknown> {
   return JSON.parse(html.slice(start, end));
 }
 
+function toLocalMinute(value: unknown): string | undefined {
+  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(value) ? value.slice(0, 16) : undefined;
+}
+
 export function parseFlightStatsAutofillFromHtml(
   html: string,
   context: FlightAutofillLookupInput & { sourceUrl: string }
@@ -90,10 +94,15 @@ export function parseFlightStatsAutofillFromHtml(
 
   const departureAirport = flight?.departureAirport?.iata || flight?.departureAirport?.fs;
   const arrivalAirport = flight?.arrivalAirport?.iata || flight?.arrivalAirport?.fs;
+  const schedule = flight?.schedule;
   const departureDatetime =
-    flight?.schedule?.estimatedActualDepartureUTC || flight?.schedule?.scheduledDepartureUTC;
+    toLocalMinute(schedule?.scheduledDeparture) ||
+    schedule?.scheduledDepartureUTC ||
+    schedule?.estimatedActualDepartureUTC;
   const arrivalDatetime =
-    flight?.schedule?.estimatedActualArrivalUTC || flight?.schedule?.scheduledArrivalUTC;
+    toLocalMinute(schedule?.scheduledArrival) ||
+    schedule?.scheduledArrivalUTC ||
+    schedule?.estimatedActualArrivalUTC;
   const statusText =
     flight?.status?.statusDescription || flight?.status?.status || flight?.flightNote?.message;
 

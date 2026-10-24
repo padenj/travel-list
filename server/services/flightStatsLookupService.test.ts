@@ -53,4 +53,13 @@ describe('flightStatsLookupService', () => {
     expect(details.departureAirport).toBe('DEN');
     expect(details.arrivalAirport).toBe('SJD');
   });
+
+  it('prefers scheduled local times over UTC and actual times', () => {
+    const html = `<script>__NEXT_DATA__ = {"props":{"initialState":{"flightTracker":{"flight":{"schedule":{"scheduledDeparture":"2026-10-24T09:00:00.000","scheduledDepartureUTC":"2026-10-24T15:00:00.000Z","estimatedActualDeparture":"2026-10-24T08:53:00.000","estimatedActualDepartureUTC":"2026-10-24T14:53:00.000Z","scheduledArrival":"2026-10-24T11:00:00.000","scheduledArrivalUTC":"2026-10-24T18:00:00.000Z"},"departureAirport":{"iata":"DEN"},"arrivalAirport":{"iata":"SJD"},"status":{"status":"S"}}}}}}</script>`;
+    const details = parseFlightStatsAutofillFromHtml(html, {
+      airlineCode: 'WN', flightNumber: '722', flightDate: '2026-10-24', sourceUrl: 'https://example.com',
+    });
+    expect(details.departureDatetime).toBe('2026-10-24T09:00');
+    expect(details.arrivalDatetime).toBe('2026-10-24T11:00');
+  });
 });
