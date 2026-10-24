@@ -10,6 +10,7 @@ interface FlightSeatGridProps {
 
 export function FlightSeatGrid({ tripId, legId, travelers }: FlightSeatGridProps) {
   const [seatByParticipant, setSeatByParticipant] = useState<Record<string, string>>({});
+  const [feedback, setFeedback] = useState<Record<string, string>>({});
 
   const load = useCallback(async () => {
     const seats = await tripApi.listSeatsForLeg(tripId, legId);
@@ -26,15 +27,21 @@ export function FlightSeatGrid({ tripId, legId, travelers }: FlightSeatGridProps
 
   const handleChange = (participantId: string, value: string) => {
     setSeatByParticipant(prev => ({ ...prev, [participantId]: value }));
+    setFeedback(prev => ({ ...prev, [participantId]: '' }));
   };
 
   const handleBlur = async (participantId: string) => {
-    const seatNumber = seatByParticipant[participantId];
-    if (!seatNumber || !seatNumber.trim()) {
-      await tripApi.removeSeat(tripId, legId, participantId);
-      return;
+    const seatNumber = (seatByParticipant[participantId] || '').trim();
+    try {
+      if (!seatNumber) {
+        await tripApi.removeSeat(tripId, legId, participantId);
+      } else {
+        await tripApi.assignSeat(tripId, legId, participantId, seatNumber);
+      }
+      setFeedback(prev => ({ ...prev, [participantId]: 'Saved' }));
+    } catch (err) {
+      setFeedback(prev => ({ ...prev, [participantId]: err instanceof Error ? err.message : 'Failed to save seat' }));
     }
-    await tripApi.assignSeat(tripId, legId, participantId, seatNumber.trim());
   };
 
   if (travelers.length === 0) {
@@ -54,6 +61,7 @@ export function FlightSeatGrid({ tripId, legId, travelers }: FlightSeatGridProps
             onBlur={() => handleBlur(traveler.id)}
             placeholder="e.g. 14C"
           />
+          {feedback[traveler.id] && <span className="seat-feedback">{feedback[traveler.id]}</span>}
         </div>
       ))}
     </div>

@@ -41,4 +41,18 @@ describe('FlightSeatGrid', () => {
     fireEvent.blur(input);
     await waitFor(() => expect(tripApi.assignSeat).toHaveBeenCalledWith('trip-1', 'leg-1', 'p1', '14C'));
   });
+
+  it('confirms a saved seat and surfaces save errors', async () => {
+    (tripApi.assignSeat as any).mockResolvedValue({});
+    render(<FlightSeatGrid tripId="trip-1" legId="leg-1" travelers={travelers} />);
+    const input = await screen.findByLabelText(/alice seat/i);
+    fireEvent.change(input, { target: { value: '14C' } });
+    fireEvent.blur(input);
+    expect(await screen.findByText(/saved/i)).toBeTruthy();
+
+    (tripApi.assignSeat as any).mockRejectedValue(new Error('nope'));
+    fireEvent.change(input, { target: { value: '15A' } });
+    fireEvent.blur(input);
+    expect(await screen.findByText(/nope/)).toBeTruthy();
+  });
 });
