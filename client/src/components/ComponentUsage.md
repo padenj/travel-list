@@ -146,6 +146,12 @@ Displays existing bookings (confirmation number, per-person advertised price, ac
 
 Lists/add/removes transactions for a single booking with a running total; supports recording price-drop rebookings (negative amount + new confirmation number) and free-text fee/tax breakdown notes.
 
+### FlightLegsEditor
+**Used in:**
+  - `pages/TripDetailPage.tsx` (create and edit flight forms)
+
+Controlled editor for an array of flight-leg drafts: manual airports/times, add/remove connecting legs, layover display, and FlightStats lookup with empty/error feedback.
+
 ### FlightSeatGrid
 **Used in:**
   - `pages/TripDetailPage.tsx` (once per flight leg)
