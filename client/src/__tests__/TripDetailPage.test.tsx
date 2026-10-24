@@ -13,6 +13,7 @@ vi.mock('../api/tripApi', () => ({
     createElement: vi.fn(),
     updateElement: vi.fn(),
     lookupFlightAutofill: vi.fn(),
+    syncLegs: vi.fn(),
     listBookings: vi.fn(),
     createBooking: vi.fn(),
     listBookingTransactions: vi.fn(),
@@ -176,8 +177,8 @@ describe('TripDetailPage', () => {
             legs: [
               expect.objectContaining({
                 flightNumber: 'WN123',
-                departureDatetime: '2026-09-12T00:00:00Z',
-                arrivalDatetime: '2026-09-12T00:00:00Z',
+                departureDatetime: '2026-09-12T00:00',
+                arrivalDatetime: '2026-09-12T00:00',
               }),
             ],
           }),
@@ -205,14 +206,14 @@ describe('TripDetailPage', () => {
     fireEvent.change(screen.getByLabelText(/flight date/i), { target: { value: '2026-08-29' } });
     fireEvent.change(screen.getByLabelText(/airline code/i), { target: { value: 'WN' } });
     fireEvent.change(screen.getByLabelText(/flight number/i), { target: { value: '722' } });
-    fireEvent.click(screen.getByRole('button', { name: /auto-fill flight details/i }));
+    fireEvent.click(screen.getByRole('button', { name: /look up flight details/i }));
 
     await waitFor(() => {
       expect((screen.getByLabelText(/name/i) as HTMLInputElement).value).toBe('DEN → SJD');
     });
 
     fireEvent.change(screen.getByLabelText(/name/i), { target: { value: 'Custom name' } });
-    fireEvent.click(screen.getByRole('button', { name: /auto-fill flight details/i }));
+    fireEvent.click(screen.getByRole('button', { name: /look up flight details/i }));
 
     await waitFor(() => {
       expect((screen.getByLabelText(/name/i) as HTMLInputElement).value).toBe('Custom name');
@@ -290,7 +291,7 @@ describe('TripDetailPage', () => {
     fireEvent.change(screen.getByLabelText(/flight date/i), { target: { value: '2026-08-29' } });
     fireEvent.change(screen.getByLabelText(/airline code/i), { target: { value: 'WN' } });
     fireEvent.change(screen.getByLabelText(/flight number/i), { target: { value: '722' } });
-    fireEvent.click(screen.getByRole('button', { name: /auto-fill flight details/i }));
+    fireEvent.click(screen.getByRole('button', { name: /look up flight details/i }));
 
     await waitFor(() => {
       expect(tripApi.lookupFlightAutofill).toHaveBeenCalledWith('trip-1', {
@@ -311,13 +312,77 @@ describe('TripDetailPage', () => {
               expect.objectContaining({
                 departureAirport: 'DEN',
                 arrivalAirport: 'SJD',
-                departureDatetime: '2026-08-29T15:10:00.000Z',
-                arrivalDatetime: '2026-08-29T18:05:00.000Z',
+                departureDatetime: '2026-08-29T15:10',
+                arrivalDatetime: '2026-08-29T18:05',
               }),
             ],
           }),
         })
       );
     });
+  });
+  it('creates a two-leg flight with a connection', async () => {
+    (tripApi.createElement as any).mockResolvedValue({ id: 'el-5', tripId: 'trip-1', elementType: 'flight', name: 'DEN → DAL → SJD', sortPosition: 0, createdAt: '', updatedAt: '' });
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: /add element/i }));
+    fireEvent.change(screen.getByLabelText(/from \(airport/i), { target: { value: 'DEN' } });
+    fireEvent.change(screen.getByLabelText(/to \(airport/i), { target: { value: 'DAL' } });
+    fireEvent.change(screen.getByLabelText(/flight date/i), { target: { value: '2026-11-10' } });
+    fireEvent.click(screen.getByRole('button', { name: /add connecting flight/i }));
+    const froms = screen.getAllByLabelText(/from \(airport/i);
+    const tos = screen.getAllByLabelText(/to \(airport/i);
+    fireEvent.change(froms[1], { target: { value: 'DAL' } });
+    fireEvent.change(tos[1], { target: { value: 'SJD' } });
+
+    await waitFor(() => expect((screen.getByLabelText(/^name$/i) as HTMLInputElement).value).toBe('DEN → DAL → SJD'));
+    fireEvent.click(screen.getByRole('button', { name: /save element/i }));
+
+    await waitFor(() => {
+      expect(tripApi.createElement).toHaveBeenCalledWith('trip-1', expect.objectContaining({
+        typeSpecificData: expect.objectContaining({
+          legs: [
+            expect.objectContaining({ legOrder: 1, departureAirport: 'DEN', arrivalAirport: 'DAL' }),
+            expect.objectContaining({ legOrder: 2, departureAirport: 'DAL', arrivalAirport: 'SJD' }),
+          ],
+        }),
+      }));
+    });
+  });
+
+  it('lists every leg of a flight with its layover and edits legs through syncLegs', async () => {
+    (tripApi.listElements as any).mockResolvedValue([
+      {
+        id: 'el-7', tripId: 'trip-1', elementType: 'flight', name: 'DEN → DAL → SJD', sortPosition: 0, createdAt: '', updatedAt: '',
+        legs: [
+          { id: 'leg-1', elementId: 'el-7', legOrder: 1, departureAirport: 'DEN', departureDatetime: '2026-11-10T08:00', arrivalAirport: 'DAL', arrivalDatetime: '2026-11-10T10:00', airline: 'WN', flightNumber: '100', layoverMinutesAfter: 135, createdAt: '', updatedAt: '' },
+          { id: 'leg-2', elementId: 'el-7', legOrder: 2, departureAirport: 'DAL', departureDatetime: '2026-11-10T12:15', arrivalAirport: 'SJD', arrivalDatetime: '2026-11-10T14:00', airline: 'WN', flightNumber: '200', createdAt: '', updatedAt: '' },
+        ],
+      },
+    ]);
+    (tripApi.updateElement as any).mockResolvedValue({});
+    (tripApi.syncLegs as any).mockResolvedValue([]);
+
+    renderPage();
+
+    expect(await screen.findByText(/DEN → DAL/, { selector: '.flight-leg-summary strong' })).toBeTruthy();
+    expect(screen.getByText(/layover.*2h 15m/i)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: /view\/edit/i }));
+    fireEvent.change(screen.getAllByLabelText(/flight number/i)[1], { target: { value: '201' } });
+    fireEvent.click(screen.getByRole('button', { name: /save changes/i }));
+
+    await waitFor(() => {
+      expect(tripApi.syncLegs).toHaveBeenCalledWith('trip-1', 'el-7', [
+        expect.objectContaining({ id: 'leg-1', flightNumber: '100' }),
+        expect.objectContaining({ id: 'leg-2', flightNumber: '201', departureAirport: 'DAL', arrivalAirport: 'SJD' }),
+      ]);
+    });
+  });
+
+  it('hides the date range when a trip has no dates', async () => {
+    (tripApi.getTrip as any).mockResolvedValue({ id: 'trip-1', familyId: 'fam-1', name: 'Cabo', createdAt: '', updatedAt: '' });
+    renderPage();
+    await screen.findByRole('button', { name: /add element/i });
+    expect(screen.queryByText(/ to /)).toBeNull();
   });
 });

@@ -469,3 +469,11 @@
   color: var(--ctp-mocha-subtext);
   font-size: 0.9rem;
 }
+
+.element-flight-legs {
+  margin: 0.5rem 0;
+}
+
+.flight-leg-summary {
+  margin: 0.25rem 0;
+}

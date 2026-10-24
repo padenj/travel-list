@@ -1,23 +1,17 @@
 import { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
-import { Trip, TripElement, TripParticipant } from '../types/trip';
+import { Trip, TripElement, TripParticipant, FlightLegPayload } from '../types/trip';
 import { tripApi } from '../api/tripApi';
 import { TripParticipantsPanel } from '../components/TripParticipantsPanel';
 import { BookingCard } from '../components/BookingCard';
 import { FlightSeatGrid } from '../components/FlightSeatGrid';
+import { FlightLegsEditor } from '../components/FlightLegsEditor';
+import { FlightLegDraft, buildFlightName, draftHasDate, draftToPayload, emptyLegDraft, formatLayover, formatLegTime, legToDraft } from '../utils/flightLegs';
 import '../styles/trips.css';
 
 type TripElementPayload = Partial<TripElement> & {
   typeSpecificData?: {
-    legs?: Array<{
-      legOrder: number;
-      departureAirport?: string;
-      departureDatetime?: string;
-      arrivalAirport?: string;
-      arrivalDatetime?: string;
-      flightNumber?: string;
-      airline?: string;
-    }>;
+    legs?: FlightLegPayload[];
   };
 };
 
@@ -25,16 +19,6 @@ function parseNumberInput(value: string): number | undefined {
   if (!value.trim()) return undefined;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : undefined;
-}
-
-function isoDateAtMidnight(date: string): string {
-  return `${date}T00:00:00Z`;
-}
-
-function displayDateOnly(value?: string): string | null {
-  if (!value) return null;
-  const [datePart] = value.split('T');
-  return datePart || null;
 }
 
 export function TripDetailPage() {
@@ -49,15 +33,8 @@ export function TripDetailPage() {
   const [newBookingReference, setNewBookingReference] = useState('');
   const [newPriceCash, setNewPriceCash] = useState('');
   const [newPricePoints, setNewPricePoints] = useState('');
-  const [newFlightDate, setNewFlightDate] = useState('');
-  const [newFlightAirlineCode, setNewFlightAirlineCode] = useState('');
-  const [newFlightNumber, setNewFlightNumber] = useState('');
-  const [newFlightDepartureAirport, setNewFlightDepartureAirport] = useState('');
-  const [newFlightArrivalAirport, setNewFlightArrivalAirport] = useState('');
-  const [newFlightDepartureDatetime, setNewFlightDepartureDatetime] = useState('');
-  const [newFlightArrivalDatetime, setNewFlightArrivalDatetime] = useState('');
-  const [flightAutofillStatus, setFlightAutofillStatus] = useState('');
-  const [flightAutofillLoading, setFlightAutofillLoading] = useState(false);
+  const [newLegs, setNewLegs] = useState<FlightLegDraft[]>([emptyLegDraft()]);
+  const [editingLegs, setEditingLegs] = useState<FlightLegDraft[]>([]);
   const [nameManuallyEdited, setNameManuallyEdited] = useState(false);
   const [participants, setParticipants] = useState<TripParticipant[]>([]);
   const [bookingsVersion, setBookingsVersion] = useState(0);
@@ -104,12 +81,9 @@ export function TripDetailPage() {
 
   useEffect(() => {
     if (newElementType !== 'flight' || nameManuallyEdited) return;
-    const dep = newFlightDepartureAirport.trim();
-    const arr = newFlightArrivalAirport.trim();
-    if (dep && arr) {
-      setNewElementName(`${dep} → ${arr}`);
-    }
-  }, [newElementType, newFlightDepartureAirport, newFlightArrivalAirport, nameManuallyEdited]);
+    const generated = buildFlightName(newLegs);
+    if (generated) setNewElementName(generated);
+  }, [newElementType, newLegs, nameManuallyEdited]);
 
   const createElement = async () => {
     if (!tripId) return;
@@ -117,8 +91,8 @@ export function TripDetailPage() {
       setError('Element name is required');
       return;
     }
-    if (newElementType === 'flight' && !newFlightDate.trim()) {
-      setError('Flight date is required for flights');
+    if (newElementType === 'flight' && !newLegs.every(draftHasDate)) {
+      setError('Each flight needs a flight date or departure time');
       return;
     }
 
@@ -140,17 +114,7 @@ export function TripDetailPage() {
 
       if (newElementType === 'flight') {
         payload.typeSpecificData = {
-          legs: [
-            {
-              legOrder: 1,
-              departureAirport: newFlightDepartureAirport.trim() || 'TBD',
-              arrivalAirport: newFlightArrivalAirport.trim() || 'TBD',
-              departureDatetime: newFlightDepartureDatetime || isoDateAtMidnight(newFlightDate.trim()),
-              arrivalDatetime: newFlightArrivalDatetime || isoDateAtMidnight(newFlightDate.trim()),
-              airline: newFlightAirlineCode.trim().toUpperCase() || undefined,
-              flightNumber: newFlightNumber.trim() || undefined,
-            },
-          ],
+          legs: newLegs.map((draft, index) => ({ ...draftToPayload(draft), legOrder: index + 1 })),
         };
       }
 
@@ -160,14 +124,7 @@ export function TripDetailPage() {
       setNewBookingReference('');
       setNewPriceCash('');
       setNewPricePoints('');
-      setNewFlightDate('');
-      setNewFlightAirlineCode('');
-      setNewFlightNumber('');
-      setNewFlightDepartureAirport('');
-      setNewFlightArrivalAirport('');
-      setNewFlightDepartureDatetime('');
-      setNewFlightArrivalDatetime('');
-      setFlightAutofillStatus('');
+      setNewLegs([emptyLegDraft()]);
       setNameManuallyEdited(false);
       setNewElementType('flight');
       setShowAddElementForm(false);
@@ -179,37 +136,6 @@ export function TripDetailPage() {
     }
   };
 
-  const autoFillFlightDetails = async () => {
-    if (!tripId) return;
-    if (!newFlightDate.trim() || !newFlightAirlineCode.trim() || !newFlightNumber.trim()) {
-      setError('Flight date, airline code, and flight number are required to auto-fill');
-      return;
-    }
-
-    try {
-      setFlightAutofillLoading(true);
-      setError(null);
-      const details = await tripApi.lookupFlightAutofill(tripId, {
-        airlineCode: newFlightAirlineCode.trim().toUpperCase(),
-        flightNumber: newFlightNumber.trim(),
-        flightDate: newFlightDate.trim(),
-      });
-
-      setNewFlightAirlineCode(details.airlineCode);
-      setNewFlightNumber(details.flightNumber);
-      setNewFlightDate(details.flightDate);
-      setNewFlightDepartureAirport(details.departureAirport || '');
-      setNewFlightArrivalAirport(details.arrivalAirport || '');
-      setNewFlightDepartureDatetime(details.departureDatetime || '');
-      setNewFlightArrivalDatetime(details.arrivalDatetime || '');
-      setFlightAutofillStatus(details.statusText || '');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to auto-fill flight details');
-    } finally {
-      setFlightAutofillLoading(false);
-    }
-  };
-
   const startEditingElement = (element: TripElement) => {
     setEditingElementId(element.id);
     setEditingName(element.name);
@@ -217,6 +143,7 @@ export function TripDetailPage() {
     setEditingBookingReference(element.bookingReference || '');
     setEditingPriceCash(element.priceCash !== undefined && element.priceCash !== null ? String(element.priceCash) : '');
     setEditingPricePoints(element.pricePoints !== undefined && element.pricePoints !== null ? String(element.pricePoints) : '');
+    setEditingLegs(element.elementType === 'flight' && element.legs?.length ? element.legs.map(legToDraft) : [emptyLegDraft()]);
   };
 
   const cancelEditingElement = () => {
@@ -226,12 +153,17 @@ export function TripDetailPage() {
     setEditingBookingReference('');
     setEditingPriceCash('');
     setEditingPricePoints('');
+    setEditingLegs([]);
   };
 
   const saveElementEdits = async (elementId: string) => {
     if (!tripId) return;
     if (!editingName.trim()) {
       setError('Element name is required');
+      return;
+    }
+    if (elements.find(e => e.id === elementId)?.elementType === 'flight' && !editingLegs.every(draftHasDate)) {
+      setError('Each flight needs a flight date or departure time');
       return;
     }
 
@@ -249,6 +181,9 @@ export function TripDetailPage() {
         payload.pricePoints = parseNumberInput(editingPricePoints);
       }
       await tripApi.updateElement(tripId, elementId, payload);
+      if (editingElement?.elementType === 'flight') {
+        await tripApi.syncLegs(tripId, elementId, editingLegs.map(draftToPayload));
+      }
       cancelEditingElement();
       await loadTripData(tripId);
     } catch (err) {
@@ -271,11 +206,15 @@ export function TripDetailPage() {
   }
 
   // Group elements by type
+  const firstDeparture = (el: TripElement) => el.legs?.[0]?.departureDatetime ?? '';
   const groupedByType = elements.reduce((acc, el) => {
     if (!acc[el.elementType]) acc[el.elementType] = [];
     acc[el.elementType].push(el);
     return acc;
   }, {} as Record<string, TripElement[]>);
+  if (groupedByType.flight) {
+    groupedByType.flight.sort((a, b) => firstDeparture(a).localeCompare(firstDeparture(b)));
+  }
 
   const typeLabels: Record<string, string> = {
     flight: 'Flights',
@@ -392,57 +331,10 @@ export function TripDetailPage() {
           )}
           {newElementType === 'flight' && (
             <>
-              <div className="create-element-field">
-                <label htmlFor="flight-date">Flight date</label>
-                <input
-                  id="flight-date"
-                  type="date"
-                  value={newFlightDate}
-                  onChange={(e) => setNewFlightDate(e.target.value)}
-                />
-              </div>
-              <div className="create-element-field">
-                <label htmlFor="flight-airline-code">Airline code</label>
-                <input
-                  id="flight-airline-code"
-                  type="text"
-                  value={newFlightAirlineCode}
-                  onChange={(e) => setNewFlightAirlineCode(e.target.value.toUpperCase())}
-                  placeholder="e.g. WN"
-                />
-              </div>
-              <div className="create-element-field">
-                <label htmlFor="flight-number">Flight number</label>
-                <input
-                  id="flight-number"
-                  type="text"
-                  value={newFlightNumber}
-                  onChange={(e) => setNewFlightNumber(e.target.value)}
-                  placeholder="e.g. WN123"
-                />
-              </div>
-              <div className="create-element-field">
-                <button
-                  className="view-toggle-btn"
-                  type="button"
-                  onClick={autoFillFlightDetails}
-                  disabled={flightAutofillLoading}
-                >
-                  {flightAutofillLoading ? 'Looking up...' : 'Auto-fill flight details (POC)'}
-                </button>
-              </div>
+              {tripId && <FlightLegsEditor tripId={tripId} legs={newLegs} onChange={setNewLegs} idPrefix="new-leg" />}
               <p className="element-notes">
                 Confirmation number, pricing, and travelers are entered per-booking below after saving this element.
               </p>
-              {(newFlightDepartureAirport || newFlightArrivalAirport || flightAutofillStatus) && (
-                <div className="flight-autofill-preview">
-                  <strong>Lookup result:</strong>{' '}
-                  {newFlightDepartureAirport || '—'} → {newFlightArrivalAirport || '—'}
-                  {newFlightDepartureDatetime && ` • Dep ${newFlightDepartureDatetime}`}
-                  {newFlightArrivalDatetime && ` • Arr ${newFlightArrivalDatetime}`}
-                  {flightAutofillStatus && ` • ${flightAutofillStatus}`}
-                </div>
-              )}
             </>
           )}
           <button className="create-trip-submit-btn" type="button" onClick={createElement} disabled={creatingElement}>
@@ -467,12 +359,30 @@ export function TripDetailPage() {
                         <span className="booking-ref">{item.bookingReference}</span>
                       )}
                     </div>
-                    {item.elementType === 'flight' && item.legs?.[0] && (
-                      <div className="element-flight-meta">
-                        {displayDateOnly(item.legs[0].departureDatetime) && (
-                          <span>Date: {displayDateOnly(item.legs[0].departureDatetime)}</span>
-                        )}
-                        {item.legs[0].flightNumber && <span>Flight: {item.legs[0].flightNumber}</span>}
+                    {item.elementType === 'flight' && item.legs && item.legs.length > 0 && (
+                      <div className="element-flight-legs">
+                        {item.legs.map((leg, index) => (
+                          <div key={leg.id}>
+                            <div className="flight-leg-summary">
+                              <strong>{leg.departureAirport || '—'} → {leg.arrivalAirport || '—'}</strong>{' '}
+                              <span>
+                                {[leg.airline, leg.flightNumber].filter(Boolean).join(' ')}
+                                {leg.departureDatetime ? ` · ${formatLegTime(leg.departureDatetime)}` : ''}
+                                {leg.arrivalDatetime ? ` → ${formatLegTime(leg.arrivalDatetime)}` : ''}
+                              </span>
+                              {leg.checkPriceUrl && (
+                                <>
+                                  {' '}
+                                  <a href={leg.checkPriceUrl} target="_blank" rel="noreferrer">Check price</a>
+                                </>
+                              )}
+                            </div>
+                            {tripId && <FlightSeatGrid tripId={tripId} legId={leg.id} travelers={participants} />}
+                            {index < item.legs!.length - 1 && leg.layoverMinutesAfter != null && (
+                              <p className="flight-layover">Layover: {formatLayover(leg.layoverMinutesAfter)}</p>
+                            )}
+                          </div>
+                        ))}
                       </div>
                     )}
                     {item.notes && <p className="element-notes">{item.notes}</p>}
@@ -488,9 +398,6 @@ export function TripDetailPage() {
                     )}
                     {item.elementType === 'flight' && tripId && (
                       <>
-                        {item.legs?.map(leg => (
-                          <FlightSeatGrid key={leg.id} tripId={tripId} legId={leg.id} travelers={participants} />
-                        ))}
                         <BookingCard
                           tripId={tripId}
                           elementId={item.id}
@@ -516,6 +423,9 @@ export function TripDetailPage() {
                             onChange={(e) => setEditingName(e.target.value)}
                           />
                         </div>
+                        {item.elementType === 'flight' && tripId && (
+                          <FlightLegsEditor tripId={tripId} legs={editingLegs} onChange={setEditingLegs} idPrefix={`edit-leg-${item.id}`} />
+                        )}
                         {item.elementType !== 'flight' && (
                           <>
                             <div className="create-element-field">
@@ -550,7 +460,8 @@ export function TripDetailPage() {
                               />
                             </div>
                           </>
-                        )}                        <div className="create-element-field edit-notes-field">
+                        )}
+                        <div className="create-element-field edit-notes-field">
                           <label htmlFor={`edit-notes-${item.id}`}>Notes</label>
                           <input
                             id={`edit-notes-${item.id}`}
