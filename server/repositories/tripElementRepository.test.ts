@@ -557,4 +557,64 @@ describe('TripElementRepository', () => {
       expect(ownership).toBeNull();
     });
   });
+
+  describe('syncLegs', () => {
+    const baseLeg = {
+      departureAirport: 'DEN', departureDatetime: '2026-11-10T08:00',
+      arrivalAirport: 'DAL', arrivalDatetime: '2026-11-10T10:00',
+      airline: 'WN', flightNumber: '100',
+    };
+
+    async function createFlight() {
+      return repo.createElement(tripId, {
+        elementType: 'flight',
+        name: 'DEN → DAL',
+        typeSpecificData: { legs: [{ legOrder: 1, ...baseLeg }] },
+      });
+    }
+
+    it('updates existing legs, adds new ones, and computes layover minutes', async () => {
+      const element = await createFlight();
+      const existingId = (element as any).legs[0].id;
+
+      const legs = await repo.syncLegs(element.id, [
+        { id: existingId, ...baseLeg, flightNumber: '101' },
+        { departureAirport: 'dal', departureDatetime: '2026-11-10T12:15', arrivalAirport: 'sjd', arrivalDatetime: '2026-11-10T14:00', airline: 'WN', flightNumber: '200' },
+      ]);
+
+      expect(legs).toHaveLength(2);
+      expect(legs[0].id).toBe(existingId);
+      expect(legs[0].flightNumber).toBe('101');
+      expect(legs[0].layoverMinutesAfter).toBe(135);
+      expect(legs[1].departureAirport).toBe('DAL');
+      expect(legs[1].arrivalAirport).toBe('SJD');
+      expect(legs[1].legOrder).toBe(2);
+      expect(legs[1].layoverMinutesAfter).toBeNull();
+    });
+
+    it('deletes legs that are not in the payload', async () => {
+      const element = await createFlight();
+      const legs = await repo.syncLegs(element.id, [
+        { ...baseLeg },
+      ]);
+      expect(legs).toHaveLength(1);
+      expect(legs[0].id).not.toBe((element as any).legs[0].id);
+    });
+
+    it('rejects a leg id that belongs to another element', async () => {
+      const a = await createFlight();
+      const b = await createFlight();
+      await expect(
+        repo.syncLegs(b.id, [{ id: (a as any).legs[0].id, ...baseLeg }])
+      ).rejects.toThrow(/does not belong/i);
+    });
+
+    it('rejects blank airports, empty leg lists, and non-flight elements', async () => {
+      const element = await createFlight();
+      await expect(repo.syncLegs(element.id, [{ ...baseLeg, departureAirport: '  ' }])).rejects.toThrow(/airports/i);
+      await expect(repo.syncLegs(element.id, [])).rejects.toThrow(/at least one leg/i);
+      const hotel = await repo.createElement(tripId, { elementType: 'hotel', name: 'Hotel' });
+      await expect(repo.syncLegs(hotel.id, [{ ...baseLeg }])).rejects.toThrow(/flight element/i);
+    });
+  });
 });
