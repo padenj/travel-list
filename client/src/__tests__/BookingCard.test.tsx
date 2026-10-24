@@ -83,4 +83,25 @@ describe('BookingCard', () => {
     expect(await screen.findByText(/also covers/i)).toBeTruthy();
     expect(await screen.findByText('Return Flights')).toBeTruthy();
   });
+
+  it('shows the original confirmation number after a rebook changed the current one', async () => {
+    (tripApi.listBookings as any).mockResolvedValue([
+      {
+        id: 'b1', tripId: 'trip-1', confirmationNumber: 'ABC123', advertisedPriceCash: 79, advertisedPricePoints: null,
+        loyaltyProgram: null, notes: null, createdAt: '', updatedAt: '',
+        elementIds: ['el-1'], travelerIds: ['p1'], currentConfirmationNumber: 'XYZ789', actualTotalCash: 137.96, actualTotalPoints: 0,
+      },
+    ]);
+    render(<BookingCard tripId="trip-1" elementId="el-1" elements={elements} participants={participants} onParticipantsChanged={() => {}} />);
+    expect(await screen.findByText('XYZ789')).toBeTruthy();
+    expect(screen.getByText(/originally booked as ABC123/i)).toBeTruthy();
+    expect(screen.getByText(/\$137\.96 \(\$137\.96 \/ person\)/)).toBeTruthy();
+  });
+
+  it('refetches bookings when refreshKey changes and notifies the page after a transaction', async () => {
+    const { rerender } = render(<BookingCard tripId="trip-1" elementId="el-1" elements={elements} participants={participants} onParticipantsChanged={() => {}} refreshKey={0} />);
+    await waitFor(() => expect(tripApi.listBookings).toHaveBeenCalledTimes(1));
+    rerender(<BookingCard tripId="trip-1" elementId="el-1" elements={elements} participants={participants} onParticipantsChanged={() => {}} refreshKey={1} />);
+    await waitFor(() => expect(tripApi.listBookings).toHaveBeenCalledTimes(2));
+  });
 });

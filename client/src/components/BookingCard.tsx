@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Booking, TripElement, TripParticipant } from '../types/trip';
 import { tripApi } from '../api/tripApi';
 import { BookingTransactionList } from './BookingTransactionList';
+import { formatMoney } from '../utils/money';
 
 interface BookingCardProps {
   tripId: string;
@@ -9,6 +10,8 @@ interface BookingCardProps {
   elements: TripElement[];
   participants: TripParticipant[];
   onParticipantsChanged: (participants: TripParticipant[]) => void;
+  refreshKey?: number;
+  onBookingsChanged?: () => void;
 }
 
 function parseNumberInput(value: string): number | undefined {
@@ -17,7 +20,7 @@ function parseNumberInput(value: string): number | undefined {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
-export function BookingCard({ tripId, elementId, elements, participants, onParticipantsChanged }: BookingCardProps) {
+export function BookingCard({ tripId, elementId, elements, participants, onParticipantsChanged, refreshKey = 0, onBookingsChanged }: BookingCardProps) {
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [confirmationNumber, setConfirmationNumber] = useState('');
@@ -38,7 +41,12 @@ export function BookingCard({ tripId, elementId, elements, participants, onParti
 
   useEffect(() => {
     load();
-  }, [load]);
+  }, [load, refreshKey]);
+
+  const handleBookingsChanged = useCallback(async () => {
+    await load();
+    onBookingsChanged?.();
+  }, [load, onBookingsChanged]);
 
   const toggleTraveler = (participantId: string) => {
     setSelectedTravelerIds(prev =>
@@ -92,7 +100,7 @@ export function BookingCard({ tripId, elementId, elements, participants, onParti
       setNewTravelerName('');
       setSelectedElementIds([elementId]);
       setShowForm(false);
-      await load();
+      await handleBookingsChanged();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save booking');
     } finally {
@@ -106,7 +114,7 @@ export function BookingCard({ tripId, elementId, elements, participants, onParti
     <div className="booking-card-section">
       <div className="booking-card-header">
         <h4>Bookings</h4>
-        <button type="button" onClick={() => setShowForm(prev => !prev)}>
+        <button type="button" className="view-toggle-btn" onClick={() => setShowForm(prev => !prev)}>
           {showForm ? 'Cancel' : '+ Add Booking'}
         </button>
       </div>
@@ -176,7 +184,7 @@ export function BookingCard({ tripId, elementId, elements, participants, onParti
             </fieldset>
           )}
 
-          <button type="button" onClick={saveBooking} disabled={saving}>
+          <button type="button" className="view-toggle-btn" onClick={saveBooking} disabled={saving}>
             {saving ? 'Saving...' : 'Save Booking'}
           </button>
         </div>
@@ -203,9 +211,12 @@ export function BookingCard({ tripId, elementId, elements, participants, onParti
             </div>
             <p>Travelers: {travelerNames}</p>
             {booking.advertisedPriceCash !== null && (
-              <p>Advertised: ${booking.advertisedPriceCash.toFixed(2)} / person</p>
+              <p>Advertised: {formatMoney(booking.advertisedPriceCash)} / person</p>
             )}
-            <p>Actual total: ${booking.actualTotalCash.toFixed(2)} (${actualPerPerson.toFixed(2)} / person)</p>
+            <p>Actual total: {formatMoney(booking.actualTotalCash)} ({formatMoney(actualPerPerson)} / person)</p>
+            {booking.confirmationNumber && booking.confirmationNumber !== booking.currentConfirmationNumber && (
+              <p>Originally booked as {booking.confirmationNumber}</p>
+            )}
             {otherLinkedElements.length > 0 && (
               <p>
                 Also covers:{' '}
@@ -217,7 +228,13 @@ export function BookingCard({ tripId, elementId, elements, participants, onParti
                 ))}
               </p>
             )}
-            <BookingTransactionList tripId={tripId} bookingId={booking.id} onChanged={load} />
+            <BookingTransactionList
+              tripId={tripId}
+              bookingId={booking.id}
+              originalConfirmationNumber={booking.confirmationNumber}
+              refreshKey={refreshKey}
+              onChanged={handleBookingsChanged}
+            />
           </div>
         );
       })}

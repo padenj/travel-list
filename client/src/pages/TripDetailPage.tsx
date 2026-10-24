@@ -60,6 +60,8 @@ export function TripDetailPage() {
   const [flightAutofillLoading, setFlightAutofillLoading] = useState(false);
   const [nameManuallyEdited, setNameManuallyEdited] = useState(false);
   const [participants, setParticipants] = useState<TripParticipant[]>([]);
+  const [bookingsVersion, setBookingsVersion] = useState(0);
+  const [participantsVersion, setParticipantsVersion] = useState(0);
   const [editingElementId, setEditingElementId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
   const [editingNotes, setEditingNotes] = useState('');
@@ -69,6 +71,12 @@ export function TripDetailPage() {
   const [savingEdit, setSavingEdit] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const handleBookingsChanged = () => setBookingsVersion(v => v + 1);
+  const handleParticipantsFromBooking = (next: TripParticipant[]) => {
+    setParticipants(next);
+    setParticipantsVersion(v => v + 1);
+  };
 
   const loadTripData = async (id: string) => {
     try {
@@ -301,6 +309,7 @@ export function TripDetailPage() {
       {tripId && (
         <TripParticipantsPanel
           tripId={tripId}
+          refreshKey={participantsVersion}
           onParticipantsChanged={setParticipants}
         />
       )}
@@ -487,7 +496,9 @@ export function TripDetailPage() {
                           elementId={item.id}
                           elements={elements}
                           participants={participants}
-                          onParticipantsChanged={setParticipants}
+                          onParticipantsChanged={handleParticipantsFromBooking}
+                          refreshKey={bookingsVersion}
+                          onBookingsChanged={handleBookingsChanged}
                         />
                       </>
                     )}

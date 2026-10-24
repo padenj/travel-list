@@ -57,4 +57,11 @@ describe('TripParticipantsPanel', () => {
 
     expect(await screen.findByText(/attached to one or more bookings/i)).toBeTruthy();
   });
+
+  it('reloads travelers when refreshKey changes', async () => {
+    const { rerender } = render(<TripParticipantsPanel tripId="trip-1" onParticipantsChanged={() => {}} refreshKey={0} />);
+    await waitFor(() => expect(tripApi.listParticipants).toHaveBeenCalledTimes(1));
+    rerender(<TripParticipantsPanel tripId="trip-1" onParticipantsChanged={() => {}} refreshKey={1} />);
+    await waitFor(() => expect(tripApi.listParticipants).toHaveBeenCalledTimes(2));
+  });
 });
