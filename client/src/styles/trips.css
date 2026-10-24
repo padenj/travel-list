@@ -442,6 +442,10 @@
   font: inherit;
 }
 
+.flight-legs-editor {
+  grid-column: 1 / -1;
+}
+
 .flight-leg-row {
   background-color: var(--ctp-mocha-surface0);
   border: 1px solid var(--ctp-mocha-surface1);
