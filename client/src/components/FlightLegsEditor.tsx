@@ -32,8 +32,11 @@ export function FlightLegsEditor({ tripId, legs, onChange, idPrefix = 'leg' }: F
     onChange(next);
   };
 
-  const update = (index: number, draft: FlightLegDraft) =>
-    emit(legsRef.current.map((leg, i) => (i === index ? draft : leg)));
+  const update = (key: string, draft: FlightLegDraft) => {
+    const i = keysRef.current.indexOf(key);
+    if (i === -1) return;
+    emit(legsRef.current.map((leg, idx) => (idx === i ? draft : leg)));
+  };
 
   const remove = (index: number) => {
     keysRef.current = keysRef.current.filter((_, i) => i !== index);
@@ -71,7 +74,7 @@ export function FlightLegsEditor({ tripId, legs, onChange, idPrefix = 'leg' }: F
                   </ActionIcon>
                 )}
               </Group>
-              <FlightLegForm tripId={tripId} draft={leg} onChange={draft => update(index, draft)} idPrefix={`${idPrefix}-${key}`} />
+              <FlightLegForm tripId={tripId} draft={leg} onChange={draft => update(key, draft)} idPrefix={`${idPrefix}-${key}`} />
             </Paper>
           </div>
         );

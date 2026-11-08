@@ -105,4 +105,38 @@ describe('FlightLegsEditor', () => {
     expect(screen.queryByRole('status')).toBeNull();
     expect((screen.getByLabelText('Flight #') as HTMLInputElement).value).toBe('WN999');
   });
+
+  it('applies a lookup to the leg it was started on, not the leg that shifted into its index, when an earlier leg is removed', async () => {
+    const user = userEvent.setup();
+    let resolveLookup!: (value: any) => void;
+    (tripApi.lookupFlightAutofill as any).mockImplementation(
+      () => new Promise(resolve => { resolveLookup = resolve; }),
+    );
+    const legA: FlightLegDraft = { ...filled, flightCode: 'WN111', departureAirport: 'DEN', arrivalAirport: 'DAL' };
+    const legB: FlightLegDraft = { ...filled, flightCode: 'WN555', departureAirport: 'DAL', arrivalAirport: 'SJD' };
+    const legC: FlightLegDraft = { ...filled, flightCode: 'WN777', departureAirport: 'SJD', arrivalAirport: 'LAX' };
+    renderWithMantine(<Harness initial={[legA, legB, legC]} />);
+
+    // Start a lookup on leg B (index 1).
+    await user.click(screen.getAllByRole('button', { name: 'Look up' })[1]);
+    await waitFor(() => expect(tripApi.lookupFlightAutofill).toHaveBeenCalled());
+
+    // Remove leg A (index 0) before the lookup resolves; B shifts to index 0, C to index 1.
+    await user.click(screen.getByRole('button', { name: 'Remove leg 1' }));
+    expect(latest).toHaveLength(2);
+
+    resolveLookup({
+      airlineCode: 'WN', flightNumber: '555', flightDate: filled.date,
+      departureAirport: 'AAA', arrivalAirport: 'BBB',
+      departureDatetime: `${filled.date}T09:00:00.000`, arrivalDatetime: `${filled.date}T11:00:00.000`,
+      statusText: 'Scheduled', sourceUrl: 'https://fs',
+    });
+
+    await waitFor(() => expect(screen.getAllByRole('status')[0]?.textContent).toMatch(/Filled from FlightStats/));
+    expect(latest).toHaveLength(2);
+    const updatedB = latest.find(leg => leg.flightCode === 'WN555')!;
+    expect(updatedB).toMatchObject({ departureAirport: 'AAA', arrivalAirport: 'BBB', departureTime: '09:00', arrivalTime: '11:00' });
+    const unchangedC = latest.find(leg => leg.flightCode === 'WN777')!;
+    expect(unchangedC).toMatchObject({ departureAirport: 'SJD', arrivalAirport: 'LAX' });
+  });
 });
