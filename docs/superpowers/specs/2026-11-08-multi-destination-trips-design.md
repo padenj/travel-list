@@ -16,7 +16,7 @@ Let a family pack for one trip where members go to different places. For example
 
 ## Data model
 
-New table `trip_destinations` (added by migration `server/migrations/migrations/20261108_01_add_trip_destinations.cjs` and to the schema in `server/db.ts`):
+New table `trip_destinations` (added by migration `server/migrations/migrations/20261108_02_add_trip_destinations.cjs` and to the schema in `server/db.ts`):
 
 | Column | Notes |
 |---|---|
@@ -104,6 +104,11 @@ New hook `useDashboardData(activeListId)` replaces the data loading currently in
 ### Selector
 
 `ActivePackingListSelector` replaces a trip's destination lists with a single entry, "<trip name> · N destinations". Selecting it sets the active list to the destination with the lowest `position`.
+
+This works with the existing family active list and per-user override (`ActivePackingListContext`, `families.active_packing_list_id`). Whichever destination list is active, the dashboard shows the whole trip.
+
+- **Selector match:** the selector treats the trip entry as selected when the active id is any of the trip's destination lists.
+- **Manage Lists:** destination lists show a "<trip name> · <destination>" badge. "Set as active" on any of them makes the trip active for the family.
 
 ### View toggle
 
