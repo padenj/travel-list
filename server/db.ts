@@ -4,6 +4,8 @@ import { open, Database } from 'sqlite';
 let dbInstance: Database | null = null;
 let isInitializing = false;
 let initializationPromise: Promise<void> | null = null;
+// Shared by concurrent first callers so only one connection is opened and initialised.
+let openPromise: Promise<Database> | null = null;
 
 // Database schemas separated for maintainability
 const SCHEMAS = {
@@ -640,34 +642,42 @@ export async function getDb(): Promise<Database> {
     }
   }
 
-  if (!dbInstance) {
-    try {
+  if (dbInstance) return dbInstance;
+
+  if (!openPromise) {
+    openPromise = (async () => {
+      try {
   // Vitest sets a global VITEST flag; additionally respect NODE_ENV=test
   // Use an in-memory DB for tests to avoid file-based locking and ensure clean state.
   // eslint-disable-next-line @typescript-eslint/ban-ts-comment
   // @ts-ignore
   const isTest = process.env.NODE_ENV === 'test' || (typeof global !== 'undefined' && (global as any).VITEST) || process.env.VITEST;
   const filename = isTest ? ':memory:' : (process.env.DB_FILE || './data/travel-list.sqlite');
-      
-      dbInstance = await open({
-        filename,
-        driver: sqlite3.Database,
-      });
-      
-      await initializeDatabase(dbInstance);
-      
-      // Handle connection errors
-      dbInstance.on('error', (err: Error) => {
-        console.error('💥 Database error:', err);
-      });
-      
-    } catch (error) {
-      console.error('💥 Failed to open database:', error);
-      dbInstance = null;
-      throw error;
-    }
+
+        const db = await open({
+          filename,
+          driver: sqlite3.Database,
+        });
+
+        await initializeDatabase(db);
+
+        // Handle connection errors
+        db.on('error', (err: Error) => {
+          console.error('💥 Database error:', err);
+        });
+
+        dbInstance = db;
+        return db;
+      } catch (error) {
+        console.error('💥 Failed to open database:', error);
+        dbInstance = null;
+        throw error;
+      } finally {
+        openPromise = null;
+      }
+    })();
   }
-  return dbInstance;
+  return openPromise;
 }
 
 // Migration helpers removed: automatic packing_list_items rebuilds are no longer performed here.
