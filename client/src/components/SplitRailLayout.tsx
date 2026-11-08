@@ -105,6 +105,7 @@ export default function SplitRailLayout({ children, user, onLogout }: SplitRailL
     if (path.startsWith('/packing-lists')) return 'lists';
     if (path.startsWith('/categories')) return 'categories';
     if (path.startsWith('/templates')) return 'templates';
+    if (path.startsWith('/trips')) return 'trips';
     return 'dashboard';
   }
 

@@ -2,14 +2,23 @@ import { Router, Request, Response } from 'express';
 import { TripRepository } from '../repositories/tripRepository';
 import { TripElementRepository } from '../repositories/tripElementRepository';
 import { TripElementConfirmationRepository } from '../repositories/tripElementConfirmationRepository';
+import { TripParticipantRepository } from '../repositories/tripParticipantRepository';
+import { BookingRepository, BookingConflictError } from '../repositories/bookingRepository';
+import { BookingTransactionRepository } from '../repositories/bookingTransactionRepository';
+import { FlightTravelerSeatRepository } from '../repositories/flightTravelerSeatRepository';
 import { authMiddleware } from '../middleware';
 import { tripAccessMiddleware } from '../middleware/tripAccessMiddleware';
+import { lookupFlightStatsAutofill } from '../services/flightStatsLookupService';
 
 export const tripRouter = Router();
 
 const tripRepository = new TripRepository();
 const tripElementRepository = new TripElementRepository();
 const tripElementConfirmationRepository = new TripElementConfirmationRepository();
+const tripParticipantRepository = new TripParticipantRepository();
+const bookingRepository = new BookingRepository();
+const bookingTransactionRepository = new BookingTransactionRepository();
+const flightTravelerSeatRepository = new FlightTravelerSeatRepository();
 
 // List trips for authenticated user's family
 tripRouter.get('/', authMiddleware, async (req: Request, res: Response) => {
@@ -44,7 +53,15 @@ tripRouter.post('/', authMiddleware, async (req: Request, res: Response) => {
 
 // Get trip detail
 tripRouter.get('/:tripId', authMiddleware, tripAccessMiddleware, async (req: Request, res: Response) => {
-  res.json(req.trip);
+  try {
+    const trip = await tripRepository.getTripById(req.trip!.id);
+    if (!trip) {
+      return res.status(404).json({ error: 'Trip not found' });
+    }
+    res.json(trip);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch trip' });
+  }
 });
 
 // Update trip
@@ -77,11 +94,31 @@ tripRouter.get('/:tripId/elements', authMiddleware, tripAccessMiddleware, async 
   }
 });
 
+// Lookup flight details from FlightStats (POC)
+tripRouter.post('/:tripId/flight-autofill', authMiddleware, tripAccessMiddleware, async (req: Request, res: Response) => {
+  try {
+    const { airlineCode, flightNumber, flightDate } = req.body || {};
+    if (!airlineCode || !flightNumber || !flightDate) {
+      return res.status(400).json({ error: 'Missing required fields: airlineCode, flightNumber, flightDate' });
+    }
+
+    const details = await lookupFlightStatsAutofill({
+      airlineCode: String(airlineCode),
+      flightNumber: String(flightNumber),
+      flightDate: String(flightDate),
+    });
+    return res.json(details);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Flight lookup failed';
+    return res.status(502).json({ error: message });
+  }
+});
+
 // Create element
 tripRouter.post('/:tripId/elements', authMiddleware, tripAccessMiddleware, async (req: Request, res: Response) => {
   try {
     const { elementType, name, bookingReference, bookingUrl, priceCash, pricePoints, loyaltyProgram, totalCash, totalPoints, notes, sortPosition, typeSpecificData } = req.body;
-    if (!elementType || !name) {
+    if (!elementType || (!name && elementType !== 'flight')) {
       return res.status(400).json({ error: 'Missing required fields: elementType, name' });
     }
     const element = await tripElementRepository.createElement(req.trip!.id, {
@@ -128,6 +165,24 @@ tripRouter.put('/:tripId/elements/:elementId', authMiddleware, tripAccessMiddlew
     res.json(updated);
   } catch (error) {
     res.status(500).json({ error: 'Failed to update element' });
+  }
+});
+
+// Replace/update the legs of a flight element (update by id, insert new, delete missing)
+tripRouter.put('/:tripId/elements/:elementId/legs', authMiddleware, tripAccessMiddleware, async (req: Request, res: Response) => {
+  try {
+    const element = await tripElementRepository.getElementById(req.params.elementId);
+    if (!element || element.tripId !== req.trip!.id || element.elementType !== 'flight') {
+      return res.status(404).json({ error: 'Flight element not found' });
+    }
+    const legs = req.body?.legs;
+    if (!Array.isArray(legs)) {
+      return res.status(400).json({ error: 'legs array is required' });
+    }
+    const saved = await tripElementRepository.syncLegs(req.params.elementId, legs);
+    res.json(saved);
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : 'Failed to save legs' });
   }
 });
 
@@ -217,5 +272,358 @@ tripRouter.delete('/:tripId/elements/:elementId/confirmations/:confirmationId', 
     res.status(204).send();
   } catch (error) {
     res.status(500).json({ error: 'Failed to delete confirmation' });
+  }
+});
+
+// ===== Participants =====
+
+tripRouter.get('/:tripId/participants', authMiddleware, tripAccessMiddleware, async (req: Request, res: Response) => {
+  try {
+    const participants = await tripParticipantRepository.getParticipantsForTrip(req.trip!.id);
+    res.json(participants);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch participants' });
+  }
+});
+
+tripRouter.post('/:tripId/participants', authMiddleware, tripAccessMiddleware, async (req: Request, res: Response) => {
+  try {
+    const { displayName, userId } = req.body;
+    if (!displayName) {
+      return res.status(400).json({ error: 'Missing required field: displayName' });
+    }
+    const participant = await tripParticipantRepository.createParticipant(req.trip!.id, { displayName, userId });
+    res.status(201).json(participant);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to create participant' });
+  }
+});
+
+tripRouter.patch('/:tripId/participants/:id', authMiddleware, tripAccessMiddleware, async (req: Request, res: Response) => {
+  try {
+    const participant = await tripParticipantRepository.getParticipantById(req.params.id);
+    if (!participant || participant.tripId !== req.trip!.id) {
+      return res.status(404).json({ error: 'Participant not found' });
+    }
+    const updated = await tripParticipantRepository.updateParticipant(req.params.id, req.body);
+    res.json(updated);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to update participant' });
+  }
+});
+
+tripRouter.delete('/:tripId/participants/:id', authMiddleware, tripAccessMiddleware, async (req: Request, res: Response) => {
+  try {
+    const participant = await tripParticipantRepository.getParticipantById(req.params.id);
+    if (!participant || participant.tripId !== req.trip!.id) {
+      return res.status(404).json({ error: 'Participant not found' });
+    }
+    await tripParticipantRepository.deleteParticipant(req.params.id);
+    res.status(204).send();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to delete participant';
+    res.status(409).json({ error: message });
+  }
+});
+
+// ===== Bookings =====
+
+// Returns an error message when any id does not belong to the trip.
+async function findForeignBookingRef(tripId: string, elementIds: string[] = [], travelerIds: string[] = []): Promise<string | null> {
+  for (const elementId of elementIds) {
+    const element = await tripElementRepository.getElementById(elementId);
+    if (!element || element.tripId !== tripId) return `Element not found: ${elementId}`;
+  }
+  for (const participantId of travelerIds) {
+    const participant = await tripParticipantRepository.getParticipantById(participantId);
+    if (!participant || participant.tripId !== tripId) return `Participant not found: ${participantId}`;
+  }
+  return null;
+}
+
+function sendBookingError(res: Response, error: unknown, fallback: string) {
+  if (error instanceof BookingConflictError) {
+    return res.status(409).json({ error: error.message });
+  }
+  return res.status(500).json({ error: fallback });
+}
+
+tripRouter.get('/:tripId/bookings', authMiddleware, tripAccessMiddleware, async (req: Request, res: Response) => {
+  try {
+    const elementId = typeof req.query.elementId === 'string' ? req.query.elementId : undefined;
+    const bookings = await bookingRepository.getBookingsForTrip(req.trip!.id, elementId);
+    res.json(bookings);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch bookings' });
+  }
+});
+
+tripRouter.post('/:tripId/bookings', authMiddleware, tripAccessMiddleware, async (req: Request, res: Response) => {
+  try {
+    const { confirmationNumber, advertisedPriceCash, advertisedPricePoints, loyaltyProgram, notes, elementIds, travelerIds } = req.body;
+    if (!Array.isArray(elementIds) || elementIds.length === 0) {
+      return res.status(400).json({ error: 'At least one elementId is required' });
+    }
+    if (!Array.isArray(travelerIds) || travelerIds.length === 0) {
+      return res.status(400).json({ error: 'At least one travelerId is required' });
+    }
+    const foreign = await findForeignBookingRef(req.trip!.id, elementIds, travelerIds);
+    if (foreign) {
+      return res.status(404).json({ error: foreign });
+    }
+    const booking = await bookingRepository.createBooking(req.trip!.id, {
+      confirmationNumber,
+      advertisedPriceCash,
+      advertisedPricePoints,
+      loyaltyProgram,
+      notes,
+      elementIds,
+      travelerIds,
+    });
+    res.status(201).json(booking);
+  } catch (error) {
+    sendBookingError(res, error, 'Failed to create booking');
+  }
+});
+
+tripRouter.get('/:tripId/bookings/:id', authMiddleware, tripAccessMiddleware, async (req: Request, res: Response) => {
+  try {
+    const booking = await bookingRepository.getBookingById(req.params.id);
+    if (!booking || booking.tripId !== req.trip!.id) {
+      return res.status(404).json({ error: 'Booking not found' });
+    }
+    res.json(booking);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch booking' });
+  }
+});
+
+tripRouter.patch('/:tripId/bookings/:id', authMiddleware, tripAccessMiddleware, async (req: Request, res: Response) => {
+  try {
+    const booking = await bookingRepository.getBookingById(req.params.id);
+    if (!booking || booking.tripId !== req.trip!.id) {
+      return res.status(404).json({ error: 'Booking not found' });
+    }
+    const { confirmationNumber, advertisedPriceCash, advertisedPricePoints, loyaltyProgram, notes, elementIds, travelerIds } = req.body ?? {};
+    if (elementIds !== undefined && (!Array.isArray(elementIds) || elementIds.length === 0)) {
+      return res.status(400).json({ error: 'At least one elementId is required' });
+    }
+    if (travelerIds !== undefined && (!Array.isArray(travelerIds) || travelerIds.length === 0)) {
+      return res.status(400).json({ error: 'At least one travelerId is required' });
+    }
+    const foreign = await findForeignBookingRef(req.trip!.id, elementIds, travelerIds);
+    if (foreign) {
+      return res.status(404).json({ error: foreign });
+    }
+    const updates: Record<string, unknown> = {};
+    const fields = { confirmationNumber, advertisedPriceCash, advertisedPricePoints, loyaltyProgram, notes, elementIds, travelerIds };
+    for (const [key, value] of Object.entries(fields)) {
+      if (key in (req.body ?? {})) updates[key] = value;
+    }
+    const updated = await bookingRepository.updateBooking(req.params.id, updates);
+    res.json(updated);
+  } catch (error) {
+    sendBookingError(res, error, 'Failed to update booking');
+  }
+});
+
+tripRouter.delete('/:tripId/bookings/:id', authMiddleware, tripAccessMiddleware, async (req: Request, res: Response) => {
+  try {
+    const booking = await bookingRepository.getBookingById(req.params.id);
+    if (!booking || booking.tripId !== req.trip!.id) {
+      return res.status(404).json({ error: 'Booking not found' });
+    }
+    await bookingRepository.deleteBooking(req.params.id);
+    res.status(204).send();
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to delete booking' });
+  }
+});
+
+tripRouter.post('/:tripId/bookings/:id/elements', authMiddleware, tripAccessMiddleware, async (req: Request, res: Response) => {
+  try {
+    const booking = await bookingRepository.getBookingById(req.params.id);
+    if (!booking || booking.tripId !== req.trip!.id) {
+      return res.status(404).json({ error: 'Booking not found' });
+    }
+    const { elementId } = req.body;
+    if (!elementId) {
+      return res.status(400).json({ error: 'Missing required field: elementId' });
+    }
+    const element = await tripElementRepository.getElementById(elementId);
+    if (!element || element.tripId !== req.trip!.id) {
+      return res.status(404).json({ error: 'Element not found' });
+    }
+    await bookingRepository.linkElement(req.params.id, elementId);
+    res.json(await bookingRepository.getBookingById(req.params.id));
+  } catch (error) {
+    sendBookingError(res, error, 'Failed to link element to booking');
+  }
+});
+
+tripRouter.delete('/:tripId/bookings/:id/elements/:elementId', authMiddleware, tripAccessMiddleware, async (req: Request, res: Response) => {
+  try {
+    const booking = await bookingRepository.getBookingById(req.params.id);
+    if (!booking || booking.tripId !== req.trip!.id) {
+      return res.status(404).json({ error: 'Booking not found' });
+    }
+    await bookingRepository.unlinkElement(req.params.id, req.params.elementId);
+    res.json(await bookingRepository.getBookingById(req.params.id));
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to unlink element from booking' });
+  }
+});
+
+tripRouter.post('/:tripId/bookings/:id/travelers', authMiddleware, tripAccessMiddleware, async (req: Request, res: Response) => {
+  try {
+    const booking = await bookingRepository.getBookingById(req.params.id);
+    if (!booking || booking.tripId !== req.trip!.id) {
+      return res.status(404).json({ error: 'Booking not found' });
+    }
+    const { participantId } = req.body;
+    if (!participantId) {
+      return res.status(400).json({ error: 'Missing required field: participantId' });
+    }
+    const participant = await tripParticipantRepository.getParticipantById(participantId);
+    if (!participant || participant.tripId !== req.trip!.id) {
+      return res.status(404).json({ error: 'Participant not found' });
+    }
+    await bookingRepository.addTraveler(req.params.id, participantId);
+    res.json(await bookingRepository.getBookingById(req.params.id));
+  } catch (error) {
+    sendBookingError(res, error, 'Failed to add traveler to booking');
+  }
+});
+
+tripRouter.delete('/:tripId/bookings/:id/travelers/:participantId', authMiddleware, tripAccessMiddleware, async (req: Request, res: Response) => {
+  try {
+    const booking = await bookingRepository.getBookingById(req.params.id);
+    if (!booking || booking.tripId !== req.trip!.id) {
+      return res.status(404).json({ error: 'Booking not found' });
+    }
+    await bookingRepository.removeTraveler(req.params.id, req.params.participantId);
+    res.json(await bookingRepository.getBookingById(req.params.id));
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to remove traveler from booking' });
+  }
+});
+
+// ===== Booking transactions =====
+
+tripRouter.get('/:tripId/bookings/:bookingId/transactions', authMiddleware, tripAccessMiddleware, async (req: Request, res: Response) => {
+  try {
+    const booking = await bookingRepository.getBookingById(req.params.bookingId);
+    if (!booking || booking.tripId !== req.trip!.id) {
+      return res.status(404).json({ error: 'Booking not found' });
+    }
+    const transactions = await bookingTransactionRepository.getTransactionsForBooking(req.params.bookingId);
+    res.json(transactions);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch transactions' });
+  }
+});
+
+tripRouter.post('/:tripId/bookings/:bookingId/transactions', authMiddleware, tripAccessMiddleware, async (req: Request, res: Response) => {
+  try {
+    const booking = await bookingRepository.getBookingById(req.params.bookingId);
+    if (!booking || booking.tripId !== req.trip!.id) {
+      return res.status(404).json({ error: 'Booking not found' });
+    }
+    const { amountCash, amountPoints, transactionDate, confirmationNumber, notes } = req.body;
+    const transaction = await bookingTransactionRepository.addTransaction(req.params.bookingId, {
+      amountCash,
+      amountPoints,
+      transactionDate,
+      confirmationNumber,
+      notes,
+    });
+    res.status(201).json(transaction);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to add transaction';
+    res.status(400).json({ error: message });
+  }
+});
+
+tripRouter.patch('/:tripId/bookings/:bookingId/transactions/:id', authMiddleware, tripAccessMiddleware, async (req: Request, res: Response) => {
+  try {
+    const booking = await bookingRepository.getBookingById(req.params.bookingId);
+    if (!booking || booking.tripId !== req.trip!.id) {
+      return res.status(404).json({ error: 'Booking not found' });
+    }
+    const transactions = await bookingTransactionRepository.getTransactionsForBooking(req.params.bookingId);
+    if (!transactions.some((transaction) => transaction.id === req.params.id)) {
+      return res.status(404).json({ error: 'Transaction not found' });
+    }
+    const updated = await bookingTransactionRepository.updateTransaction(req.params.id, req.body);
+    res.json(updated);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to update transaction';
+    res.status(400).json({ error: message });
+  }
+});
+
+tripRouter.delete('/:tripId/bookings/:bookingId/transactions/:id', authMiddleware, tripAccessMiddleware, async (req: Request, res: Response) => {
+  try {
+    const booking = await bookingRepository.getBookingById(req.params.bookingId);
+    if (!booking || booking.tripId !== req.trip!.id) {
+      return res.status(404).json({ error: 'Booking not found' });
+    }
+    const transactions = await bookingTransactionRepository.getTransactionsForBooking(req.params.bookingId);
+    if (!transactions.some((transaction) => transaction.id === req.params.id)) {
+      return res.status(404).json({ error: 'Transaction not found' });
+    }
+    await bookingTransactionRepository.deleteTransaction(req.params.id);
+    res.status(204).send();
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to delete transaction' });
+  }
+});
+
+// ===== Flight seats =====
+
+tripRouter.get('/:tripId/legs/:legId/seats', authMiddleware, tripAccessMiddleware, async (req: Request, res: Response) => {
+  try {
+    const ownership = await tripElementRepository.getLegOwnership(req.params.legId);
+    if (!ownership || ownership.tripId !== req.trip!.id) {
+      return res.status(404).json({ error: 'Leg not found' });
+    }
+    const seats = await flightTravelerSeatRepository.getSeatsForLeg(req.params.legId);
+    res.json(seats);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch seats' });
+  }
+});
+
+tripRouter.put('/:tripId/legs/:legId/seats/:participantId', authMiddleware, tripAccessMiddleware, async (req: Request, res: Response) => {
+  try {
+    const ownership = await tripElementRepository.getLegOwnership(req.params.legId);
+    if (!ownership || ownership.tripId !== req.trip!.id) {
+      return res.status(404).json({ error: 'Leg not found' });
+    }
+    const participant = await tripParticipantRepository.getParticipantById(req.params.participantId);
+    if (!participant || participant.tripId !== req.trip!.id) {
+      return res.status(404).json({ error: 'Participant not found' });
+    }
+    const { seatNumber } = req.body;
+    if (!seatNumber) {
+      return res.status(400).json({ error: 'Missing required field: seatNumber' });
+    }
+    const seat = await flightTravelerSeatRepository.upsertSeat(req.params.legId, req.params.participantId, seatNumber);
+    res.json(seat);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to assign seat' });
+  }
+});
+
+tripRouter.delete('/:tripId/legs/:legId/seats/:participantId', authMiddleware, tripAccessMiddleware, async (req: Request, res: Response) => {
+  try {
+    const ownership = await tripElementRepository.getLegOwnership(req.params.legId);
+    if (!ownership || ownership.tripId !== req.trip!.id) {
+      return res.status(404).json({ error: 'Leg not found' });
+    }
+    await flightTravelerSeatRepository.deleteSeat(req.params.legId, req.params.participantId);
+    res.status(204).send();
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to remove seat' });
   }
 });

@@ -1,113 +1,195 @@
-import { useState, useEffect } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { Trip, TripElement } from '../types/trip';
+import { Alert, Button, Container, Loader, Text } from '@mantine/core';
+import { Booking, Trip, TripElement, TripParticipant } from '../types/trip';
 import { tripApi } from '../api/tripApi';
+import { buildFlightRows, flightTotals } from '../utils/flightRows';
+import { TripHeader } from '../components/TripHeader';
+import { TripTravelersStrip } from '../components/TripTravelersStrip';
+import { FlightsSection } from '../components/FlightsSection';
+import { ElementDialog } from '../components/ElementDialog';
+import { FlightDetailsTab } from '../components/FlightDetailsTab';
+import { FlightSeatsTab } from '../components/FlightSeatsTab';
+import { AddElementDialog } from '../components/AddElementDialog';
+import { BookingCard } from '../components/BookingCard';
 import '../styles/trips.css';
 
 export function TripDetailPage() {
   const { tripId } = useParams<{ tripId: string }>();
   const [trip, setTrip] = useState<Trip | null>(null);
   const [elements, setElements] = useState<TripElement[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [participants, setParticipants] = useState<TripParticipant[]>([]);
+  const [bookings, setBookings] = useState<Booking[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [reloadError, setReloadError] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [editingDetails, setEditingDetails] = useState(false);
+  const [editingBookings, setEditingBookings] = useState(false);
+  const [bookingsVersion, setBookingsVersion] = useState(0);
+  const [participantsVersion, setParticipantsVersion] = useState(0);
+
+  // Silent reload keeps open dialogs mounted; only the first load shows the spinner.
+  const load = useCallback(async (id: string, initial = false) => {
+    try {
+      if (initial) setLoading(true);
+      const [tripData, elementsData, participantsData, bookingsData] = await Promise.all([
+        tripApi.getTrip(id),
+        tripApi.listElements(id),
+        tripApi.listParticipants(id),
+        tripApi.listBookings(id),
+      ]);
+      setTrip(tripData);
+      setElements(elementsData);
+      setParticipants(participantsData);
+      setBookings(bookingsData);
+      setLoadError(null);
+      setReloadError(null);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to load trip';
+      if (initial) setLoadError(message);
+      else setReloadError(message);
+    } finally {
+      if (initial) setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
+    if (tripId) load(tripId, true);
+  }, [tripId, load]);
+
+  const reload = useCallback(async () => {
+    if (tripId) await load(tripId);
+  }, [tripId, load]);
+
+  // Bumping bookingsVersion makes each booking's transaction list refetch too.
+  const reloadBookings = useCallback(async () => {
     if (!tripId) return;
-
-    const loadTripData = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        const [tripData, elementsData] = await Promise.all([
-          tripApi.getTrip(tripId),
-          tripApi.listElements(tripId),
-        ]);
-        setTrip(tripData);
-        setElements(elementsData);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load trip');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadTripData();
+    try {
+      setBookings(await tripApi.listBookings(tripId));
+      setBookingsVersion(v => v + 1);
+    } catch (err) {
+      setReloadError(err instanceof Error ? err.message : 'Failed to reload bookings');
+    }
   }, [tripId]);
 
-  if (loading) {
-    return <div className="trip-detail-page"><p>Loading...</p></div>;
-  }
-
-  if (error) {
-    return <div className="trip-detail-page"><p className="error">Error: {error}</p></div>;
-  }
-
-  if (!trip) {
-    return <div className="trip-detail-page"><p>Trip not found</p></div>;
-  }
-
-  // Group elements by type
-  const groupedByType = elements.reduce((acc, el) => {
-    if (!acc[el.elementType]) acc[el.elementType] = [];
-    acc[el.elementType].push(el);
-    return acc;
-  }, {} as Record<string, TripElement[]>);
-
-  const typeLabels: Record<string, string> = {
-    flight: 'Flights',
-    hotel: 'Hotels',
-    car_rental: 'Car Rentals',
-    activity: 'Activities',
+  const handleParticipantsFromBooking = (next: TripParticipant[]) => {
+    setParticipants(next);
+    setParticipantsVersion(v => v + 1);
   };
 
-  return (
-    <div className="trip-detail-page">
-      <div className="trip-header">
-        <h1>{trip.name}</h1>
-        {trip.description && <p className="trip-description">{trip.description}</p>}
-        <div className="trip-metadata">
-          {trip.tripType && <span className="trip-type">{trip.tripType}</span>}
-          <span className="trip-dates">
-            {trip.startDate} to {trip.endDate}
-          </span>
-        </div>
-      </div>
+  const rows = useMemo(() => buildFlightRows(elements, bookings), [elements, bookings]);
+  const totals = useMemo(() => flightTotals(elements, bookings), [elements, bookings]);
+  const hiddenCount = elements.filter(e => e.elementType !== 'flight').length;
+  const selected = elements.find(e => e.id === selectedId) ?? null;
+  const selectedBookingCount = selected ? bookings.filter(b => b.elementIds.includes(selected.id)).length : 0;
 
-      <div className="elements-section">
-        {Object.entries(groupedByType).length === 0 ? (
-          <p className="no-elements">No elements added yet</p>
-        ) : (
-          Object.entries(groupedByType).map(([type, items]) => (
-            <div key={type} className="element-group">
-              <h2>{typeLabels[type] || type}</h2>
-              <div className="element-list">
-                {items.map(item => (
-                  <div key={item.id} className="element-card">
-                    <div className="element-header">
-                      <h3>{item.name}</h3>
-                      {item.bookingReference && (
-                        <span className="booking-ref">{item.bookingReference}</span>
-                      )}
-                    </div>
-                    {item.notes && <p className="element-notes">{item.notes}</p>}
-                    <div className="element-pricing">
-                      {item.priceCash && (
-                        <span className="price">${item.priceCash.toFixed(2)}</span>
-                      )}
-                      {item.pricePoints && (
-                        <span className="points">{item.pricePoints} points</span>
-                      )}
-                    </div>
-                    <span className="edit-link placeholder" title="Element editing coming soon">
-                      View/Edit → (coming soon)
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))
-        )}
-      </div>
-    </div>
+  if (loading) {
+    return <Container size="lg" py="md"><Loader size="sm" aria-label="Loading" /></Container>;
+  }
+
+  if (loadError) {
+    return (
+      <Container size="lg" py="md">
+        <Alert color="red" title="Couldn't load trip">{loadError}</Alert>
+        <Button mt="sm" variant="default" onClick={() => tripId && load(tripId, true)}>Retry</Button>
+      </Container>
+    );
+  }
+
+  if (!trip || !tripId) {
+    return <Container size="lg" py="md"><Text>Trip not found</Text></Container>;
+  }
+
+  return (
+    <Container size="lg" py="md">
+      <TripHeader trip={trip} onAdd={() => setAdding(true)} />
+      <TripTravelersStrip
+        tripId={tripId}
+        participants={participants}
+        refreshKey={participantsVersion}
+        onParticipantsChanged={setParticipants}
+      />
+
+      {reloadError && (
+        <Alert color="red" mt="sm" withCloseButton onClose={() => setReloadError(null)}>{reloadError}</Alert>
+      )}
+
+      {rows.length === 0 ? (
+        <Button mt="md" variant="light" onClick={() => setAdding(true)}>Add your first flight</Button>
+      ) : (
+        <FlightsSection rows={rows} totalLabel={totals.label} onOpen={setSelectedId} />
+      )}
+
+      {hiddenCount > 0 && (
+        <Text size="sm" c="dimmed" mt="sm">
+          {hiddenCount === 1
+            ? '1 other element hidden until its section is built'
+            : `${hiddenCount} other elements hidden until their sections are built`}
+        </Text>
+      )}
+
+      <AddElementDialog
+        tripId={tripId}
+        opened={adding}
+        onClose={() => setAdding(false)}
+        onCreated={async () => {
+          setAdding(false);
+          await reload();
+        }}
+      />
+
+      {selected && (
+        <ElementDialog
+          opened
+          onClose={() => setSelectedId(null)}
+          title={selected.name}
+          swipeEnabled={!editingDetails && !editingBookings}
+          tabs={[
+            {
+              value: 'details',
+              label: 'Details',
+              content: (
+                <FlightDetailsTab
+                  key={selected.id}
+                  tripId={tripId}
+                  element={selected}
+                  onChanged={reload}
+                  onDeleted={async () => {
+                    setSelectedId(null);
+                    await reload();
+                  }}
+                  onEditingChange={setEditingDetails}
+                />
+              ),
+            },
+            {
+              value: 'bookings',
+              label: 'Bookings',
+              count: selectedBookingCount,
+              content: (
+                <BookingCard
+                  tripId={tripId}
+                  elementId={selected.id}
+                  elements={elements}
+                  participants={participants}
+                  bookings={bookings}
+                  onParticipantsChanged={handleParticipantsFromBooking}
+                  refreshKey={bookingsVersion}
+                  onBookingsChanged={reloadBookings}
+                  onEditingChange={setEditingBookings}
+                />
+              ),
+            },
+            {
+              value: 'seats',
+              label: 'Seats',
+              content: <FlightSeatsTab tripId={tripId} element={selected} travelers={participants} />,
+            },
+          ]}
+        />
+      )}
+    </Container>
   );
 }

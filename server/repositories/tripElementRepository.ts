@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import { getDb } from '../db';
+import { flightTitle } from '../utils/flightTitle';
 
 export interface TripElement {
   id: string;
@@ -18,6 +19,22 @@ export interface TripElement {
   createdAt: string;
   updatedAt: string;
   deletedAt?: string | null;
+}
+
+export interface FlightLegInput {
+  id?: string;
+  departureAirport: string;
+  departureDatetime: string;
+  arrivalAirport: string;
+  arrivalDatetime: string;
+  airline?: string;
+  flightNumber?: string;
+  checkPriceUrl?: string;
+}
+
+function toEpochMinutes(value: string): number {
+  const normalized = /(Z|[+-]\d{2}:?\d{2})$/.test(value) ? value : `${value}Z`;
+  return Date.parse(normalized) / 60000;
 }
 
 export interface FlightLeg {
@@ -87,7 +104,7 @@ export class TripElementRepository {
 
   async createElement(tripId: string, element: {
     elementType: 'flight' | 'hotel' | 'car_rental' | 'activity';
-    name: string;
+    name?: string;
     bookingReference?: string;
     bookingUrl?: string;
     priceCash?: number;
@@ -107,24 +124,33 @@ export class TripElementRepository {
     await db.run(
       `INSERT INTO trip_elements (id, trip_id, element_type, name, booking_reference, booking_url, price_cash, price_points, loyalty_program, total_cash, total_points, notes, sort_position, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
-      [id, tripId, element.elementType, element.name, element.bookingReference || null, element.bookingUrl || null,
-       element.priceCash || null, element.pricePoints || null, element.loyaltyProgram || null,
-       element.totalCash || null, element.totalPoints || null, element.notes || null, sortPos]
+      [id, tripId, element.elementType, element.name?.trim() || (element.elementType === 'flight' ? 'Flight' : ''), element.bookingReference || null, element.bookingUrl || null,
+       element.priceCash ?? null, element.pricePoints ?? null, element.loyaltyProgram || null,
+       element.totalCash ?? null, element.totalPoints ?? null, element.notes || null, sortPos]
     );
 
     // Insert type-specific data
     if (element.elementType === 'flight' && element.typeSpecificData?.legs) {
-      for (const leg of element.typeSpecificData.legs) {
+      for (const [index, leg] of element.typeSpecificData.legs.entries()) {
+        const fallbackDate = typeof leg.flightDate === 'string' && leg.flightDate
+          ? `${leg.flightDate}T00:00:00Z`
+          : null;
+        const departureDatetime = leg.departureDatetime || fallbackDate || new Date().toISOString();
+        const arrivalDatetime = leg.arrivalDatetime || departureDatetime;
+        const departureAirport = leg.departureAirport || 'TBD';
+        const arrivalAirport = leg.arrivalAirport || 'TBD';
         const legId = uuidv4();
         await db.run(
           `INSERT INTO flight_legs (id, element_id, leg_order, departure_airport, departure_datetime, arrival_airport, arrival_datetime, airline, flight_number, seat_numbers, price_cash, price_points, loyalty_program, confirmation_number, check_price_url, layover_minutes_after, created_at, updated_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
-          [legId, id, leg.legOrder, leg.departureAirport, leg.departureDatetime, leg.arrivalAirport, leg.arrivalDatetime,
-           leg.airline || null, leg.flightNumber || null, leg.seatNumbers || null, leg.priceCash || null,
-           leg.pricePoints || null, leg.loyaltyProgram || null, leg.confirmationNumber || null,
-           leg.checkPriceUrl || null, leg.layoverMinutesAfter || null]
+          [legId, id, leg.legOrder ?? index + 1, departureAirport, departureDatetime, arrivalAirport, arrivalDatetime,
+           leg.airline || null, leg.flightNumber || null, leg.seatNumbers || null, leg.priceCash ?? null,
+           leg.pricePoints ?? null, leg.loyaltyProgram || null, leg.confirmationNumber || null,
+           leg.checkPriceUrl || null, leg.layoverMinutesAfter ?? null]
         );
       }
+      await this.recomputeLayovers(id, true);
+      await this.refreshFlightTitle(id);
     } else if (element.elementType === 'hotel' && element.typeSpecificData) {
       await db.run(
         `INSERT INTO hotel_element_details (element_id, address, check_in_date, check_out_date, room_type, booking_source, advertised_price_cash, advertised_price_points, advertised_loyalty_program, created_at, updated_at)
@@ -288,5 +314,130 @@ export class TripElementRepository {
       `UPDATE trip_elements SET deleted_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`,
       [elementId]
     );
+  }
+
+  async syncLegs(elementId: string, legs: FlightLegInput[]): Promise<FlightLeg[]> {
+    const db = await this.db;
+    const element = await this.getElementById(elementId);
+    if (!element || element.elementType !== 'flight') {
+      throw new Error('Flight element not found');
+    }
+    if (legs.length === 0) {
+      throw new Error('A flight needs at least one leg');
+    }
+
+    const existingIds = new Set<string>(((element as any).legs ?? []).map((l: FlightLeg) => l.id));
+    for (const leg of legs) {
+      if (!leg || typeof leg !== 'object') {
+        throw new Error('Each leg must be an object');
+      }
+      if (!leg.departureAirport?.trim() || !leg.arrivalAirport?.trim()) {
+        throw new Error('Each leg needs departure and arrival airports');
+      }
+      if (!leg.departureDatetime || !leg.arrivalDatetime) {
+        throw new Error('Each leg needs departure and arrival times');
+      }
+      if (!Number.isFinite(toEpochMinutes(leg.departureDatetime)) || !Number.isFinite(toEpochMinutes(leg.arrivalDatetime))) {
+        throw new Error('Each leg needs valid departure and arrival times');
+      }
+      if (leg.id && !existingIds.has(leg.id)) {
+        throw new Error('Leg does not belong to this element');
+      }
+    }
+
+    for (let i = 1; i < legs.length; i++) {
+      if (toEpochMinutes(legs[i].departureDatetime) < toEpochMinutes(legs[i - 1].arrivalDatetime)) {
+        throw new Error(`Leg ${i + 1} departs before the previous leg arrives`);
+      }
+    }
+
+    await db.run('BEGIN TRANSACTION');
+    try {
+      const keepIds = new Set(legs.filter(l => l.id).map(l => l.id as string));
+      for (const id of existingIds) {
+        if (!keepIds.has(id)) {
+          await db.run('DELETE FROM flight_legs WHERE id = ?', [id]);
+        }
+      }
+
+      for (const [index, leg] of legs.entries()) {
+        const values = [
+          leg.departureAirport.trim().toUpperCase(),
+          leg.departureDatetime,
+          leg.arrivalAirport.trim().toUpperCase(),
+          leg.arrivalDatetime,
+          leg.airline?.trim() || null,
+          leg.flightNumber?.trim() || null,
+          leg.checkPriceUrl?.trim() || null,
+        ];
+        if (leg.id) {
+          await db.run(
+            `UPDATE flight_legs SET leg_order = ?, departure_airport = ?, departure_datetime = ?, arrival_airport = ?, arrival_datetime = ?,
+                    airline = ?, flight_number = ?, check_price_url = ?, updated_at = datetime('now') WHERE id = ?`,
+            [index + 1, ...values, leg.id]
+          );
+        } else {
+          await db.run(
+            `INSERT INTO flight_legs (id, element_id, leg_order, departure_airport, departure_datetime, arrival_airport, arrival_datetime,
+                                      airline, flight_number, check_price_url, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+            [uuidv4(), elementId, index + 1, ...values]
+          );
+        }
+      }
+
+      await this.recomputeLayovers(elementId);
+      await this.refreshFlightTitle(elementId);
+      await db.run('COMMIT');
+    } catch (error) {
+      try { await db.run('ROLLBACK'); } catch (e) {}
+      throw error;
+    }
+    return (((await this.getElementById(elementId)) as any)?.legs ?? []) as FlightLeg[];
+  }
+
+  // Keeps a flight's name in sync with its legs; leaves the name alone when the title can't be derived.
+  private async refreshFlightTitle(elementId: string): Promise<void> {
+    const db = await this.db;
+    const legs = await db.all(
+      `SELECT departure_airport as departureAirport, arrival_airport as arrivalAirport
+       FROM flight_legs WHERE element_id = ? ORDER BY leg_order ASC`,
+      [elementId]
+    );
+    const title = flightTitle(legs);
+    if (title) {
+      await db.run(`UPDATE trip_elements SET name = ? WHERE id = ?`, [title, elementId]);
+    }
+  }
+
+  private async recomputeLayovers(elementId: string, onlyMissing = false): Promise<void> {
+    const db = await this.db;
+    const legs = await db.all(
+      `SELECT id, departure_datetime as dep, arrival_datetime as arr, layover_minutes_after as layover
+       FROM flight_legs WHERE element_id = ? ORDER BY leg_order ASC`,
+      [elementId]
+    );
+    for (let i = 0; i < legs.length; i++) {
+      if (onlyMissing && legs[i].layover !== null) continue;
+      let minutes: number | null = null;
+      if (i < legs.length - 1) {
+        const diff = toEpochMinutes(legs[i + 1].dep) - toEpochMinutes(legs[i].arr);
+        minutes = Number.isFinite(diff) && diff >= 0 ? Math.round(diff) : null;
+      }
+      await db.run('UPDATE flight_legs SET layover_minutes_after = ? WHERE id = ?', [minutes, legs[i].id]);
+    }
+  }
+
+  async getLegOwnership(legId: string): Promise<{ elementId: string; tripId: string } | null> {
+    const db = await this.db;
+    const row = await db.get(
+      `SELECT fl.element_id as elementId, te.trip_id as tripId
+       FROM flight_legs fl
+       JOIN trip_elements te ON te.id = fl.element_id
+       WHERE fl.id = ?`,
+      [legId]
+    );
+
+    return row ? { elementId: row.elementId, tripId: row.tripId } : null;
   }
 }

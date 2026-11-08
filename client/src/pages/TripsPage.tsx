@@ -1,71 +1,106 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
+import { Alert, Button, Card, Container, Group, Loader, Modal, SegmentedControl, SimpleGrid, Stack, Text, TextInput, Title, Badge } from '@mantine/core';
 import { Trip } from '../types/trip';
 import { tripApi } from '../api/tripApi';
+import { formatTripDateRange } from '../utils/tripDates';
 import '../styles/trips.css';
 
 export function TripsPage() {
   const [trips, setTrips] = useState<Trip[]>([]);
   const [viewMode, setViewMode] = useState<'list' | 'card'>('list');
+  const [showCreate, setShowCreate] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [name, setName] = useState('');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const loadTrips = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        const data = await tripApi.listTrips();
-        setTrips(data);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load trips');
-      } finally {
-        setLoading(false);
-      }
-    };
+  const loadTrips = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      setTrips(await tripApi.listTrips());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load trips');
+    } finally {
+      setLoading(false);
+    }
+  };
 
+  useEffect(() => {
     loadTrips();
   }, []);
 
-  if (loading) {
-    return <div className="trips-page"><p>Loading trips...</p></div>;
-  }
+  const createTrip = async () => {
+    if (!name || !startDate || !endDate) {
+      setError('Name, start date, and end date are required');
+      return;
+    }
+    try {
+      setCreating(true);
+      setError(null);
+      await tripApi.createTrip({ name, startDate, endDate });
+      setName('');
+      setStartDate('');
+      setEndDate('');
+      setShowCreate(false);
+      await loadTrips();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create trip');
+    } finally {
+      setCreating(false);
+    }
+  };
 
-  if (error) {
-    return <div className="trips-page"><p className="error">Error: {error}</p></div>;
-  }
+  const tripCard = (trip: Trip) => (
+    <Card key={trip.id} component="a" href={`/trips/${trip.id}`} withBorder padding="sm">
+      <Group justify="space-between" wrap="nowrap">
+        <Text fw={600}>{trip.name}</Text>
+        {trip.tripType && <Badge variant="light">{trip.tripType}</Badge>}
+      </Group>
+      <Text size="sm" c="dimmed">{formatTripDateRange(trip.startDate, trip.endDate)}</Text>
+      {trip.description && <Text size="sm">{trip.description}</Text>}
+    </Card>
+  );
 
   return (
-    <div className="trips-page">
-      <div className="trips-header">
-        <h1>Trips</h1>
-        <button 
-          className="view-toggle-btn"
-          onClick={() => setViewMode(viewMode === 'list' ? 'card' : 'list')}
-        >
-          Toggle {viewMode === 'list' ? 'Card' : 'List'} View
-        </button>
-      </div>
+    <Container size="lg" py="md">
+      <Group justify="space-between" mb="md">
+        <Title order={2}>Trips</Title>
+        <Group>
+          <SegmentedControl
+            value={viewMode}
+            onChange={value => setViewMode(value as 'list' | 'card')}
+            data={[
+              { value: 'list', label: 'List' },
+              { value: 'card', label: 'Cards' },
+            ]}
+          />
+          <Button onClick={() => setShowCreate(true)}>Create Trip</Button>
+        </Group>
+      </Group>
 
-      {trips.length === 0 ? (
-        <p className="no-trips">No trips yet. Create your first trip!</p>
+      {error && <Alert color="red" mb="md" withCloseButton onClose={() => setError(null)}>{error}</Alert>}
+
+      <Modal opened={showCreate} onClose={() => setShowCreate(false)} title="Create trip">
+        <Stack>
+          <TextInput placeholder="Trip name" aria-label="Trip name" value={name} onChange={e => setName(e.currentTarget.value)} />
+          <TextInput type="date" label="Start date" value={startDate} onChange={e => setStartDate(e.currentTarget.value)} />
+          <TextInput type="date" label="End date" value={endDate} onChange={e => setEndDate(e.currentTarget.value)} />
+          <Button onClick={createTrip} loading={creating}>Save Trip</Button>
+        </Stack>
+      </Modal>
+
+      {loading ? (
+        <Loader size="sm" aria-label="Loading trips" />
+      ) : trips.length === 0 ? (
+        <Text c="dimmed">No trips yet. Create your first trip!</Text>
+      ) : viewMode === 'card' ? (
+        <SimpleGrid cols={{ base: 1, sm: 2, md: 3 }}>{trips.map(tripCard)}</SimpleGrid>
       ) : (
-        <div className={`trips-container trips-${viewMode}`}>
-          {trips.map(trip => (
-            <a 
-              key={trip.id} 
-              href={`/trips/${trip.id}`} 
-              className="trip-item"
-            >
-              <h2>{trip.name}</h2>
-              {trip.description && <p className="trip-description">{trip.description}</p>}
-              {trip.tripType && <span className="trip-type">{trip.tripType}</span>}
-              <span className="trip-dates">
-                {trip.startDate} to {trip.endDate}
-              </span>
-            </a>
-          ))}
-        </div>
+        <Stack gap="xs">{trips.map(tripCard)}</Stack>
       )}
-    </div>
+    </Container>
   );
 }

@@ -127,3 +127,88 @@ export interface TripAttachment {
   fileSize: number;
   createdAt: string;
 }
+
+export interface FlightAutofillLookupInput {
+  airlineCode: string;
+  flightNumber: string;
+  flightDate: string;
+}
+
+export interface FlightAutofillDetails {
+  airlineCode: string;
+  flightNumber: string;
+  flightDate: string;
+  departureAirport?: string;
+  arrivalAirport?: string;
+  departureDatetime?: string;
+  arrivalDatetime?: string;
+  statusText?: string;
+  sourceUrl: string;
+}
+
+export interface Booking {
+  id: string;
+  tripId: string;
+  confirmationNumber: string | null;
+  advertisedPriceCash: number | null;
+  advertisedPricePoints: number | null;
+  loyaltyProgram: string | null;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+  elementIds: string[];
+  travelerIds: string[];
+  currentConfirmationNumber: string | null;
+  actualTotalCash: number;
+  actualTotalPoints: number;
+}
+
+export interface CreateBookingPayload {
+  confirmationNumber?: string | null;
+  advertisedPriceCash?: number | null;
+  advertisedPricePoints?: number | null;
+  loyaltyProgram?: string | null;
+  notes?: string | null;
+  elementIds: string[];
+  travelerIds: string[];
+}
+
+export interface BookingTransaction {
+  id: string;
+  bookingId: string;
+  amountCash: number;
+  amountPoints: number;
+  transactionDate: string;
+  confirmationNumber: string | null;
+  notes: string | null;
+  createdAt: string;
+}
+
+export interface AddBookingTransactionPayload {
+  amountCash?: number;
+  amountPoints?: number;
+  transactionDate?: string;
+  confirmationNumber?: string;
+  notes?: string;
+}
+
+export interface FlightTravelerSeat {
+  id: string;
+  legId: string;
+  participantId: string;
+  seatNumber: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FlightLegPayload {
+  id?: string;
+  legOrder?: number;
+  departureAirport: string;
+  departureDatetime: string;
+  arrivalAirport: string;
+  arrivalDatetime: string;
+  airline?: string;
+  flightNumber?: string;
+  checkPriceUrl?: string;
+}
