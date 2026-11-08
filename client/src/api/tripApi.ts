@@ -1,5 +1,5 @@
 import {
-  Trip, TripElement, TripElementConfirmation, TripAttachment, FlightAutofillLookupInput, FlightAutofillDetails,
+  Trip, TripElement, TripElementConfirmation, FlightAutofillLookupInput, FlightAutofillDetails,
   TripParticipant, Booking, CreateBookingPayload, BookingTransaction, AddBookingTransactionPayload, FlightTravelerSeat,
   FlightLeg, FlightLegPayload,
 } from '../types/trip';

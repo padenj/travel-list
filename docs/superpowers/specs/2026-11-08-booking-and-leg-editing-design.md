@@ -83,7 +83,7 @@ Price check link [optional                           ]
 - **Arrival day**: Mantine `SegmentedControl` with `Same day | +1 | +2` (offset 0/1/2). Defaults to 0. When either time changes, `autoArrivalOffset(dep, arr, current)` toggles between Same day and +1 automatically (arrival earlier than departure → +1; otherwise +1 → Same day). A manually chosen +2 is never changed automatically.
 - **Look up**: uses the parsed flight code + date via the existing `lookupFlightAutofill`; results are split back into date/times/offset.
 - **Validation (client)**: date, both airports and both times required; inline `Alert` on failure. Server validation remains authoritative.
-- **Layout**: one column below `48em`, two columns above; inputs use Mantine default sizes (touch-friendly).
+- **Layout**: two columns at all widths (every field is short); inputs use Mantine default sizes (touch-friendly).
 - **New-leg defaults**: date = previous leg's arrival date; From = previous leg's To.
 
 Draft model (`utils/flightLegs.ts`):
