@@ -28,10 +28,27 @@ export interface CreateBookingInput {
   travelerIds: string[];
 }
 
+export class BookingConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'BookingConflictError';
+  }
+}
+
+export interface TravelerConflict {
+  bookingId: string;
+  confirmationNumber: string | null;
+  elementId: string;
+  elementName: string;
+  participantId: string;
+  travelerName: string;
+}
+
 export class BookingRepository {
   private db = getDb();
 
   async createBooking(tripId: string, input: CreateBookingInput): Promise<Booking> {
+    await this.assertNoTravelerConflicts(tripId, input.elementIds, input.travelerIds);
     const id = uuidv4();
     const db = await this.db;
     await db.run(
@@ -47,6 +64,55 @@ export class BookingRepository {
       await db.run(`INSERT INTO booking_travelers (booking_id, participant_id) VALUES (?, ?)`, [id, participantId]);
     }
     return this.getBookingById(id) as Promise<Booking>;
+  }
+
+  // Other bookings in the trip that already cover any (element, traveler) pair from the given sets.
+  async findTravelerConflicts(
+    tripId: string,
+    elementIds: string[],
+    travelerIds: string[],
+    excludeBookingId?: string
+  ): Promise<TravelerConflict[]> {
+    if (elementIds.length === 0 || travelerIds.length === 0) return [];
+    const db = await this.db;
+    const elementMarks = elementIds.map(() => '?').join(', ');
+    const travelerMarks = travelerIds.map(() => '?').join(', ');
+    return db.all(
+      `SELECT b.id AS bookingId,
+              COALESCE(
+                (SELECT t.confirmation_number FROM booking_transactions t
+                 WHERE t.booking_id = b.id AND t.confirmation_number IS NOT NULL AND t.confirmation_number != ''
+                 ORDER BY t.created_at DESC LIMIT 1),
+                NULLIF(b.confirmation_number, '')
+              ) AS confirmationNumber,
+              bl.element_id AS elementId, e.name AS elementName,
+              bt.participant_id AS participantId, p.display_name AS travelerName
+       FROM bookings b
+       JOIN booking_links bl ON bl.booking_id = b.id
+       JOIN booking_travelers bt ON bt.booking_id = b.id
+       JOIN trip_elements e ON e.id = bl.element_id
+       JOIN trip_participants p ON p.id = bt.participant_id
+       WHERE b.trip_id = ?
+         AND b.id != ?
+         AND bl.element_id IN (${elementMarks})
+         AND bt.participant_id IN (${travelerMarks})
+       ORDER BY b.created_at ASC, e.name ASC, p.display_name ASC`,
+      [tripId, excludeBookingId ?? '', ...elementIds, ...travelerIds]
+    );
+  }
+
+  async assertNoTravelerConflicts(
+    tripId: string,
+    elementIds: string[],
+    travelerIds: string[],
+    excludeBookingId?: string
+  ): Promise<void> {
+    const [first] = await this.findTravelerConflicts(tripId, elementIds, travelerIds, excludeBookingId);
+    if (!first) return;
+    const other = first.confirmationNumber
+      ? `booking ${first.confirmationNumber}`
+      : 'another booking without a confirmation number';
+    throw new BookingConflictError(`${first.travelerName} is already on ${other} for ${first.elementName}`);
   }
 
   async getBookingById(id: string): Promise<Booking | null> {
@@ -126,6 +192,10 @@ export class BookingRepository {
   }
 
   async linkElement(bookingId: string, elementId: string): Promise<void> {
+    const booking = await this.getBookingById(bookingId);
+    if (booking) {
+      await this.assertNoTravelerConflicts(booking.tripId, [elementId], booking.travelerIds, bookingId);
+    }
     const db = await this.db;
     await db.run(
       `INSERT OR IGNORE INTO booking_links (booking_id, element_id) VALUES (?, ?)`,
@@ -139,6 +209,10 @@ export class BookingRepository {
   }
 
   async addTraveler(bookingId: string, participantId: string): Promise<void> {
+    const booking = await this.getBookingById(bookingId);
+    if (booking) {
+      await this.assertNoTravelerConflicts(booking.tripId, booking.elementIds, [participantId], bookingId);
+    }
     const db = await this.db;
     await db.run(
       `INSERT OR IGNORE INTO booking_travelers (booking_id, participant_id) VALUES (?, ?)`,

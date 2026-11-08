@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { getDb, closeDb } from '../db';
-import { BookingRepository } from './bookingRepository';
+import { BookingRepository, BookingConflictError } from './bookingRepository';
 import { TripParticipantRepository } from './tripParticipantRepository';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -153,6 +153,52 @@ describe('BookingRepository', () => {
       expect(linkCount.count).toBe(0);
       expect(travelerCount.count).toBe(0);
       expect(txnCount.count).toBe(0);
+    });
+  });
+
+  describe('traveler conflicts', () => {
+    it('rejects a second booking for the same flight and traveler with a readable message', async () => {
+      await repo.createBooking(tripId, { confirmationNumber: 'ABC123', elementIds: [elementId], travelerIds: [participantAId] });
+      await expect(
+        repo.createBooking(tripId, { elementIds: [elementId], travelerIds: [participantAId] })
+      ).rejects.toThrow(new BookingConflictError('A is already on booking ABC123 for Departure Flights'));
+    });
+
+    it('allows the same traveler on a different flight', async () => {
+      await repo.createBooking(tripId, { elementIds: [elementId], travelerIds: [participantAId] });
+      await expect(repo.createBooking(tripId, { elementIds: [elementId2], travelerIds: [participantAId] })).resolves.toBeTruthy();
+    });
+
+    it('allows a different traveler on the same flight (separate per-traveler bookings)', async () => {
+      await repo.createBooking(tripId, { elementIds: [elementId], travelerIds: [participantAId] });
+      await expect(repo.createBooking(tripId, { elementIds: [elementId], travelerIds: [participantBId] })).resolves.toBeTruthy();
+    });
+
+    it('describes a conflicting booking without a confirmation number', async () => {
+      await repo.createBooking(tripId, { elementIds: [elementId], travelerIds: [participantAId] });
+      await expect(
+        repo.createBooking(tripId, { elementIds: [elementId], travelerIds: [participantAId] })
+      ).rejects.toThrow('A is already on another booking without a confirmation number for Departure Flights');
+    });
+
+    it('findTravelerConflicts ignores the excluded booking', async () => {
+      const booking = await repo.createBooking(tripId, { elementIds: [elementId], travelerIds: [participantAId] });
+      expect(await repo.findTravelerConflicts(tripId, [elementId], [participantAId], booking.id)).toEqual([]);
+      const conflicts = await repo.findTravelerConflicts(tripId, [elementId], [participantAId]);
+      expect(conflicts).toHaveLength(1);
+      expect(conflicts[0]).toMatchObject({ bookingId: booking.id, elementId, participantId: participantAId, travelerName: 'A', elementName: 'Departure Flights' });
+    });
+
+    it('linkElement rejects linking a flight where a traveler is already booked', async () => {
+      await repo.createBooking(tripId, { elementIds: [elementId2], travelerIds: [participantAId] });
+      const booking = await repo.createBooking(tripId, { elementIds: [elementId], travelerIds: [participantAId] });
+      await expect(repo.linkElement(booking.id, elementId2)).rejects.toBeInstanceOf(BookingConflictError);
+    });
+
+    it('addTraveler rejects adding a traveler already booked on one of the flights', async () => {
+      await repo.createBooking(tripId, { elementIds: [elementId], travelerIds: [participantBId] });
+      const booking = await repo.createBooking(tripId, { elementIds: [elementId], travelerIds: [participantAId] });
+      await expect(repo.addTraveler(booking.id, participantBId)).rejects.toBeInstanceOf(BookingConflictError);
     });
   });
 
