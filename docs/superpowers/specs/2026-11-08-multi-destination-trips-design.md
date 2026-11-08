@@ -48,7 +48,7 @@ All routes require authentication and check that the trip belongs to the user's 
 | `POST /trips/:tripId/split` | Body: `{ sourceListId, destinations: [{ name, memberIds }], sharedItemsDestinationIndex }`. See "Split" below. |
 | `POST /packing-lists/:listId/items/:pliId/move` | Body: `{ toListId }`. Both lists must be destinations of the same trip. See "Move" below. |
 | `GET /packing-lists/:id` | Adds `trip_destination: { tripId, tripName, destinations: [...] } \| null` to the response. |
-| `GET /families/:familyId/packing-lists` | Adds `trip_destination` (`{ tripId, tripName, destinationCount }` or null) to each list so the selector can group them. |
+| `GET /families/:familyId/packing-lists` | Adds `trip_destination` (`{ tripId, tripName, destinationId, destinationName, position, destinationCount }` or null) to each list so the selector and Manage Lists can group and label them. |
 
 ### Split (single transaction)
 
@@ -79,7 +79,7 @@ Trips are soft-deleted, so `TripRepository.deleteTrip` also soft-deletes the tri
 
 Opened from "Split by destination" in the dashboard list menu and in Manage Lists. Uses a Mantine `Modal`, full screen on phones.
 
-1. **Trip:** pick an existing trip (the one already linked to the list is selected first), or create a new trip with a name (defaults to the list name) and start and end dates (required by the trips API).
+1. **Trip:** pick an existing trip, or create a new trip (the default) with a name (defaults to the list name) and start and end dates (required by the trips API).
 2. **Who goes where:** destination chips that can be renamed (default two, named "Destination 1" and "Destination 2"; "+" adds more). Each person gets a row with a segmented control to choose their destination. "Next" stays disabled until every list member is assigned and every destination has at least one person.
 3. **Shared items:** "Where should the N shared items go?" with one radio button per destination. A note explains that personal items follow each person and that checks are kept.
 
@@ -162,8 +162,9 @@ Checking items and toggling not-needed work offline through the existing per-lis
 |---|---|
 | `server/repositories/tripDestinationRepository.ts` | CRUD, the one-destination rule, member updates. |
 | `server/services/tripSplitService.ts` | Split and move logic, run inside transactions. |
+| `server/utils/transaction.ts` | `withTransaction(db, fn)` helper. |
 | `server/routes/tripRoutes.ts` | Destination, split and move routes. |
-| `client/src/api/tripApi.ts` | Helpers `getTripDestinations`, `createTripDestination`, `updateTripDestination`, `deleteTripDestination`, `splitListIntoTrip`. |
+| `client/src/api/tripApi.ts` | `tripApi.listDestinations`, `createDestination`, `updateDestination`, `deleteDestination`, `splitList`. A 409 response throws `ApiConflictError`, which carries the response body. |
 | `client/src/api.ts` | Helper `movePackingListItem`. |
 | `client/src/utils/dashboardGroups.ts` | Pure helpers: build one destination group from a list response; person ordering and counts for Person view. |
 | `client/src/components/PersonView.tsx` | Person-first view. |
