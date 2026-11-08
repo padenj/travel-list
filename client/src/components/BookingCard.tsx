@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
+import { Alert, Badge, Button, Checkbox, Group, Paper, SimpleGrid, Text, TextInput } from '@mantine/core';
 import { Booking, TripElement, TripParticipant } from '../types/trip';
 import { tripApi } from '../api/tripApi';
 import { BookingTransactionList } from './BookingTransactionList';
-import { formatMoney } from '../utils/money';
+import { bookingMoneyLine } from '../utils/bookingSummary';
 
 interface BookingCardProps {
   tripId: string;
@@ -64,7 +65,7 @@ export function BookingCard({ tripId, elementId, elements, participants, onParti
     try {
       setSaving(true);
       setError(null);
-      let travelerIds = [...selectedTravelerIds];
+      const travelerIds = [...selectedTravelerIds];
 
       if (newTravelerName.trim()) {
         const created = await tripApi.createParticipant(tripId, { displayName: newTravelerName.trim() });
@@ -111,114 +112,80 @@ export function BookingCard({ tripId, elementId, elements, participants, onParti
   const otherElements = elements.filter(e => e.id !== elementId && e.elementType === 'flight');
 
   return (
-    <div className="booking-card-section">
-      <div className="booking-card-header">
-        <h4>Bookings</h4>
-        <button type="button" className="view-toggle-btn" onClick={() => setShowForm(prev => !prev)}>
-          {showForm ? 'Cancel' : '+ Add Booking'}
-        </button>
-      </div>
+    <div>
+      <Group justify="flex-end">
+        <Button size="compact-sm" variant="light" onClick={() => setShowForm(prev => !prev)}>
+          {showForm ? 'Cancel' : '+ Booking'}
+        </Button>
+      </Group>
 
-      {error && <p className="error">{error}</p>}
+      {error && <Alert color="red" mt="xs">{error}</Alert>}
 
       {showForm && (
-        <div className="booking-form">
-          <div className="create-element-field">
-            <label htmlFor={`booking-conf-${elementId}`}>Confirmation number</label>
-            <input id={`booking-conf-${elementId}`} type="text" value={confirmationNumber} onChange={(e) => setConfirmationNumber(e.target.value)} />
-          </div>
-          <div className="create-element-field">
-            <label htmlFor={`booking-price-cash-${elementId}`}>Advertised price per person (cash)</label>
-            <input id={`booking-price-cash-${elementId}`} type="number" step="0.01" value={advertisedPriceCash} onChange={(e) => setAdvertisedPriceCash(e.target.value)} />
-          </div>
-          <div className="create-element-field">
-            <label htmlFor={`booking-price-points-${elementId}`}>Advertised price per person (points)</label>
-            <input id={`booking-price-points-${elementId}`} type="number" step="1" value={advertisedPricePoints} onChange={(e) => setAdvertisedPricePoints(e.target.value)} />
-          </div>
-          <div className="create-element-field">
-            <label htmlFor={`booking-loyalty-${elementId}`}>Loyalty program</label>
-            <input id={`booking-loyalty-${elementId}`} type="text" value={loyaltyProgram} onChange={(e) => setLoyaltyProgram(e.target.value)} />
-          </div>
-          <div className="create-element-field">
-            <label htmlFor={`booking-notes-${elementId}`}>Notes</label>
-            <input id={`booking-notes-${elementId}`} type="text" value={notes} onChange={(e) => setNotes(e.target.value)} />
-          </div>
+        <Paper withBorder p="sm" mt="xs">
+          <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="xs">
+            <TextInput id={`booking-conf-${elementId}`} label="Confirmation number" value={confirmationNumber} onChange={e => setConfirmationNumber(e.currentTarget.value)} />
+            <TextInput id={`booking-loyalty-${elementId}`} label="Loyalty program" value={loyaltyProgram} onChange={e => setLoyaltyProgram(e.currentTarget.value)} />
+            <TextInput id={`booking-price-cash-${elementId}`} label="Advertised price per person (cash)" type="number" step="0.01" value={advertisedPriceCash} onChange={e => setAdvertisedPriceCash(e.currentTarget.value)} />
+            <TextInput id={`booking-price-points-${elementId}`} label="Advertised price per person (points)" type="number" step="1" value={advertisedPricePoints} onChange={e => setAdvertisedPricePoints(e.currentTarget.value)} />
+          </SimpleGrid>
+          <TextInput mt="xs" id={`booking-notes-${elementId}`} label="Notes" value={notes} onChange={e => setNotes(e.currentTarget.value)} />
 
-          <fieldset>
-            <legend>Travelers on this booking</legend>
+          <Text size="sm" fw={600} mt="sm">Travelers on this booking</Text>
+          <Group gap="sm" mt={4}>
             {participants.map(p => (
-              <label key={p.id}>
-                <input
-                  type="checkbox"
-                  checked={selectedTravelerIds.includes(p.id)}
-                  onChange={() => toggleTraveler(p.id)}
-                />
-                {p.displayName}
-              </label>
+              <Checkbox key={p.id} label={p.displayName} checked={selectedTravelerIds.includes(p.id)} onChange={() => toggleTraveler(p.id)} />
             ))}
-            <div className="create-element-field">
-              <label htmlFor={`booking-new-traveler-${elementId}`}>+ New traveler</label>
-              <input
-                id={`booking-new-traveler-${elementId}`}
-                type="text"
-                value={newTravelerName}
-                onChange={(e) => setNewTravelerName(e.target.value)}
-                placeholder="Name of traveler not yet on the trip"
-              />
-            </div>
-          </fieldset>
+          </Group>
+          <TextInput
+            mt="xs"
+            id={`booking-new-traveler-${elementId}`}
+            label="+ New traveler"
+            placeholder="Name of traveler not yet on the trip"
+            value={newTravelerName}
+            onChange={e => setNewTravelerName(e.currentTarget.value)}
+          />
 
           {otherElements.length > 0 && (
-            <fieldset>
-              <legend>Also applies to</legend>
-              {otherElements.map(el => (
-                <label key={el.id}>
-                  <input
-                    type="checkbox"
-                    checked={selectedElementIds.includes(el.id)}
-                    onChange={() => toggleElement(el.id)}
-                  />
-                  {el.name}
-                </label>
-              ))}
-            </fieldset>
+            <>
+              <Text size="sm" fw={600} mt="sm">Also applies to</Text>
+              <Group gap="sm" mt={4}>
+                {otherElements.map(el => (
+                  <Checkbox key={el.id} label={el.name} checked={selectedElementIds.includes(el.id)} onChange={() => toggleElement(el.id)} />
+                ))}
+              </Group>
+            </>
           )}
 
-          <button type="button" className="view-toggle-btn" onClick={saveBooking} disabled={saving}>
-            {saving ? 'Saving...' : 'Save Booking'}
-          </button>
-        </div>
+          <Button mt="sm" size="xs" onClick={saveBooking} loading={saving}>Save booking</Button>
+        </Paper>
       )}
 
-      {bookings.length === 0 && !showForm && <p className="no-elements">No bookings yet for this element</p>}
+      {bookings.length === 0 && !showForm && (
+        <Text size="sm" c="dimmed" mt="xs">No bookings yet for this flight</Text>
+      )}
 
       {bookings.map(booking => {
-        const travelerNames = booking.travelerIds
-          .map(id => participants.find(p => p.id === id)?.displayName || id)
-          .join(', ');
+        const travelerNames = booking.travelerIds.map(id => participants.find(p => p.id === id)?.displayName || id);
         const otherLinkedElements = booking.elementIds
           .filter(id => id !== elementId)
           .map(id => elements.find(e => e.id === id))
           .filter((e): e is TripElement => !!e);
-        const actualPerPerson = booking.travelerIds.length > 0
-          ? booking.actualTotalCash / booking.travelerIds.length
-          : booking.actualTotalCash;
 
         return (
-          <div key={booking.id} className="element-card">
-            <div className="element-header">
-              <h3>{booking.currentConfirmationNumber || 'No confirmation number'}</h3>
-            </div>
-            <p>Travelers: {travelerNames}</p>
-            {booking.advertisedPriceCash !== null && (
-              <p>Advertised: {formatMoney(booking.advertisedPriceCash)} / person</p>
-            )}
-            <p>Actual total: {formatMoney(booking.actualTotalCash)} ({formatMoney(actualPerPerson)} / person)</p>
-            {booking.confirmationNumber && booking.confirmationNumber !== booking.currentConfirmationNumber && (
-              <p>Originally booked as {booking.confirmationNumber}</p>
-            )}
+          <Paper key={booking.id} withBorder p="xs" mt="xs">
+            <Group gap="xs">
+              <Text fw={700}>{booking.currentConfirmationNumber || 'No confirmation number'}</Text>
+              {booking.confirmationNumber && booking.confirmationNumber !== booking.currentConfirmationNumber && (
+                <Text size="xs" c="dimmed">{`orig ${booking.confirmationNumber}`}</Text>
+              )}
+              {travelerNames.map((name, index) => (
+                <Badge key={`${name}-${index}`} variant="outline" tt="none" size="sm">{name}</Badge>
+              ))}
+            </Group>
+            <Text size="sm" c="dimmed">{bookingMoneyLine(booking)}</Text>
             {otherLinkedElements.length > 0 && (
-              <p>
+              <Text size="xs" c="dimmed">
                 Also covers:{' '}
                 {otherLinkedElements.map((e, index) => (
                   <span key={e.id}>
@@ -226,7 +193,7 @@ export function BookingCard({ tripId, elementId, elements, participants, onParti
                     {e.name}
                   </span>
                 ))}
-              </p>
+              </Text>
             )}
             <BookingTransactionList
               tripId={tripId}
@@ -235,7 +202,7 @@ export function BookingCard({ tripId, elementId, elements, participants, onParti
               refreshKey={refreshKey}
               onChanged={handleBookingsChanged}
             />
-          </div>
+          </Paper>
         );
       })}
     </div>
