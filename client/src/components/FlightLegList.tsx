@@ -90,7 +90,7 @@ export function FlightLegList({ tripId, elementId, legs, onChanged, onEditingCha
         idPrefix={`leg-${elementId}-${editing.index}`}
       />
       <Group mt="sm" justify="flex-end">
-        <Button variant="default" size="xs" onClick={cancel}>Cancel</Button>
+        <Button variant="default" size="xs" onClick={cancel} disabled={saving}>Cancel</Button>
         <Button size="xs" onClick={saveLeg} loading={saving}>Save leg</Button>
       </Group>
     </Paper>
@@ -113,12 +113,12 @@ export function FlightLegList({ tripId, elementId, legs, onChanged, onEditingCha
               {confirmingIndex === index ? (
                 <Group gap={4} wrap="nowrap">
                   <Text size="xs">Delete this leg?</Text>
-                  <Button size="compact-xs" color="red" onClick={() => deleteLeg(index)} loading={saving}>Confirm</Button>
-                  <Button size="compact-xs" variant="default" onClick={() => setConfirmingIndex(null)}>Cancel</Button>
+                  <Button size="xs" color="red" onClick={() => deleteLeg(index)} loading={saving}>Confirm</Button>
+                  <Button size="xs" variant="default" onClick={() => setConfirmingIndex(null)}>Cancel</Button>
                 </Group>
               ) : (
                 <Group gap={2} wrap="nowrap">
-                  <ActionIcon variant="subtle" size="lg" aria-label={`Edit leg ${index + 1}`} onClick={() => startEdit(index)} disabled={isEditing}>
+                  <ActionIcon variant="subtle" size="lg" aria-label={`Edit leg ${index + 1}`} onClick={() => startEdit(index)} disabled={isEditing || saving}>
                     <IconPencil size={16} />
                   </ActionIcon>
                   {legs.length > 1 && (
@@ -131,7 +131,7 @@ export function FlightLegList({ tripId, elementId, legs, onChanged, onEditingCha
                         setError(null);
                         setConfirmingIndex(index);
                       }}
-                      disabled={isEditing}
+                      disabled={isEditing || saving}
                     >
                       <IconTrash size={16} />
                     </ActionIcon>
@@ -146,7 +146,7 @@ export function FlightLegList({ tripId, elementId, legs, onChanged, onEditingCha
         </div>
       ))}
       {editing?.index === 'new' ? form : (
-        <Button variant="light" size="compact-sm" mt="xs" onClick={startAdd} disabled={isEditing}>+ Leg</Button>
+        <Button variant="light" size="compact-sm" mt="xs" onClick={startAdd} disabled={isEditing || saving}>+ Leg</Button>
       )}
     </div>
   );

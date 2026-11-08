@@ -126,4 +126,31 @@ describe('FlightLegList', () => {
     expect(screen.queryByRole('button', { name: 'Delete leg 1' })).toBeNull();
     expect(screen.getByRole('button', { name: 'Edit leg 1' })).toBeTruthy();
   });
+
+  it('disables Cancel and + Leg while a save is in flight', async () => {
+    const user = userEvent.setup();
+    let resolveSave: (value: unknown) => void;
+    api.syncLegs.mockReturnValue(new Promise(resolve => { resolveSave = resolve; }));
+    renderList();
+    await user.click(screen.getByRole('button', { name: 'Edit leg 2' }));
+
+    const code = screen.getByLabelText('Flight #');
+    await user.clear(code);
+    await user.type(code, 'WN201');
+    await user.click(screen.getByRole('button', { name: 'Save leg' }));
+
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Cancel' }) as HTMLButtonElement).disabled).toBe(true));
+    expect((screen.getByRole('button', { name: '+ Leg' }) as HTMLButtonElement).disabled).toBe(true);
+
+    resolveSave!([]);
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Save leg' })).toBeNull());
+  });
+
+  it('disables other rows Edit/Delete buttons while a leg form is open', async () => {
+    const user = userEvent.setup();
+    renderList();
+    await user.click(screen.getByRole('button', { name: 'Edit leg 2' }));
+    expect((screen.getByRole('button', { name: 'Edit leg 1' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'Delete leg 1' }) as HTMLButtonElement).disabled).toBe(true);
+  });
 });
