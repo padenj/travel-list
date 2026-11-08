@@ -54,6 +54,9 @@ export function parseFlightCode(code: string): { airline?: string; flightNumber?
 }
 
 export function formatFlightCode(airline?: string | null, flightNumber?: string | null): string {
+  const cleanAirline = (airline ?? '').trim().toUpperCase();
+  const cleanNumber = (flightNumber ?? '').replace(/[\s-]/g, '').toUpperCase();
+  if (cleanAirline && cleanNumber.startsWith(cleanAirline)) return flightNumber ?? '';
   return `${airline ?? ''}${flightNumber ?? ''}`;
 }
 
@@ -79,12 +82,13 @@ export function autoArrivalOffset(departureTime: string, arrivalTime: string, cu
 export function legToDraft(leg: FlightLeg): FlightLegDraft {
   const departure = splitDatetime(leg.departureDatetime);
   const arrival = splitDatetime(leg.arrivalDatetime);
+  const isPlaceholder = leg.departureDatetime === leg.arrivalDatetime;
   return {
     id: leg.id,
     flightCode: formatFlightCode(leg.airline, leg.flightNumber),
     date: departure.date,
-    departureTime: departure.time,
-    arrivalTime: arrival.time,
+    departureTime: isPlaceholder ? '' : departure.time,
+    arrivalTime: isPlaceholder ? '' : arrival.time,
     arrivalDayOffset: departure.date && arrival.date ? clampOffset(dayDiff(departure.date, arrival.date)) : 0,
     departureAirport: cleanAirport(leg.departureAirport),
     arrivalAirport: cleanAirport(leg.arrivalAirport),

@@ -39,6 +39,12 @@ describe('parseFlightCode', () => {
     expect(formatFlightCode(undefined, '1234')).toBe('1234');
     expect(formatFlightCode()).toBe('');
   });
+
+  it('does not double the airline prefix for legacy flight numbers that already include it', () => {
+    expect(formatFlightCode('WN', 'WN123')).toBe('WN123');
+    expect(formatFlightCode('wn', 'WN123')).toBe('WN123');
+    expect(formatFlightCode('WN', '1234')).toBe('WN1234');
+  });
 });
 
 describe('dates and offsets', () => {
@@ -89,6 +95,20 @@ describe('leg <-> draft <-> payload', () => {
     expect(draftToPayload(legToDraft(stored))).toMatchObject({
       id: 'l1', departureDatetime: '2026-08-31T23:00', arrivalDatetime: '2026-09-01T01:30', airline: 'WN', flightNumber: '1234',
     });
+  });
+
+  it('blanks out the times for placeholder legs with matching departure/arrival datetimes', () => {
+    const d = legToDraft(leg({
+      departureAirport: 'TBD', arrivalAirport: 'TBD',
+      departureDatetime: '2026-09-05T00:00:00Z', arrivalDatetime: '2026-09-05T00:00:00Z',
+    }));
+    expect(d).toMatchObject({ date: '2026-09-05', departureTime: '', arrivalTime: '', arrivalDayOffset: 0 });
+    expect(validateDraft({ ...d, departureAirport: 'DEN', arrivalAirport: 'MCO' })).toBe('Enter the departure and arrival times');
+  });
+
+  it('round-trips a legacy leg whose flight number already includes the airline prefix', () => {
+    const stored = leg({ airline: 'WN', flightNumber: 'WN123' });
+    expect(draftToPayload(legToDraft(stored))).toMatchObject({ airline: 'WN', flightNumber: '123' });
   });
 
   it('passes untouched legs through unchanged, including TBD placeholders', () => {
