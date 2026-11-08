@@ -19,12 +19,14 @@ interface BookingBlockProps {
   refreshKey: number;
   onChanged: () => Promise<void> | void;
   onEditingChange: (editing: boolean) => void;
+  actionsDisabled?: boolean;
 }
 
 export function BookingBlock({
-  tripId, booking, bookings, elements, participants, onParticipantsChanged, refreshKey, onChanged, onEditingChange,
+  tripId, booking, bookings, elements, participants, onParticipantsChanged, refreshKey, onChanged, onEditingChange, actionsDisabled,
 }: BookingBlockProps) {
   const [editing, setEditing] = useState(false);
+  const [transactionFormOpen, setTransactionFormOpen] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [transactionCount, setTransactionCount] = useState(0);
@@ -32,9 +34,10 @@ export function BookingBlock({
   const onEditingChangeRef = useRef(onEditingChange);
   onEditingChangeRef.current = onEditingChange;
 
+  const anyEditing = editing || transactionFormOpen;
   useEffect(() => {
-    onEditingChangeRef.current(editing);
-  }, [editing]);
+    onEditingChangeRef.current(anyEditing);
+  }, [anyEditing]);
   useEffect(() => () => onEditingChangeRef.current(false), []);
 
   const remove = async () => {
@@ -94,6 +97,7 @@ export function BookingBlock({
             variant="subtle"
             size="lg"
             aria-label="Edit booking"
+            disabled={actionsDisabled}
             onClick={() => {
               setConfirmingDelete(false);
               setError(null);
@@ -102,7 +106,7 @@ export function BookingBlock({
           >
             <IconPencil size={16} />
           </ActionIcon>
-          <ActionIcon variant="subtle" color="red" size="lg" aria-label="Delete booking" onClick={() => setConfirmingDelete(true)}>
+          <ActionIcon variant="subtle" color="red" size="lg" aria-label="Delete booking" disabled={actionsDisabled} onClick={() => setConfirmingDelete(true)}>
             <IconTrash size={16} />
           </ActionIcon>
         </Group>
@@ -138,6 +142,7 @@ export function BookingBlock({
         refreshKey={refreshKey}
         onChanged={onChanged}
         onCountChange={setTransactionCount}
+        onEditingChange={setTransactionFormOpen}
       />
     </Paper>
   );

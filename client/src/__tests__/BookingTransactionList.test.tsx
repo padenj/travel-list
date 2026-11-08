@@ -125,4 +125,17 @@ describe('BookingTransactionList', () => {
     await screen.findByText('$78.98');
     expect(onCountChange).toHaveBeenLastCalledWith(1);
   });
+
+  it('reports editing state while the add-transaction form is open', async () => {
+    const onEditingChange = vi.fn();
+    renderList({ onEditingChange });
+    await screen.findByText('$78.98');
+    expect(onEditingChange).toHaveBeenLastCalledWith(false);
+
+    fireEvent.click(screen.getByRole('button', { name: /\+ transaction/i }));
+    expect(onEditingChange).toHaveBeenLastCalledWith(true);
+
+    fireEvent.click(screen.getByRole('button', { name: /^cancel$/i }));
+    expect(onEditingChange).toHaveBeenLastCalledWith(false);
+  });
 });

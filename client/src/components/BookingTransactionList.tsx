@@ -12,6 +12,7 @@ interface BookingTransactionListProps {
   refreshKey?: number;
   onChanged: () => void;
   onCountChange?: (count: number) => void;
+  onEditingChange?: (editing: boolean) => void;
 }
 
 function parseAmount(value: string): number | undefined {
@@ -20,7 +21,7 @@ function parseAmount(value: string): number | undefined {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
-export function BookingTransactionList({ tripId, bookingId, originalConfirmationNumber = null, refreshKey = 0, onChanged, onCountChange }: BookingTransactionListProps) {
+export function BookingTransactionList({ tripId, bookingId, originalConfirmationNumber = null, refreshKey = 0, onChanged, onCountChange, onEditingChange }: BookingTransactionListProps) {
   const [transactions, setTransactions] = useState<BookingTransaction[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
@@ -47,6 +48,13 @@ export function BookingTransactionList({ tripId, bookingId, originalConfirmation
   useEffect(() => {
     onCountChangeRef.current?.(transactions.length);
   }, [transactions.length]);
+
+  const onEditingChangeRef = useRef(onEditingChange);
+  onEditingChangeRef.current = onEditingChange;
+  useEffect(() => {
+    onEditingChangeRef.current?.(showForm);
+  }, [showForm]);
+  useEffect(() => () => onEditingChangeRef.current?.(false), []);
 
   let carriedConfirmation = originalConfirmationNumber;
   const rows = transactions.map(t => {

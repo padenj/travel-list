@@ -45,7 +45,7 @@ export function BookingCard({
   return (
     <div>
       <Group justify="flex-end">
-        {!creating && (
+        {!creating && editingIds.length === 0 && (
           <Button size="compact-sm" variant="light" onClick={() => setCreating(true)}>+ Booking</Button>
         )}
       </Group>
@@ -87,6 +87,7 @@ export function BookingCard({
           refreshKey={refreshKey}
           onChanged={onBookingsChanged}
           onEditingChange={editing => setBlockEditing(booking.id, editing)}
+          actionsDisabled={creating || editingIds.some(id => id !== booking.id)}
         />
       ))}
     </div>

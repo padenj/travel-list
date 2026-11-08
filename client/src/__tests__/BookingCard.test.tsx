@@ -213,4 +213,28 @@ describe('BookingCard', () => {
     expect(screen.getByText('No bookings yet for this flight')).toBeTruthy();
     expect(screen.getByText('Not booked: Alice, Bob, Carol')).toBeTruthy();
   });
+
+  it('allows only one booking form open at a time', async () => {
+    const user = userEvent.setup();
+    const first = makeBooking({ id: 'b-first', confirmationNumber: 'AAA111', currentConfirmationNumber: 'AAA111', elementIds: ['el-1'], travelerIds: ['p2'] });
+    const second = makeBooking({ id: 'b-second', confirmationNumber: 'BBB222', currentConfirmationNumber: 'BBB222', elementIds: ['el-1'], travelerIds: ['p3'] });
+    renderCard({ bookings: [first, second] });
+
+    expect(screen.getByRole('button', { name: '+ Booking' })).toBeTruthy();
+    const editButtons = screen.getAllByRole('button', { name: 'Edit booking' });
+    expect(editButtons).toHaveLength(2);
+
+    await user.click(editButtons[0]);
+
+    expect(screen.queryByRole('button', { name: '+ Booking' })).toBeNull();
+    expect((screen.getByRole('button', { name: 'Edit booking' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'Delete booking' }) as HTMLButtonElement).disabled).toBe(true);
+
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    expect(screen.getByRole('button', { name: '+ Booking' })).toBeTruthy();
+    const editButtonsAfter = screen.getAllByRole('button', { name: 'Edit booking' });
+    expect(editButtonsAfter).toHaveLength(2);
+    editButtonsAfter.forEach(btn => expect((btn as HTMLButtonElement).disabled).toBe(false));
+  });
 });
