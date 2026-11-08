@@ -17,6 +17,7 @@ export default defineConfig({
       'client/src/__tests__/BookingTransactionList.test.tsx', // Booking transaction ledger coverage
       'client/src/__tests__/FlightSeatGrid.test.tsx', // Per-leg seat assignment coverage
       'client/src/__tests__/BookingCard.test.tsx', // Booking creation/display coverage
+      'client/src/__tests__/bookingSummary.test.ts', // Booking money line helper
       'client/src/__tests__/tripFormat.test.ts', // Money/leg formatting helpers
       'client/src/__tests__/FlightLegsEditor.test.tsx', // Multi-leg editor coverage
       'client/src/__tests__/tripDates.test.ts', // Trip date range formatting

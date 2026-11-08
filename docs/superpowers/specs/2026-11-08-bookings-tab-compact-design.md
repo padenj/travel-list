@@ -15,12 +15,12 @@ Follow-up to `2026-11-08-trip-page-compact-redesign-design.md`. Tightens the Boo
 - Form fields and labels are unchanged, laid out in two columns on desktop and one on mobile. Travelers and "Also applies to" are checkbox chips. Save button: "Save booking".
 - Each booking is a bordered block using Mantine tokens (no grey card):
   - Header: confirmation number (bold), traveler chips, muted "orig XXX" when the original confirmation differs from the current one.
-  - Money line: `Advertised $X/person · Actual $Y ($Z/person) · Paid $T`, with ` + N pts` appended to Paid when points were paid. Wraps on mobile. Advertised is omitted when null.
+  - Money line: `Advertised $X/person · Paid $T ($P/person)`; points are shown the same way (`9,000 pts + $5.60`). "Actual total" and "Total paid" are the same figure, so only `Paid` is shown. Advertised is omitted when neither price is set. Wraps on mobile.
   - "Also covers: ..." muted line only when the booking links other flights.
 - Empty state: "No bookings yet for this flight".
 
 ### Transactions (`BookingTransactionList`)
-- Compact table: date, amount (cash and/or points), confirmation. Stacks to two lines on mobile. A note renders as a muted second line only when present.
+- Compact table: date, amount (cash and/or points), confirmation. The four short columns fit on mobile, so there is no stacking. A note renders as a muted second line only when present.
 - Remove is a small icon button with an inline "Remove? Confirm / Cancel" step.
 - "Total paid" moves into the booking money line; the list itself no longer repeats it.
 - Add form (cash, points, date, new confirmation, notes; same labels) is collapsed behind a "+ Transaction" button and is a compact grid when open.
