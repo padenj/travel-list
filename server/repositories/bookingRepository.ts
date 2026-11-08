@@ -106,6 +106,7 @@ export class BookingRepository {
          AND b.id != ?
          AND bl.element_id IN (${elementMarks})
          AND bt.participant_id IN (${travelerMarks})
+         AND e.deleted_at IS NULL
        ORDER BY b.created_at ASC, e.name ASC, p.display_name ASC`,
       [tripId, excludeBookingId ?? '', ...elementIds, ...travelerIds]
     );
@@ -269,7 +270,12 @@ export class BookingRepository {
 
   private async hydrate(row: any): Promise<Booking> {
     const db = await this.db;
-    const elementRows = await db.all(`SELECT element_id as elementId FROM booking_links WHERE booking_id = ?`, [row.id]);
+    const elementRows = await db.all(
+      `SELECT bl.element_id as elementId FROM booking_links bl
+       JOIN trip_elements e ON e.id = bl.element_id
+       WHERE bl.booking_id = ? AND e.deleted_at IS NULL`,
+      [row.id]
+    );
     const travelerRows = await db.all(`SELECT participant_id as participantId FROM booking_travelers WHERE booking_id = ?`, [row.id]);
     const totals = await db.get(
       `SELECT COALESCE(SUM(amount_cash), 0) as totalCash, COALESCE(SUM(amount_points), 0) as totalPoints

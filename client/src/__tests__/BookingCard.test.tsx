@@ -214,6 +214,22 @@ describe('BookingCard', () => {
     expect(screen.getByText('Not booked: Alice, Bob, Carol')).toBeTruthy();
   });
 
+  it('drops a flight that no longer exists from elementIds when editing and saving', async () => {
+    const user = userEvent.setup();
+    const stale = makeBooking({
+      id: 'b-stale', confirmationNumber: 'STALE1', currentConfirmationNumber: 'STALE1',
+      elementIds: ['el-1', 'el-deleted'], travelerIds: ['p3'],
+    });
+    renderCard({ bookings: [stale] });
+
+    await user.click(screen.getByRole('button', { name: 'Edit booking' }));
+    await user.click(screen.getByRole('button', { name: 'Save booking' }));
+
+    await waitFor(() => expect(api.updateBooking).toHaveBeenCalledWith('trip-1', 'b-stale', expect.objectContaining({
+      elementIds: ['el-1'],
+    })));
+  });
+
   it('allows only one booking form open at a time', async () => {
     const user = userEvent.setup();
     const first = makeBooking({ id: 'b-first', confirmationNumber: 'AAA111', currentConfirmationNumber: 'AAA111', elementIds: ['el-1'], travelerIds: ['p2'] });

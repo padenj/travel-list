@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { getDb, closeDb } from '../db';
 import { BookingRepository, BookingConflictError } from './bookingRepository';
 import { TripParticipantRepository } from './tripParticipantRepository';
+import { TripElementRepository } from './tripElementRepository';
 import { v4 as uuidv4 } from 'uuid';
 
 describe('BookingRepository', () => {
@@ -275,6 +276,42 @@ describe('BookingRepository', () => {
       const reloaded = await repo.getBookingById(booking.id);
       expect(reloaded!.actualTotalCash).toBe(138);
       expect(reloaded!.currentConfirmationNumber).toBe('REBOOKED');
+    });
+  });
+
+  describe('soft-deleted flights', () => {
+    let elementRepo: TripElementRepository;
+
+    beforeEach(() => {
+      elementRepo = new TripElementRepository();
+    });
+
+    it('excludes a soft-deleted flight from elementIds', async () => {
+      const booking = await repo.createBooking(tripId, { elementIds: [elementId, elementId2], travelerIds: [participantAId] });
+      await elementRepo.deleteElement(elementId2);
+
+      const reloaded = await repo.getBookingById(booking.id);
+      expect(reloaded!.elementIds).toEqual([elementId]);
+    });
+
+    it('does not report conflicts for a soft-deleted flight but still reports them for an active flight', async () => {
+      const booking = await repo.createBooking(tripId, { elementIds: [elementId, elementId2], travelerIds: [participantAId] });
+      await elementRepo.deleteElement(elementId2);
+
+      expect(await repo.findTravelerConflicts(tripId, [elementId2], [participantAId])).toEqual([]);
+
+      const conflicts = await repo.findTravelerConflicts(tripId, [elementId], [participantAId]);
+      expect(conflicts).toHaveLength(1);
+      expect(conflicts[0]).toMatchObject({ bookingId: booking.id, elementId, participantId: participantAId });
+    });
+
+    it('updateBooking with notes only succeeds when a linked flight is soft-deleted', async () => {
+      const booking = await repo.createBooking(tripId, { elementIds: [elementId, elementId2], travelerIds: [participantAId] });
+      await elementRepo.deleteElement(elementId2);
+
+      const updated = await repo.updateBooking(booking.id, { notes: 'updated notes' });
+      expect(updated.notes).toBe('updated notes');
+      expect(updated.elementIds).toEqual([elementId]);
     });
   });
 });

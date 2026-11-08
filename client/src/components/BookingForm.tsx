@@ -36,9 +36,12 @@ export function BookingForm({
   const [priceCash, setPriceCash] = useState(booking?.advertisedPriceCash != null ? String(booking.advertisedPriceCash) : '');
   const [pricePoints, setPricePoints] = useState(booking?.advertisedPricePoints != null ? String(booking.advertisedPricePoints) : '');
   const [notes, setNotes] = useState(booking?.notes ?? '');
-  const [elementIds, setElementIds] = useState<string[]>(
-    booking ? booking.elementIds : defaultElementId ? [defaultElementId] : []
-  );
+  const [elementIds, setElementIds] = useState<string[]>(() => {
+    const initial = booking ? booking.elementIds : defaultElementId ? [defaultElementId] : [];
+    // Defensive: drop ids for flights that no longer exist (e.g. soft-deleted) so a stale
+    // id with no checkbox can't silently be resubmitted on save.
+    return initial.filter(id => flights.some(f => f.id === id));
+  });
   const [travelerIds, setTravelerIds] = useState<string[]>(() => {
     if (booking) return booking.travelerIds;
     const taken = bookedTravelers(bookings, defaultElementId ? [defaultElementId] : []);
