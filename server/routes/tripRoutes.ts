@@ -118,7 +118,7 @@ tripRouter.post('/:tripId/flight-autofill', authMiddleware, tripAccessMiddleware
 tripRouter.post('/:tripId/elements', authMiddleware, tripAccessMiddleware, async (req: Request, res: Response) => {
   try {
     const { elementType, name, bookingReference, bookingUrl, priceCash, pricePoints, loyaltyProgram, totalCash, totalPoints, notes, sortPosition, typeSpecificData } = req.body;
-    if (!elementType || !name) {
+    if (!elementType || (!name && elementType !== 'flight')) {
       return res.status(400).json({ error: 'Missing required fields: elementType, name' });
     }
     const element = await tripElementRepository.createElement(req.trip!.id, {
