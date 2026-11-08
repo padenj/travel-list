@@ -19,6 +19,11 @@ export default defineConfig({
       'client/src/__tests__/BookingCard.test.tsx', // Booking creation/display coverage
       'client/src/__tests__/tripFormat.test.ts', // Money/leg formatting helpers
       'client/src/__tests__/FlightLegsEditor.test.tsx', // Multi-leg editor coverage
+      'client/src/__tests__/tripDates.test.ts', // Trip date range formatting
+      'client/src/__tests__/flightRows.test.ts', // Flight row model
+      'client/src/__tests__/swipe.test.ts', // Swipe helpers
+      'client/src/__tests__/FlightsSection.test.tsx', // Flights table/cards
+      'client/src/__tests__/ElementDialog.test.tsx', // Dialog tabs and swipe
       'src/**/*.test.{ts,tsx}',           // Frontend unit tests
       'server/**/*.test.ts',              // Backend unit tests
       'tests/integration/**/*.test.ts',   // Integration tests
