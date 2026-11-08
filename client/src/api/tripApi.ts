@@ -7,7 +7,8 @@ import { getAuthToken } from '../api';
 
 const API_BASE = '/api/trips';
 
-type TripElementWritePayload = Partial<TripElement> & {
+type TripElementWritePayload = Omit<Partial<TripElement>, 'notes'> & {
+  notes?: string | null;
   typeSpecificData?: Record<string, unknown>;
 };
 
@@ -19,9 +20,10 @@ function authHeaders(extra: Record<string, string> = {}): Record<string, string>
   };
 }
 
-function handleResponse(response: Response) {
+async function handleResponse(response: Response) {
   if (!response.ok) {
-    throw new Error(`API Error: ${response.status}`);
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body?.error || `API Error: ${response.status}`);
   }
   return response.json();
 }
@@ -215,7 +217,8 @@ export const tripApi = {
   deleteBooking: async (tripId: string, bookingId: string): Promise<void> => {
     const response = await fetch(`${API_BASE}/${tripId}/bookings/${bookingId}`, { method: 'DELETE', headers: authHeaders() });
     if (!response.ok) {
-      throw new Error(`Failed to delete booking: ${response.status}`);
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body?.error || `Failed to delete booking: ${response.status}`);
     }
   },
 

@@ -25,6 +25,7 @@ export default defineConfig({
       'client/src/__tests__/swipe.test.ts', // Swipe helpers
       'client/src/__tests__/FlightsSection.test.tsx', // Flights table/cards
       'client/src/__tests__/ElementDialog.test.tsx', // Dialog tabs and swipe
+      'client/src/__tests__/tripApi.test.ts', // API error surfacing
       'src/**/*.test.{ts,tsx}',           // Frontend unit tests
       'server/**/*.test.ts',              // Backend unit tests
       'tests/integration/**/*.test.ts',   // Integration tests
