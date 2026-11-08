@@ -1,37 +1,127 @@
 /* @vitest-environment jsdom */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import { cleanup, render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { cleanup, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { renderWithMantine } from '../test-utils/renderWithMantine';
 
 vi.mock('../api/tripApi', () => ({
   tripApi: {
     getTrip: vi.fn(),
     listElements: vi.fn(),
     listParticipants: vi.fn(),
-    createParticipant: vi.fn(),
-    deleteParticipant: vi.fn(),
+    listBookings: vi.fn(),
     createElement: vi.fn(),
     updateElement: vi.fn(),
-    lookupFlightAutofill: vi.fn(),
+    deleteElement: vi.fn(),
     syncLegs: vi.fn(),
-    listBookings: vi.fn(),
-    createBooking: vi.fn(),
-    listBookingTransactions: vi.fn(),
-    addBookingTransaction: vi.fn(),
-    deleteBookingTransaction: vi.fn(),
-    listSeatsForLeg: vi.fn(),
-    assignSeat: vi.fn(),
-    removeSeat: vi.fn(),
-    listConfirmations: vi.fn(),
-    addConfirmation: vi.fn(),
   },
+}));
+
+vi.mock('../components/TripParticipantsPanel', () => ({
+  TripParticipantsPanel: () => <div>participants panel</div>,
+}));
+vi.mock('../components/BookingCard', () => ({
+  BookingCard: ({ elementId }: { elementId: string }) => <div>booking card {elementId}</div>,
+}));
+vi.mock('../components/FlightSeatGrid', () => ({
+  FlightSeatGrid: ({ legId }: { legId: string }) => <div>seat grid {legId}</div>,
+}));
+vi.mock('../components/FlightLegsEditor', () => ({
+  FlightLegsEditor: ({ legs, onChange }: { legs: any[]; onChange: (legs: any[]) => void }) => (
+    <div>
+      <span>legs in editor: {legs.length}</span>
+      <button
+        type="button"
+        onClick={() =>
+          onChange([{ ...legs[0], flightDate: '2026-09-12', departureAirport: 'DEN', arrivalAirport: 'SJD' }])
+        }
+      >
+        mock fill leg
+      </button>
+      <button
+        type="button"
+        onClick={() =>
+          onChange([
+            {
+              ...legs[0],
+              flightDate: '2026-08-29',
+              airline: 'WN',
+              flightNumber: '722',
+              departureAirport: 'DEN',
+              arrivalAirport: 'SJD',
+              departureDatetime: '2026-08-29T15:10',
+              arrivalDatetime: '2026-08-29T18:05',
+            },
+          ])
+        }
+      >
+        mock autofill leg
+      </button>
+      <button
+        type="button"
+        onClick={() =>
+          onChange([
+            { ...legs[0], flightDate: '2026-11-10', departureAirport: 'DEN', arrivalAirport: 'DAL' },
+            { ...legs[0], id: undefined, flightDate: '2026-11-10', departureAirport: 'DAL', arrivalAirport: 'SJD' },
+          ])
+        }
+      >
+        mock two legs
+      </button>
+      <button
+        type="button"
+        onClick={() => onChange(legs.map((l, i) => (i === legs.length - 1 ? { ...l, flightNumber: '201' } : l)))}
+      >
+        mock bump last flight number
+      </button>
+    </div>
+  ),
 }));
 
 import { tripApi } from '../api/tripApi';
 import { TripDetailPage } from '../pages/TripDetailPage';
 
+const api = tripApi as any;
+
+const flightEl = (over: any = {}) => ({
+  id: 'el-1',
+  tripId: 'trip-1',
+  elementType: 'flight',
+  name: 'Delta 45',
+  sortPosition: 0,
+  createdAt: '',
+  updatedAt: '',
+  legs: [
+    {
+      id: 'leg-1',
+      elementId: 'el-1',
+      legOrder: 1,
+      departureAirport: 'DEN',
+      departureDatetime: '2026-09-01T08:00',
+      arrivalAirport: 'SJD',
+      arrivalDatetime: '2026-09-01T11:00',
+      airline: 'DL',
+      flightNumber: '45',
+      createdAt: '',
+      updatedAt: '',
+    },
+  ],
+  ...over,
+});
+
+const twoLegFlight = () =>
+  flightEl({
+    id: 'el-7',
+    name: 'DEN → DAL → SJD',
+    legs: [
+      { id: 'leg-1', elementId: 'el-7', legOrder: 1, departureAirport: 'DEN', departureDatetime: '2026-11-10T08:00', arrivalAirport: 'DAL', arrivalDatetime: '2026-11-10T10:00', airline: 'WN', flightNumber: '100', layoverMinutesAfter: 135, createdAt: '', updatedAt: '' },
+      { id: 'leg-2', elementId: 'el-7', legOrder: 2, departureAirport: 'DAL', departureDatetime: '2026-11-10T12:15', arrivalAirport: 'SJD', arrivalDatetime: '2026-11-10T14:00', airline: 'WN', flightNumber: '200', createdAt: '', updatedAt: '' },
+    ],
+  });
+
 function renderPage() {
-  render(
+  return renderWithMantine(
     <MemoryRouter initialEntries={['/trips/trip-1']}>
       <Routes>
         <Route path="/trips/:tripId" element={<TripDetailPage />} />
@@ -41,273 +131,133 @@ function renderPage() {
 }
 
 describe('TripDetailPage', () => {
-  afterEach(() => {
-    cleanup();
-  });
+  afterEach(() => cleanup());
 
   beforeEach(() => {
-    vi.clearAllMocks();
-    (tripApi.getTrip as any).mockResolvedValue({
+    vi.resetAllMocks();
+    api.getTrip.mockResolvedValue({
       id: 'trip-1',
       familyId: 'fam-1',
       name: 'Cabo',
-      startDate: '2026-09-01',
-      endDate: '2026-09-08',
+      tripType: 'vacation',
+      startDate: '2026-08-29',
+      endDate: '2026-09-05',
       createdAt: '',
       updatedAt: '',
     });
-    (tripApi.listElements as any).mockResolvedValue([]);
-    (tripApi.listParticipants as any).mockResolvedValue([]);
-    (tripApi.listBookings as any).mockResolvedValue([]);
-    (tripApi.listBookingTransactions as any).mockResolvedValue([]);
-    (tripApi.listSeatsForLeg as any).mockResolvedValue([]);
-    (tripApi.listConfirmations as any).mockResolvedValue([]);
+    api.listElements.mockResolvedValue([]);
+    api.listParticipants.mockResolvedValue([]);
+    api.listBookings.mockResolvedValue([]);
   });
 
-  it('shows add element action when trip has no elements', async () => {
-    renderPage();
-    expect(await screen.findByRole('button', { name: /add element/i })).toBeTruthy();
-  });
-
-  it('creates a new element from the trip detail page', async () => {
-    (tripApi.createElement as any).mockResolvedValue({
-      id: 'el-1',
-      tripId: 'trip-1',
-      elementType: 'flight',
-      name: 'Southwest flight',
-      sortPosition: 0,
-      createdAt: '',
-      updatedAt: '',
-    });
-    (tripApi.listElements as any)
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([
-        {
-          id: 'el-1',
-          tripId: 'trip-1',
-          elementType: 'flight',
-          name: 'Southwest flight',
-          sortPosition: 0,
-          createdAt: '',
-          updatedAt: '',
-        },
-      ]);
-
-    renderPage();
-
-    fireEvent.click(await screen.findByRole('button', { name: /add element/i }));
-    fireEvent.change(screen.getByLabelText(/type/i), { target: { value: 'flight' } });
-    fireEvent.change(screen.getByLabelText(/name/i), { target: { value: 'Southwest flight' } });
-    fireEvent.change(screen.getByLabelText(/flight date/i), { target: { value: '2026-09-01' } });
-    fireEvent.click(screen.getByRole('button', { name: /save element/i }));
-
-    await waitFor(() => {
-      expect(tripApi.createElement).toHaveBeenCalledWith(
-        'trip-1',
-        expect.objectContaining({ elementType: 'flight', name: 'Southwest flight' })
-      );
-    });
-    expect(await screen.findByText('Southwest flight')).toBeTruthy();
-  });
-
-  it('renders a real view edit button for existing elements', async () => {
-    (tripApi.listElements as any).mockResolvedValueOnce([
+  it('renders the compact page with header, travelers and flight rows', async () => {
+    const p = (id: string, displayName: string) => ({ id, tripId: 'trip-1', displayName, createdAt: '', updatedAt: '' });
+    api.listParticipants.mockResolvedValue([p('p1', 'Taylor'), p('p2', 'Sam'), p('p3', 'Alex'), p('p4', 'Jo')]);
+    api.listElements.mockResolvedValue([flightEl()]);
+    api.listBookings.mockResolvedValue([
       {
-        id: 'el-9',
-        tripId: 'trip-1',
-        elementType: 'flight',
-        name: 'Delta 45',
-        sortPosition: 0,
-        createdAt: '',
-        updatedAt: '',
+        id: 'b-1', tripId: 'trip-1', confirmationNumber: 'ABC123', advertisedPriceCash: 500, advertisedPricePoints: null,
+        loyaltyProgram: null, notes: null, createdAt: '', updatedAt: '', elementIds: ['el-1'], travelerIds: [],
+        currentConfirmationNumber: 'ABC123', actualTotalCash: 0, actualTotalPoints: 0,
       },
     ]);
 
     renderPage();
 
-    expect(await screen.findByRole('button', { name: /view\/edit/i })).toBeTruthy();
-    expect(screen.queryByText(/coming soon/i)).toBeNull();
+    expect(await screen.findByRole('heading', { name: 'Cabo' })).toBeTruthy();
+    expect(screen.getByText('vacation')).toBeTruthy();
+    expect(screen.getByText(/Aug 29 – Sep 5, 2026 · 7 nights/)).toBeTruthy();
+    expect(screen.getByText('Taylor')).toBeTruthy();
+    expect(screen.getByText('Sam')).toBeTruthy();
+    expect(screen.getByText('Alex')).toBeTruthy();
+    expect(screen.queryByText('Jo')).toBeNull();
+    expect(screen.getByText('+1')).toBeTruthy();
+    const flights = screen.getByRole('region', { name: 'Flights' });
+    expect(within(flights).getByText('Delta 45')).toBeTruthy();
+    expect(within(flights).getByText('ABC123')).toBeTruthy();
   });
 
-  it('hides deprecated flat flight booking fields and omits them from flight creation payload', async () => {
-    (tripApi.createElement as any).mockResolvedValue({
-      id: 'el-2',
-      tripId: 'trip-1',
-      elementType: 'flight',
-      name: 'Southwest WN123',
-      sortPosition: 0,
-      createdAt: '',
-      updatedAt: '',
-    });
-    (tripApi.listElements as any)
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([
-        {
-          id: 'el-2',
-          tripId: 'trip-1',
-          elementType: 'flight',
-          name: 'Southwest WN123',
-          sortPosition: 0,
-          createdAt: '',
-          updatedAt: '',
-        },
-      ]);
+  it('shows an add-first-flight button when there are no elements', async () => {
+    renderPage();
+    expect(await screen.findByRole('button', { name: 'Add your first flight' })).toBeTruthy();
+  });
 
+  it('hides date text when the trip has no dates', async () => {
+    api.getTrip.mockResolvedValue({ id: 'trip-1', familyId: 'fam-1', name: 'Cabo', createdAt: '', updatedAt: '' });
+    renderPage();
+    await screen.findByRole('heading', { name: 'Cabo' });
+    expect(screen.queryByText(/night/i)).toBeNull();
+    expect(screen.queryByText(/ – /)).toBeNull();
+  });
+
+  it('shows a notice for hidden non-flight elements', async () => {
+    const hotel = { id: 'h-1', tripId: 'trip-1', elementType: 'hotel', name: 'Resort', sortPosition: 1, createdAt: '', updatedAt: '' };
+    api.listElements.mockResolvedValue([flightEl(), hotel]);
+    renderPage();
+    expect(await screen.findByText('1 other element hidden until its section is built')).toBeTruthy();
+    cleanup();
+    api.listElements.mockResolvedValue([flightEl(), hotel, { ...hotel, id: 'h-2' }]);
+    renderPage();
+    expect(await screen.findByText('2 other elements hidden until their sections are built')).toBeTruthy();
+  });
+
+  it('creates a flight, closes the dialog and reloads elements', async () => {
+    const user = userEvent.setup();
+    api.createElement.mockResolvedValue({ id: 'el-2' });
     renderPage();
 
-    fireEvent.click(await screen.findByRole('button', { name: /add element/i }));
-    fireEvent.change(screen.getByLabelText(/name/i), { target: { value: 'Southwest WN123' } });
-    fireEvent.change(screen.getByLabelText(/flight date/i), { target: { value: '2026-09-12' } });
-    fireEvent.change(screen.getByLabelText(/flight number/i), { target: { value: 'WN123' } });
+    await user.click(await screen.findByRole('button', { name: 'Add flight' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Add flight' });
+    await user.type(within(dialog).getByLabelText('Name'), 'Southwest WN123');
+    await user.click(within(dialog).getByRole('button', { name: 'mock fill leg' }));
+    const callsBefore = api.listElements.mock.calls.length;
+    await user.click(within(dialog).getByRole('button', { name: 'Save flight' }));
 
-    expect(screen.queryByLabelText(/booking or itinerary reference/i)).toBeNull();
-    expect(screen.queryByLabelText(/^price cash$/i)).toBeNull();
-    expect(screen.queryByLabelText(/^price points$/i)).toBeNull();
-    expect(screen.queryByLabelText(/^confirmation number$/i)).toBeNull();
-
-    fireEvent.click(screen.getByRole('button', { name: /save element/i }));
-
-    await waitFor(() => {
-      expect(tripApi.createElement).toHaveBeenCalledWith(
+    await waitFor(() =>
+      expect(api.createElement).toHaveBeenCalledWith(
         'trip-1',
         expect.objectContaining({
           elementType: 'flight',
           name: 'Southwest WN123',
-          typeSpecificData: expect.objectContaining({
-            legs: [
-              expect.objectContaining({
-                flightNumber: 'WN123',
-                departureDatetime: '2026-09-12T00:00',
-                arrivalDatetime: '2026-09-12T00:00',
-              }),
-            ],
-          }),
+          typeSpecificData: { legs: [expect.objectContaining({ legOrder: 1 })] },
         })
-      );
-    });
+      )
+    );
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Add flight' })).toBeNull());
+    expect(api.listElements.mock.calls.length).toBeGreaterThan(callsBefore);
   });
 
-  it('auto-generates flight names from auto-filled airports until manually edited', async () => {
-    (tripApi.lookupFlightAutofill as any).mockResolvedValue({
-      airlineCode: 'WN',
-      flightNumber: '722',
-      flightDate: '2026-08-29',
-      departureAirport: 'DEN',
-      arrivalAirport: 'SJD',
-      departureDatetime: '2026-08-29T15:10:00.000Z',
-      arrivalDatetime: '2026-08-29T18:05:00.000Z',
-      statusText: 'Arrived',
-      sourceUrl: 'https://example.com/flight',
-    });
-
+  it('auto-names from legs until the name is edited manually', async () => {
+    const user = userEvent.setup();
     renderPage();
+    await user.click(await screen.findByRole('button', { name: 'Add flight' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Add flight' });
+    const name = within(dialog).getByLabelText('Name') as HTMLInputElement;
 
-    fireEvent.click(await screen.findByRole('button', { name: /add element/i }));
-    fireEvent.change(screen.getByLabelText(/flight date/i), { target: { value: '2026-08-29' } });
-    fireEvent.change(screen.getByLabelText(/airline code/i), { target: { value: 'WN' } });
-    fireEvent.change(screen.getByLabelText(/flight number/i), { target: { value: '722' } });
-    fireEvent.click(screen.getByRole('button', { name: /look up flight details/i }));
+    await user.click(within(dialog).getByRole('button', { name: 'mock fill leg' }));
+    await waitFor(() => expect(name.value).toBe('DEN → SJD'));
 
-    await waitFor(() => {
-      expect((screen.getByLabelText(/name/i) as HTMLInputElement).value).toBe('DEN → SJD');
-    });
-
-    fireEvent.change(screen.getByLabelText(/name/i), { target: { value: 'Custom name' } });
-    fireEvent.click(screen.getByRole('button', { name: /look up flight details/i }));
-
-    await waitFor(() => {
-      expect((screen.getByLabelText(/name/i) as HTMLInputElement).value).toBe('Custom name');
-    });
+    await user.clear(name);
+    await user.type(name, 'Custom name');
+    await user.click(within(dialog).getByRole('button', { name: 'mock two legs' }));
+    expect(name.value).toBe('Custom name');
   });
 
-  it('renders participants, seat grid, and booking card for flights using trip participants', async () => {
-    (tripApi.listParticipants as any).mockResolvedValue([
-      {
-        id: 'p-1',
-        tripId: 'trip-1',
-        displayName: 'Taylor',
-        createdAt: '',
-        updatedAt: '',
-      },
-    ]);
-    (tripApi.listElements as any).mockResolvedValueOnce([
-      {
-        id: 'el-9',
-        tripId: 'trip-1',
-        elementType: 'flight',
-        name: 'Delta 45',
-        bookingReference: 'LEGACY-REF',
-        priceCash: 123.45,
-        sortPosition: 0,
-        createdAt: '',
-        updatedAt: '',
-        legs: [
-          {
-            id: 'leg-1',
-            departureDatetime: '2026-09-01T00:00:00Z',
-            flightNumber: 'DL45',
-          },
-        ],
-      },
-    ]);
-
+  it('sends autofilled lookup times in the create payload', async () => {
+    const user = userEvent.setup();
+    api.createElement.mockResolvedValue({ id: 'el-3' });
     renderPage();
+    await user.click(await screen.findByRole('button', { name: 'Add flight' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Add flight' });
+    await user.click(within(dialog).getByRole('button', { name: 'mock autofill leg' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Save flight' }));
 
-    expect(await screen.findByRole('heading', { name: /travelers/i })).toBeTruthy();
-    expect(await screen.findByText('Taylor')).toBeTruthy();
-    expect(await screen.findByLabelText(/taylor seat/i)).toBeTruthy();
-    expect(await screen.findByRole('heading', { name: /bookings/i })).toBeTruthy();
-    expect(await screen.findByText(/no bookings yet for this element/i)).toBeTruthy();
-    expect(screen.queryByText('LEGACY-REF')).toBeNull();
-    expect(screen.queryByText('$123.45')).toBeNull();
-  });
-
-  it('autofills flight details from the lookup endpoint', async () => {
-    (tripApi.lookupFlightAutofill as any).mockResolvedValue({
-      airlineCode: 'WN',
-      flightNumber: '722',
-      flightDate: '2026-08-29',
-      departureAirport: 'DEN',
-      arrivalAirport: 'SJD',
-      departureDatetime: '2026-08-29T15:10:00.000Z',
-      arrivalDatetime: '2026-08-29T18:05:00.000Z',
-      statusText: 'Arrived',
-      sourceUrl: 'https://www.flightstats.com/v2/flight-tracker/WN/722?year=2026&month=8&date=29',
-    });
-    (tripApi.createElement as any).mockResolvedValue({
-      id: 'el-3',
-      tripId: 'trip-1',
-      elementType: 'flight',
-      name: 'Southwest WN722',
-      sortPosition: 0,
-      createdAt: '',
-      updatedAt: '',
-    });
-
-    renderPage();
-
-    fireEvent.click(await screen.findByRole('button', { name: /add element/i }));
-    fireEvent.change(screen.getByLabelText(/name/i), { target: { value: 'Southwest WN722' } });
-    fireEvent.change(screen.getByLabelText(/flight date/i), { target: { value: '2026-08-29' } });
-    fireEvent.change(screen.getByLabelText(/airline code/i), { target: { value: 'WN' } });
-    fireEvent.change(screen.getByLabelText(/flight number/i), { target: { value: '722' } });
-    fireEvent.click(screen.getByRole('button', { name: /look up flight details/i }));
-
-    await waitFor(() => {
-      expect(tripApi.lookupFlightAutofill).toHaveBeenCalledWith('trip-1', {
-        airlineCode: 'WN',
-        flightNumber: '722',
-        flightDate: '2026-08-29',
-      });
-    });
-
-    fireEvent.click(screen.getByRole('button', { name: /save element/i }));
-
-    await waitFor(() => {
-      expect(tripApi.createElement).toHaveBeenCalledWith(
+    await waitFor(() =>
+      expect(api.createElement).toHaveBeenCalledWith(
         'trip-1',
         expect.objectContaining({
-          typeSpecificData: expect.objectContaining({
+          name: 'DEN → SJD',
+          typeSpecificData: {
             legs: [
               expect.objectContaining({
                 departureAirport: 'DEN',
@@ -316,73 +266,106 @@ describe('TripDetailPage', () => {
                 arrivalDatetime: '2026-08-29T18:05',
               }),
             ],
-          }),
+          },
         })
-      );
-    });
-  });
-  it('creates a two-leg flight with a connection', async () => {
-    (tripApi.createElement as any).mockResolvedValue({ id: 'el-5', tripId: 'trip-1', elementType: 'flight', name: 'DEN → DAL → SJD', sortPosition: 0, createdAt: '', updatedAt: '' });
-    renderPage();
-    fireEvent.click(await screen.findByRole('button', { name: /add element/i }));
-    fireEvent.change(screen.getByLabelText(/from \(airport/i), { target: { value: 'DEN' } });
-    fireEvent.change(screen.getByLabelText(/to \(airport/i), { target: { value: 'DAL' } });
-    fireEvent.change(screen.getByLabelText(/flight date/i), { target: { value: '2026-11-10' } });
-    fireEvent.click(screen.getByRole('button', { name: /add connecting flight/i }));
-    const froms = screen.getAllByLabelText(/from \(airport/i);
-    const tos = screen.getAllByLabelText(/to \(airport/i);
-    fireEvent.change(froms[1], { target: { value: 'DAL' } });
-    fireEvent.change(tos[1], { target: { value: 'SJD' } });
-
-    await waitFor(() => expect((screen.getByLabelText(/^name$/i) as HTMLInputElement).value).toBe('DEN → DAL → SJD'));
-    fireEvent.click(screen.getByRole('button', { name: /save element/i }));
-
-    await waitFor(() => {
-      expect(tripApi.createElement).toHaveBeenCalledWith('trip-1', expect.objectContaining({
-        typeSpecificData: expect.objectContaining({
-          legs: [
-            expect.objectContaining({ legOrder: 1, departureAirport: 'DEN', arrivalAirport: 'DAL' }),
-            expect.objectContaining({ legOrder: 2, departureAirport: 'DAL', arrivalAirport: 'SJD' }),
-          ],
-        }),
-      }));
-    });
+      )
+    );
   });
 
-  it('lists every leg of a flight with its layover and edits legs through syncLegs', async () => {
-    (tripApi.listElements as any).mockResolvedValue([
-      {
-        id: 'el-7', tripId: 'trip-1', elementType: 'flight', name: 'DEN → DAL → SJD', sortPosition: 0, createdAt: '', updatedAt: '',
-        legs: [
-          { id: 'leg-1', elementId: 'el-7', legOrder: 1, departureAirport: 'DEN', departureDatetime: '2026-11-10T08:00', arrivalAirport: 'DAL', arrivalDatetime: '2026-11-10T10:00', airline: 'WN', flightNumber: '100', layoverMinutesAfter: 135, createdAt: '', updatedAt: '' },
-          { id: 'leg-2', elementId: 'el-7', legOrder: 2, departureAirport: 'DAL', departureDatetime: '2026-11-10T12:15', arrivalAirport: 'SJD', arrivalDatetime: '2026-11-10T14:00', airline: 'WN', flightNumber: '200', createdAt: '', updatedAt: '' },
-        ],
-      },
-    ]);
-    (tripApi.updateElement as any).mockResolvedValue({});
-    (tripApi.syncLegs as any).mockResolvedValue([]);
+  it('creates a two-leg flight with legOrder 1 and 2', async () => {
+    const user = userEvent.setup();
+    api.createElement.mockResolvedValue({ id: 'el-5' });
+    renderPage();
+    await user.click(await screen.findByRole('button', { name: 'Add flight' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Add flight' });
+    await user.click(within(dialog).getByRole('button', { name: 'mock two legs' }));
+    await waitFor(() => expect((within(dialog).getByLabelText('Name') as HTMLInputElement).value).toBe('DEN → DAL → SJD'));
+    await user.click(within(dialog).getByRole('button', { name: 'Save flight' }));
 
+    await waitFor(() =>
+      expect(api.createElement).toHaveBeenCalledWith(
+        'trip-1',
+        expect.objectContaining({
+          typeSpecificData: {
+            legs: [
+              expect.objectContaining({ legOrder: 1, departureAirport: 'DEN', arrivalAirport: 'DAL' }),
+              expect.objectContaining({ legOrder: 2, departureAirport: 'DAL', arrivalAirport: 'SJD' }),
+            ],
+          },
+        })
+      )
+    );
+  });
+
+  it('opens a dialog with Details, Bookings and Seats tabs', async () => {
+    const user = userEvent.setup();
+    api.listElements.mockResolvedValue([twoLegFlight()]);
     renderPage();
 
-    expect(await screen.findByText(/DEN → DAL/, { selector: '.flight-leg-summary strong' })).toBeTruthy();
-    expect(screen.getByText(/layover.*2h 15m/i)).toBeTruthy();
+    await user.click(await screen.findByRole('button', { name: 'Open DEN → DAL → SJD' }));
+    const dialog = await screen.findByRole('dialog', { name: 'DEN → DAL → SJD' });
+    expect(within(dialog).getByRole('tab', { name: 'Details' })).toBeTruthy();
+    expect(within(dialog).getByText(/Layover: 2h 15m/)).toBeTruthy();
 
-    fireEvent.click(screen.getByRole('button', { name: /view\/edit/i }));
-    fireEvent.change(screen.getAllByLabelText(/flight number/i)[1], { target: { value: '201' } });
-    fireEvent.click(screen.getByRole('button', { name: /save changes/i }));
+    await user.click(within(dialog).getByRole('tab', { name: /Bookings/ }));
+    expect(await within(dialog).findByText('booking card el-7')).toBeTruthy();
+
+    await user.click(within(dialog).getByRole('tab', { name: 'Seats' }));
+    expect(await within(dialog).findByText('seat grid leg-1')).toBeTruthy();
+    expect(within(dialog).getByText('seat grid leg-2')).toBeTruthy();
+  });
+
+  it('edits legs through updateElement and syncLegs and keeps the dialog open', async () => {
+    const user = userEvent.setup();
+    api.listElements.mockResolvedValue([twoLegFlight()]);
+    api.updateElement.mockResolvedValue({});
+    api.syncLegs.mockResolvedValue([]);
+    renderPage();
+
+    await user.click(await screen.findByRole('button', { name: 'Open DEN → DAL → SJD' }));
+    const dialog = await screen.findByRole('dialog', { name: 'DEN → DAL → SJD' });
+    await user.click(within(dialog).getByRole('button', { name: 'Edit' }));
+    await user.click(within(dialog).getByRole('button', { name: 'mock bump last flight number' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Save changes' }));
 
     await waitFor(() => {
-      expect(tripApi.syncLegs).toHaveBeenCalledWith('trip-1', 'el-7', [
+      expect(api.updateElement).toHaveBeenCalledWith('trip-1', 'el-7', expect.objectContaining({ name: 'DEN → DAL → SJD' }));
+      expect(api.syncLegs).toHaveBeenCalledWith('trip-1', 'el-7', [
         expect.objectContaining({ id: 'leg-1', flightNumber: '100' }),
         expect.objectContaining({ id: 'leg-2', flightNumber: '201', departureAirport: 'DAL', arrivalAirport: 'SJD' }),
       ]);
     });
+    expect(await screen.findByRole('dialog', { name: 'DEN → DAL → SJD' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Save changes' })).toBeNull();
   });
 
-  it('hides the date range when a trip has no dates', async () => {
-    (tripApi.getTrip as any).mockResolvedValue({ id: 'trip-1', familyId: 'fam-1', name: 'Cabo', createdAt: '', updatedAt: '' });
+  it('deletes a flight after confirming and closes the dialog', async () => {
+    const user = userEvent.setup();
+    api.listElements.mockResolvedValue([flightEl()]);
+    api.deleteElement.mockResolvedValue(undefined);
     renderPage();
-    await screen.findByRole('button', { name: /add element/i });
-    expect(screen.queryByText(/ to /)).toBeNull();
+
+    await user.click(await screen.findByRole('button', { name: 'Open Delta 45' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Delta 45' });
+    await user.click(within(dialog).getByRole('button', { name: 'Delete' }));
+    api.listElements.mockResolvedValue([]);
+    await user.click(within(dialog).getByRole('button', { name: 'Confirm' }));
+
+    await waitFor(() => expect(api.deleteElement).toHaveBeenCalledWith('trip-1', 'el-1'));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Delta 45' })).toBeNull());
+  });
+
+  it('shows an inline error with Retry when loading fails', async () => {
+    const user = userEvent.setup();
+    api.getTrip.mockRejectedValueOnce(new Error('boom'));
+    renderPage();
+
+    expect(await screen.findByText('boom')).toBeTruthy();
+    const retry = screen.getByRole('button', { name: 'Retry' });
+    const callsBefore = api.getTrip.mock.calls.length;
+    await user.click(retry);
+
+    await waitFor(() => expect(api.getTrip.mock.calls.length).toBe(callsBefore + 1));
+    expect(await screen.findByRole('heading', { name: 'Cabo' })).toBeTruthy();
   });
 });
