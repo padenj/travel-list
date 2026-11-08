@@ -27,6 +27,7 @@ export default defineConfig({
       'client/src/__tests__/ElementDialog.test.tsx', // Dialog tabs and swipe
       'client/src/__tests__/tripApi.test.ts', // API error surfacing
       'client/src/__tests__/flightLegs.test.ts', // Leg draft model
+      'client/src/__tests__/FlightLegForm.test.tsx', // Single-leg form
       'src/**/*.test.{ts,tsx}',           // Frontend unit tests
       'server/**/*.test.ts',              // Backend unit tests
       'tests/integration/**/*.test.ts',   // Integration tests
