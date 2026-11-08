@@ -14,7 +14,7 @@
 }
 
 @media (max-width: 48em) {
-  .add {
+  .header .add {
     position: fixed;
     right: var(--mantine-spacing-md);
     bottom: var(--mantine-spacing-md);
