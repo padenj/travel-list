@@ -1,16 +1,18 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
+import { Alert, Button, Card, Container, Group, Loader, Modal, SegmentedControl, SimpleGrid, Stack, Text, TextInput, Title, Badge } from '@mantine/core';
 import { Trip } from '../types/trip';
 import { tripApi } from '../api/tripApi';
+import { formatTripDateRange } from '../utils/tripDates';
 import '../styles/trips.css';
 
 export function TripsPage() {
   const [trips, setTrips] = useState<Trip[]>([]);
   const [viewMode, setViewMode] = useState<'list' | 'card'>('list');
-  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [showCreate, setShowCreate] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [newTripName, setNewTripName] = useState('');
-  const [newTripStartDate, setNewTripStartDate] = useState('');
-  const [newTripEndDate, setNewTripEndDate] = useState('');
+  const [name, setName] = useState('');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -18,8 +20,7 @@ export function TripsPage() {
     try {
       setLoading(true);
       setError(null);
-      const data = await tripApi.listTrips();
-      setTrips(data);
+      setTrips(await tripApi.listTrips());
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load trips');
     } finally {
@@ -32,23 +33,18 @@ export function TripsPage() {
   }, []);
 
   const createTrip = async () => {
-    if (!newTripName || !newTripStartDate || !newTripEndDate) {
+    if (!name || !startDate || !endDate) {
       setError('Name, start date, and end date are required');
       return;
     }
-
     try {
       setCreating(true);
       setError(null);
-      await tripApi.createTrip({
-        name: newTripName,
-        startDate: newTripStartDate,
-        endDate: newTripEndDate,
-      });
-      setNewTripName('');
-      setNewTripStartDate('');
-      setNewTripEndDate('');
-      setShowCreateForm(false);
+      await tripApi.createTrip({ name, startDate, endDate });
+      setName('');
+      setStartDate('');
+      setEndDate('');
+      setShowCreate(false);
       await loadTrips();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create trip');
@@ -57,84 +53,54 @@ export function TripsPage() {
     }
   };
 
-  if (loading) {
-    return <div className="trips-page"><p>Loading trips...</p></div>;
-  }
-
-  if (error) {
-    return <div className="trips-page"><p className="error">Error: {error}</p></div>;
-  }
+  const tripCard = (trip: Trip) => (
+    <Card key={trip.id} component="a" href={`/trips/${trip.id}`} withBorder padding="sm">
+      <Group justify="space-between" wrap="nowrap">
+        <Text fw={600}>{trip.name}</Text>
+        {trip.tripType && <Badge variant="light">{trip.tripType}</Badge>}
+      </Group>
+      <Text size="sm" c="dimmed">{formatTripDateRange(trip.startDate, trip.endDate)}</Text>
+      {trip.description && <Text size="sm">{trip.description}</Text>}
+    </Card>
+  );
 
   return (
-    <div className="trips-page">
-      <div className="trips-header">
-        <h1>Trips</h1>
-        <div className="trips-header-actions">
-          <button
-            className="create-trip-btn"
-            onClick={() => setShowCreateForm(prev => !prev)}
-          >
-            {showCreateForm ? 'Cancel' : 'Create Trip'}
-          </button>
-          <button
-            className="view-toggle-btn"
-            onClick={() => setViewMode(viewMode === 'list' ? 'card' : 'list')}
-          >
-            Toggle {viewMode === 'list' ? 'Card' : 'List'} View
-          </button>
-        </div>
-      </div>
+    <Container size="lg" py="md">
+      <Group justify="space-between" mb="md">
+        <Title order={2}>Trips</Title>
+        <Group>
+          <SegmentedControl
+            value={viewMode}
+            onChange={value => setViewMode(value as 'list' | 'card')}
+            data={[
+              { value: 'list', label: 'List' },
+              { value: 'card', label: 'Cards' },
+            ]}
+          />
+          <Button onClick={() => setShowCreate(true)}>Create Trip</Button>
+        </Group>
+      </Group>
 
-      {showCreateForm && (
-        <div className="create-trip-form">
-          <label htmlFor="trip-name" className="sr-only">Trip name</label>
-          <input
-            id="trip-name"
-            type="text"
-            placeholder="Trip name"
-            value={newTripName}
-            onChange={(e) => setNewTripName(e.target.value)}
-          />
-          <label htmlFor="trip-start-date" className="sr-only">Start date</label>
-          <input
-            id="trip-start-date"
-            type="date"
-            value={newTripStartDate}
-            onChange={(e) => setNewTripStartDate(e.target.value)}
-          />
-          <label htmlFor="trip-end-date" className="sr-only">End date</label>
-          <input
-            id="trip-end-date"
-            type="date"
-            value={newTripEndDate}
-            onChange={(e) => setNewTripEndDate(e.target.value)}
-          />
-          <button className="create-trip-submit-btn" onClick={createTrip} disabled={creating}>
-            {creating ? 'Creating...' : 'Save Trip'}
-          </button>
-        </div>
-      )}
+      {error && <Alert color="red" mb="md" withCloseButton onClose={() => setError(null)}>{error}</Alert>}
 
-      {trips.length === 0 ? (
-        <p className="no-trips">No trips yet. Create your first trip!</p>
+      <Modal opened={showCreate} onClose={() => setShowCreate(false)} title="Create trip">
+        <Stack>
+          <TextInput placeholder="Trip name" aria-label="Trip name" value={name} onChange={e => setName(e.currentTarget.value)} />
+          <TextInput type="date" label="Start date" value={startDate} onChange={e => setStartDate(e.currentTarget.value)} />
+          <TextInput type="date" label="End date" value={endDate} onChange={e => setEndDate(e.currentTarget.value)} />
+          <Button onClick={createTrip} loading={creating}>Save Trip</Button>
+        </Stack>
+      </Modal>
+
+      {loading ? (
+        <Loader size="sm" aria-label="Loading trips" />
+      ) : trips.length === 0 ? (
+        <Text c="dimmed">No trips yet. Create your first trip!</Text>
+      ) : viewMode === 'card' ? (
+        <SimpleGrid cols={{ base: 1, sm: 2, md: 3 }}>{trips.map(tripCard)}</SimpleGrid>
       ) : (
-        <div className={`trips-container trips-${viewMode}`}>
-          {trips.map(trip => (
-            <a 
-              key={trip.id} 
-              href={`/trips/${trip.id}`} 
-              className="trip-item"
-            >
-              <h2>{trip.name}</h2>
-              {trip.description && <p className="trip-description">{trip.description}</p>}
-              {trip.tripType && <span className="trip-type">{trip.tripType}</span>}
-              <span className="trip-dates">
-                {trip.startDate} to {trip.endDate}
-              </span>
-            </a>
-          ))}
-        </div>
+        <Stack gap="xs">{trips.map(tripCard)}</Stack>
       )}
-    </div>
+    </Container>
   );
 }
