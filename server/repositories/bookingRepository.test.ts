@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { getDb, closeDb } from '../db';
 import { BookingRepository, BookingConflictError } from './bookingRepository';
 import { TripParticipantRepository } from './tripParticipantRepository';
@@ -131,6 +131,57 @@ describe('BookingRepository', () => {
       const updated = await repo.updateBooking(booking.id, { confirmationNumber: 'NEW123', advertisedPriceCash: 69 });
       expect(updated.confirmationNumber).toBe('NEW123');
       expect(updated.advertisedPriceCash).toBe(69);
+    });
+
+    it('clears fields set to null', async () => {
+      const booking = await repo.createBooking(tripId, { confirmationNumber: 'ABC', notes: 'n', elementIds: [elementId], travelerIds: [participantAId] });
+      const updated = await repo.updateBooking(booking.id, { confirmationNumber: null, notes: null });
+      expect(updated.confirmationNumber).toBeNull();
+      expect(updated.notes).toBeNull();
+    });
+
+    it('replaces linked flights and travelers', async () => {
+      const booking = await repo.createBooking(tripId, { elementIds: [elementId], travelerIds: [participantAId] });
+      const updated = await repo.updateBooking(booking.id, { elementIds: [elementId2], travelerIds: [participantAId, participantBId] });
+      expect(updated.elementIds).toEqual([elementId2]);
+      expect(updated.travelerIds.sort()).toEqual([participantAId, participantBId].sort());
+    });
+
+    it('rejects a replacement that conflicts with another booking and changes nothing', async () => {
+      await repo.createBooking(tripId, { confirmationNumber: 'OTHER', elementIds: [elementId2], travelerIds: [participantAId] });
+      const booking = await repo.createBooking(tripId, { confirmationNumber: 'MINE', elementIds: [elementId], travelerIds: [participantAId] });
+      await expect(
+        repo.updateBooking(booking.id, { confirmationNumber: 'CHANGED', elementIds: [elementId, elementId2] })
+      ).rejects.toBeInstanceOf(BookingConflictError);
+      const reloaded = await repo.getBookingById(booking.id);
+      expect(reloaded!.confirmationNumber).toBe('MINE');
+      expect(reloaded!.elementIds).toEqual([elementId]);
+    });
+
+    it('does not count the booking itself as a conflict', async () => {
+      const booking = await repo.createBooking(tripId, { elementIds: [elementId], travelerIds: [participantAId] });
+      await expect(repo.updateBooking(booking.id, { elementIds: [elementId], travelerIds: [participantAId] })).resolves.toBeTruthy();
+    });
+
+    it('rejects empty replacement lists', async () => {
+      const booking = await repo.createBooking(tripId, { elementIds: [elementId], travelerIds: [participantAId] });
+      await expect(repo.updateBooking(booking.id, { elementIds: [] })).rejects.toThrow('At least one flight is required');
+      await expect(repo.updateBooking(booking.id, { travelerIds: [] })).rejects.toThrow('At least one traveler is required');
+    });
+
+    it('rolls back link replacement when a write fails midway', async () => {
+      const booking = await repo.createBooking(tripId, { elementIds: [elementId], travelerIds: [participantAId] });
+      const db: any = await (repo as any).db;
+      const realRun = db.run.bind(db);
+      const spy = vi.spyOn(db, 'run').mockImplementation(async (sql: string, ...args: any[]) => {
+        if (/^\s*INSERT INTO booking_travelers/i.test(sql)) throw new Error('boom');
+        return realRun(sql, ...args);
+      });
+      await expect(repo.updateBooking(booking.id, { elementIds: [elementId2], travelerIds: [participantBId] })).rejects.toThrow('boom');
+      spy.mockRestore();
+      const reloaded = await repo.getBookingById(booking.id);
+      expect(reloaded!.elementIds).toEqual([elementId]);
+      expect(reloaded!.travelerIds).toEqual([participantAId]);
     });
   });
 

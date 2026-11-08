@@ -35,6 +35,16 @@ export class BookingConflictError extends Error {
   }
 }
 
+export interface UpdateBookingInput {
+  confirmationNumber?: string | null;
+  advertisedPriceCash?: number | null;
+  advertisedPricePoints?: number | null;
+  loyaltyProgram?: string | null;
+  notes?: string | null;
+  elementIds?: string[];
+  travelerIds?: string[];
+}
+
 export interface TravelerConflict {
   bookingId: string;
   confirmationNumber: string | null;
@@ -156,13 +166,26 @@ export class BookingRepository {
     return results;
   }
 
-  async updateBooking(id: string, updates: {
-    confirmationNumber?: string | null;
-    advertisedPriceCash?: number | null;
-    advertisedPricePoints?: number | null;
-    loyaltyProgram?: string | null;
-    notes?: string | null;
-  }): Promise<Booking> {
+  async updateBooking(id: string, updates: UpdateBookingInput): Promise<Booking> {
+    const current = await this.getBookingById(id);
+    if (!current) throw new Error('Booking not found');
+    if (updates.elementIds !== undefined && updates.elementIds.length === 0) {
+      throw new Error('At least one flight is required');
+    }
+    if (updates.travelerIds !== undefined && updates.travelerIds.length === 0) {
+      throw new Error('At least one traveler is required');
+    }
+    const elementIds = updates.elementIds ? Array.from(new Set(updates.elementIds)) : undefined;
+    const travelerIds = updates.travelerIds ? Array.from(new Set(updates.travelerIds)) : undefined;
+    if (elementIds || travelerIds) {
+      await this.assertNoTravelerConflicts(
+        current.tripId,
+        elementIds ?? current.elementIds,
+        travelerIds ?? current.travelerIds,
+        id
+      );
+    }
+
     const fieldMap: Record<string, string> = {
       confirmationNumber: 'confirmation_number',
       advertisedPriceCash: 'advertised_price_cash',
@@ -174,11 +197,30 @@ export class BookingRepository {
     for (const [key, dbKey] of Object.entries(fieldMap)) {
       if (key in updates) dbUpdates[dbKey] = (updates as any)[key] ?? null;
     }
-    if (Object.keys(dbUpdates).length > 0) {
-      const db = await this.db;
-      const fields = Object.keys(dbUpdates).map(k => `${k} = ?`).join(', ');
-      const values = [...Object.values(dbUpdates), id];
-      await db.run(`UPDATE bookings SET ${fields}, updated_at = datetime('now') WHERE id = ?`, values);
+
+    const db = await this.db;
+    await db.run('BEGIN TRANSACTION');
+    try {
+      if (Object.keys(dbUpdates).length > 0) {
+        const fields = Object.keys(dbUpdates).map(k => `${k} = ?`).join(', ');
+        await db.run(`UPDATE bookings SET ${fields}, updated_at = datetime('now') WHERE id = ?`, [...Object.values(dbUpdates), id]);
+      }
+      if (elementIds) {
+        await db.run(`DELETE FROM booking_links WHERE booking_id = ?`, [id]);
+        for (const elementId of elementIds) {
+          await db.run(`INSERT INTO booking_links (booking_id, element_id) VALUES (?, ?)`, [id, elementId]);
+        }
+      }
+      if (travelerIds) {
+        await db.run(`DELETE FROM booking_travelers WHERE booking_id = ?`, [id]);
+        for (const participantId of travelerIds) {
+          await db.run(`INSERT INTO booking_travelers (booking_id, participant_id) VALUES (?, ?)`, [id, participantId]);
+        }
+      }
+      await db.run('COMMIT');
+    } catch (error) {
+      try { await db.run('ROLLBACK'); } catch (e) {}
+      throw error;
     }
     return this.getBookingById(id) as Promise<Booking>;
   }
