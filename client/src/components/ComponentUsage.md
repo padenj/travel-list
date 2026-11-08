@@ -128,15 +128,57 @@ Searchable item-group manager using a Mantine `Select` picker, an item-only list
 **Used in:**
   - `Dashboard`
 
-### TripParticipantsPanel
+### FlightsSection
 **Used in:**
   - `pages/TripDetailPage.tsx`
+
+Compact flights table (CSS grid) that reflows to cards on mobile; shows legs, layovers, per-person price and totals.
+
+### ElementDialog
+**Used in:**
+  - `pages/TripDetailPage.tsx` (hosts `FlightDetailsTab`, bookings and `FlightSeatsTab`)
+
+Generic modal with swipeable Details/Bookings/Seats tabs; full-screen on mobile.
+
+### FlightDetailsTab
+**Used in:**
+  - `pages/TripDetailPage.tsx` (passed into `ElementDialog`)
+
+Read-only flight details with edit mode and delete.
+
+### FlightSeatsTab
+**Used in:**
+  - `pages/TripDetailPage.tsx` (passed into `ElementDialog`)
+
+Per-leg seat grids via `FlightSeatGrid`.
+
+### AddElementDialog
+**Used in:**
+  - `pages/TripDetailPage.tsx`
+
+Create-flight form in a modal.
+
+### TripHeader
+**Used in:**
+  - `pages/TripDetailPage.tsx`
+
+Trip title, badge, dates and Add flight button (floating on mobile).
+
+### TripTravelersStrip
+**Used in:**
+  - `pages/TripDetailPage.tsx`
+
+Traveler chips plus Manage modal wrapping `TripParticipantsPanel`.
+
+### TripParticipantsPanel
+**Used in:**
+  - `TripTravelersStrip` (Manage modal)
 
 Lists/add/removes trip travelers (family members and outside guests). Exports `findOrCreateParticipant` helper used by `BookingCard` for inline traveler creation.
 
 ### BookingCard
 **Used in:**
-  - `pages/TripDetailPage.tsx` (once per flight-type `TripElement`)
+  - `pages/TripDetailPage.tsx` (Bookings tab of the flight dialog)
 
 Displays existing bookings (confirmation number, per-person advertised price, actual total from transactions, "Also covers" links to other linked elements) and a form to create a new booking with traveler multi-select, inline new-traveler creation, and multi-element linking. Renders `BookingTransactionList` per booking.
 
@@ -148,13 +190,14 @@ Lists/add/removes transactions for a single booking with a running total; suppor
 
 ### FlightLegsEditor
 **Used in:**
-  - `pages/TripDetailPage.tsx` (create and edit flight forms)
+  - `AddElementDialog`
+  - `FlightDetailsTab` (edit mode)
 
 Controlled editor for an array of flight-leg drafts: manual airports/times, add/remove connecting legs, layover display, and FlightStats lookup with empty/error feedback.
 
 ### FlightSeatGrid
 **Used in:**
-  - `pages/TripDetailPage.tsx` (once per flight leg)
+  - `FlightSeatsTab` (once per flight leg)
 
 Inline-editable seat number per trip traveler.
 ---

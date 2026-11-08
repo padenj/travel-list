@@ -96,19 +96,27 @@ Keep this checklist updated as you complete migration verification and removal s
   - client/src/components/ItemEditDrawer.tsx
 
 ### Trip tracking (`client/src/api/tripApi.ts`)
-- `getTrips`, `getTrip`, `createTrip`, `updateTrip`, `deleteTrip`, `listElements`, `getElement`, `createElement`, `updateElement`, `syncLegs`, `deleteElement`, `lookupFlightAutofill`, `addConfirmation`, `listConfirmations`, `updateConfirmation`, `deleteConfirmation`:
+- `getTrips`, `createTrip`, `updateTrip`, `deleteTrip`:
   - client/src/pages/TripsPage.tsx
+- `getTrip`, `listElements`, `listParticipants`:
   - client/src/pages/TripDetailPage.tsx
-- `listParticipants`, `createParticipant`, `updateParticipant`, `deleteParticipant`:
-  - client/src/pages/TripDetailPage.tsx
-  - client/src/components/TripParticipantsPanel.tsx
+- `createElement`:
+  - client/src/components/AddElementDialog.tsx
+- `updateElement`, `syncLegs`, `deleteElement`:
+  - client/src/components/FlightDetailsTab.tsx
+- `lookupFlightAutofill`:
+  - client/src/components/FlightLegsEditor.tsx
+- `createParticipant`, `updateParticipant`, `deleteParticipant`:
+  - client/src/components/TripParticipantsPanel.tsx (rendered in the `TripTravelersStrip` Manage modal)
   - client/src/components/BookingCard.tsx (inline "+ New traveler" creation)
+- `listBookings`:
+  - client/src/pages/TripDetailPage.tsx
 - `listBookings`, `getBooking`, `createBooking`, `updateBooking`, `deleteBooking`, `linkBookingElement`, `unlinkBookingElement`, `addBookingTraveler`, `removeBookingTraveler`:
   - client/src/components/BookingCard.tsx
 - `listBookingTransactions`, `addBookingTransaction`, `updateBookingTransaction`, `deleteBookingTransaction`:
   - client/src/components/BookingTransactionList.tsx (rendered inside `BookingCard.tsx`)
 - `listSeatsForLeg`, `assignSeat`, `removeSeat`:
-  - client/src/components/FlightSeatGrid.tsx (rendered in `pages/TripDetailPage.tsx`, once per flight leg)
+  - client/src/components/FlightSeatGrid.tsx (rendered in `components/FlightSeatsTab.tsx`, once per flight leg)
 
 ---
 
