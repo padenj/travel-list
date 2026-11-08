@@ -79,4 +79,76 @@ describe('FlightLegForm', () => {
     expect(screen.getByRole('status').textContent).toMatch(/Enter the flight # \(e\.g\. WN1234\) and date/);
     expect(tripApi.lookupFlightAutofill).not.toHaveBeenCalled();
   });
+
+  it('keeps an in-flight edit and still applies the lookup result once it resolves', async () => {
+    const user = userEvent.setup();
+    let resolveLookup!: (value: any) => void;
+    (tripApi.lookupFlightAutofill as any).mockImplementation(
+      () => new Promise(resolve => { resolveLookup = resolve; }),
+    );
+    renderWithMantine(<Harness />);
+    await user.type(screen.getByLabelText('Flight #'), 'WN1234');
+    fireEvent.change(screen.getByLabelText('Date'), { target: { value: '2026-08-29' } });
+    await user.click(screen.getByRole('button', { name: 'Look up' }));
+    await waitFor(() => expect(tripApi.lookupFlightAutofill).toHaveBeenCalled());
+
+    // Edit unrelated field while the lookup is still pending.
+    await user.type(screen.getByLabelText('Price check link'), 'https://example.com');
+    expect(latest.checkPriceUrl).toBe('https://example.com');
+
+    resolveLookup({
+      airlineCode: 'WN', flightNumber: '1234', flightDate: '2026-08-29',
+      departureAirport: 'DEN', arrivalAirport: 'DAL',
+      departureDatetime: '2026-08-29T08:00:00.000', arrivalDatetime: '2026-08-29T10:00:00.000',
+      statusText: 'Scheduled', sourceUrl: 'https://fs',
+    });
+
+    await waitFor(() => expect(latest).toMatchObject({ departureAirport: 'DEN', arrivalAirport: 'DAL', departureTime: '08:00', arrivalTime: '10:00' }));
+    expect(latest.checkPriceUrl).toBe('https://example.com');
+  });
+
+  it('drops a lookup result if the flight code changed while the request was in flight', async () => {
+    const user = userEvent.setup();
+    let resolveLookup!: (value: any) => void;
+    (tripApi.lookupFlightAutofill as any).mockImplementation(
+      () => new Promise(resolve => { resolveLookup = resolve; }),
+    );
+    renderWithMantine(<Harness />);
+    await user.type(screen.getByLabelText('Flight #'), 'WN1234');
+    fireEvent.change(screen.getByLabelText('Date'), { target: { value: '2026-08-29' } });
+    await user.click(screen.getByRole('button', { name: 'Look up' }));
+    await waitFor(() => expect(tripApi.lookupFlightAutofill).toHaveBeenCalled());
+
+    // Flight code changes while the lookup for the old code is still pending.
+    await user.type(screen.getByLabelText('Flight #'), '5');
+
+    resolveLookup({
+      airlineCode: 'WN', flightNumber: '1234', flightDate: '2026-08-29',
+      departureAirport: 'DEN', arrivalAirport: 'DAL',
+      departureDatetime: '2026-08-29T08:00:00.000', arrivalDatetime: '2026-08-29T10:00:00.000',
+      statusText: 'Scheduled', sourceUrl: 'https://fs',
+    });
+
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Look up' })?.getAttribute('data-loading')).not.toBe('true'));
+    expect(latest.departureAirport).toBe('');
+    expect(latest.arrivalAirport).toBe('');
+  });
+
+  it('clears the stale "Filled from FlightStats" message when the flight code changes', async () => {
+    const user = userEvent.setup();
+    (tripApi.lookupFlightAutofill as any).mockResolvedValue({
+      airlineCode: 'WN', flightNumber: '1234', flightDate: '2026-08-29',
+      departureAirport: 'DEN', arrivalAirport: 'DAL',
+      departureDatetime: '2026-08-29T08:00:00.000', arrivalDatetime: '2026-08-29T10:00:00.000',
+      statusText: 'Scheduled', sourceUrl: 'https://fs',
+    });
+    renderWithMantine(<Harness />);
+    await user.type(screen.getByLabelText('Flight #'), 'WN1234');
+    fireEvent.change(screen.getByLabelText('Date'), { target: { value: '2026-08-29' } });
+    await user.click(screen.getByRole('button', { name: 'Look up' }));
+    await waitFor(() => expect(screen.getByRole('status').textContent).toMatch(/Filled from FlightStats/));
+
+    await user.type(screen.getByLabelText('Flight #'), '5');
+    expect(screen.queryByRole('status')).toBeNull();
+  });
 });
