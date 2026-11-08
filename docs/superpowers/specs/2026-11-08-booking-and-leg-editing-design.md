@@ -58,10 +58,10 @@ Existing `DELETE /trips/:tripId/bookings/:id` — cascades transactions, links a
 
 ### 1.4 Automatic flight title
 
-- `flightTitle(legs)` = `"<FIRST.departureAirport> → <LAST.arrivalAirport>"` (uppercase, trimmed). Intermediate stops are not included. If either end is missing/`TBD`, the title is `"Flight"`.
+- `flightTitle(legs)` = `"<FIRST.departureAirport> → <LAST.arrivalAirport>"` (uppercase, trimmed). Intermediate stops are not included. If either end is missing/`TBD`, the title cannot be derived and the existing name is kept (a new flight with no derivable title is named `"Flight"`).
 - `TripElementRepository.syncLegs` sets `trip_elements.name` to `flightTitle(savedLegs)` after saving.
 - Creating a flight with legs (`POST /elements`, `elementType: 'flight'`): `name` becomes optional; the server sets the title from the created legs. Non-flight elements still require `name`.
-- Migration `server/migrations/migrations/20261108_01_backfill_flight_titles.cjs` renames every existing flight element with ≥1 leg using the same rule. `down` is a no-op (old names are not recoverable and not needed).
+- Migration `server/migrations/migrations/20261108_01_backfill_flight_titles.cjs` renames every existing flight element whose title can be derived using the same rule (flights with `TBD` ends keep their name). It runs automatically when the dev/prod server starts (`server/index.ts` → `data/migrations.json`); do **not** use `run-migrations.cjs`, which tracks a different storage file. `down` is a no-op (old names are not recoverable and not needed).
 
 ### 1.5 Legs
 
@@ -80,7 +80,7 @@ Price check link [optional                           ]
 - **Flight #**: one field. Parsed on save by `parseFlightCode`: strip spaces/dashes, uppercase; if it starts with 3 letters followed by a digit → 3-char ICAO airline code (`SWA1234`); otherwise the first 2 characters are the airline code (`WN1234`, `B61234`, `9K123`); the remainder is the flight number. Unparseable input (e.g. only letters) is stored entirely as `flightNumber` with no airline. Displayed via `formatFlightCode(airline, number)` = concatenation (`WN1234`).
 - **Date**: single native `type="date"` input = departure date.
 - **Departs / Arrives**: native `type="time"` inputs (native pickers on mobile).
-- **Arrival day**: Mantine `SegmentedControl` with `Same day | +1 | +2` (offset 0/1/2). Defaults to 0; when the user changes a time and the arrival time is earlier than the departure time, it auto-sets to +1 (`autoArrivalOffset`). Manual selection is respected until the times change again.
+- **Arrival day**: Mantine `SegmentedControl` with `Same day | +1 | +2` (offset 0/1/2). Defaults to 0. When either time changes, `autoArrivalOffset(dep, arr, current)` toggles between Same day and +1 automatically (arrival earlier than departure → +1; otherwise +1 → Same day). A manually chosen +2 is never changed automatically.
 - **Look up**: uses the parsed flight code + date via the existing `lookupFlightAutofill`; results are split back into date/times/offset.
 - **Validation (client)**: date, both airports and both times required; inline `Alert` on failure. Server validation remains authoritative.
 - **Layout**: one column below `48em`, two columns above; inputs use Mantine default sizes (touch-friendly).
@@ -146,13 +146,13 @@ Covers: DEN → MCO (Aug 29) · MCO → DEN (Sep 5)
   - At least one flight and one traveler required.
 - **Coverage hint**: when trip travelers exist who are on no booking for this flight, a muted line `Not booked: Grandma 217` appears under the + Booking button.
 - Tab swipe disabled while any booking form is open.
-- `BookingCard` receives the trip-wide `bookings` list (already loaded by `TripDetailPage`) for coverage/conflict computation.
+- `BookingCard` receives the trip-wide `bookings` list (already loaded by `TripDetailPage`) as a prop and no longer fetches bookings itself; after any change it calls `onBookingsChanged` and the page refetches.
 
 ## 6. Components & files
 
 Client:
 
-- `utils/flightLegs.ts` — new draft model; `parseFlightCode`, `formatFlightCode`, `autoArrivalOffset`, `legToDraft`, `draftToPayload`, `flightTitle`, `formatLegLine`.
+- `utils/flightLegs.ts` — new draft model; `parseFlightCode`, `formatFlightCode`, `autoArrivalOffset`, `legToDraft`, `legToPayload`, `draftToPayload`, `validateDraft`, `applyLookup`, `formatLegLine`. (No client-side title helper: the server owns the title.)
 - `components/FlightLegForm.tsx` — single-leg form (new).
 - `components/FlightLegList.tsx` — Details-tab rows with inline edit/add/delete (new).
 - `components/FlightLegsEditor.tsx` — rewritten as a stack of `FlightLegForm` for the Add dialog.
@@ -162,7 +162,8 @@ Client:
 - `components/BookingForm.tsx` — shared create/edit form (new).
 - `components/BookingBlock.tsx` — read-mode block with legs, edit, delete (new).
 - `components/BookingCard.tsx` — thin container.
-- `api/tripApi.ts`, `types/trip.ts` — widened booking update payload; flight `name` optional on create.
+- `api/tripApi.ts`, `types/trip.ts` — widened booking update payload; flight `name` optional on create; `notes: null` allowed on element update; `handleResponse` surfaces the server's `{ error }` message (needed for 409 text and leg validation messages).
+- `client/tsconfig.json` (new) — lets `npx tsc -p client/tsconfig.json` type-check the client (the root `tsconfig.json` only includes a non-existent `src/`).
 
 Server:
 
@@ -178,6 +179,7 @@ Docs: `client/src/APIUsage.md`, `client/src/components/ComponentUsage.md`.
 
 - All errors inline (`Alert color="red"`), no notifications; forms stay open on error.
 - 409 messages are shown verbatim.
+- Pre-existing conflicting data (e.g. the Cabo trip, where one traveler is on both `Asdfsa` and `ABC123`) is not auto-fixed; editing one of those bookings returns the 409 until the traveler is removed from one of them.
 - Delete actions use inline two-step confirm.
 
 ## 8. Testing
