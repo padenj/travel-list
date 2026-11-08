@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useId } from 'react';
+import { useState, useEffect, useCallback, useId, useRef } from 'react';
 import { ActionIcon, Alert, Button, Group, SimpleGrid, Table, Text, TextInput, Textarea } from '@mantine/core';
 import { IconTrash } from '@tabler/icons-react';
 import { BookingTransaction } from '../types/trip';
@@ -11,6 +11,7 @@ interface BookingTransactionListProps {
   originalConfirmationNumber?: string | null;
   refreshKey?: number;
   onChanged: () => void;
+  onCountChange?: (count: number) => void;
 }
 
 function parseAmount(value: string): number | undefined {
@@ -19,7 +20,7 @@ function parseAmount(value: string): number | undefined {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
-export function BookingTransactionList({ tripId, bookingId, originalConfirmationNumber = null, refreshKey = 0, onChanged }: BookingTransactionListProps) {
+export function BookingTransactionList({ tripId, bookingId, originalConfirmationNumber = null, refreshKey = 0, onChanged, onCountChange }: BookingTransactionListProps) {
   const [transactions, setTransactions] = useState<BookingTransaction[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
@@ -40,6 +41,12 @@ export function BookingTransactionList({ tripId, bookingId, originalConfirmation
   useEffect(() => {
     load();
   }, [load, refreshKey]);
+
+  const onCountChangeRef = useRef(onCountChange);
+  onCountChangeRef.current = onCountChange;
+  useEffect(() => {
+    onCountChangeRef.current?.(transactions.length);
+  }, [transactions.length]);
 
   let carriedConfirmation = originalConfirmationNumber;
   const rows = transactions.map(t => {

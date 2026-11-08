@@ -118,4 +118,11 @@ describe('BookingTransactionList', () => {
     await waitFor(() => expect(tripApi.deleteBookingTransaction).toHaveBeenCalledWith('trip-1', 'b1', 't1'));
     await waitFor(() => expect(onChanged).toHaveBeenCalled());
   });
+
+  it('reports the number of transactions after loading', async () => {
+    const onCountChange = vi.fn();
+    renderList({ onCountChange });
+    await screen.findByText('$78.98');
+    expect(onCountChange).toHaveBeenLastCalledWith(1);
+  });
 });
