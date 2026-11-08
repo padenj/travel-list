@@ -3,6 +3,7 @@ import { Card, Title, Group, Button, Stack, Text, Drawer, TextInput, Badge, Chec
 import { IconEdit, IconX, IconLayersOff } from '@tabler/icons-react';
 import {
   getFamilyPackingLists,
+  getFamily,
   getCurrentUserProfile,
   getPackingList,
   getTemplates,
@@ -14,6 +15,7 @@ import {
   addItemToPackingList,
   createPackingList,
   populatePackingListFromTemplate,
+  setActivePackingList,
 } from '../api';
 import { useImpersonation } from '../contexts/ImpersonationContext';
 import { showNotification } from '@mantine/notifications';
@@ -24,6 +26,7 @@ import AddItemsDrawer from './AddItemsDrawer';
 
 export default function ManagePackingLists() {
   const [familyId, setFamilyId] = useState<string | null>(null);
+  const [activeFamilyListId, setActiveFamilyListId] = useState<string | null>(null);
   const { impersonatingFamilyId } = useImpersonation();
   const [lists, setLists] = useState<any[]>([]);
   // selected removed; edit modal holds the current list being edited in editListId
@@ -86,12 +89,29 @@ export default function ManagePackingLists() {
       let fid: string | null = null;
       if (impersonatingFamilyId) {
         fid = impersonatingFamilyId;
+        try {
+          const familyRes = await getFamily(impersonatingFamilyId);
+          if (familyRes.response.ok && familyRes.data?.family) {
+            setActiveFamilyListId(familyRes.data.family.active_packing_list_id ?? null);
+          } else {
+            setActiveFamilyListId(null);
+          }
+        } catch {
+          setActiveFamilyListId(null);
+        }
       } else {
         try {
           const profile = await getCurrentUserProfile();
-          fid = profile.response.ok && profile.data.family ? profile.data.family.id : null;
+          if (profile.response.ok && profile.data.family) {
+            fid = profile.data.family.id;
+            setActiveFamilyListId(profile.data.family.active_packing_list_id ?? null);
+          } else {
+            fid = null;
+            setActiveFamilyListId(null);
+          }
         } catch (e) {
           fid = null;
+          setActiveFamilyListId(null);
         }
       }
       setFamilyId(fid);
@@ -343,6 +363,31 @@ export default function ManagePackingLists() {
             <Group key={l.id} align="center" style={{ justifyContent: 'space-between' }}>
               <Text>{l.name}</Text>
               <Group>
+                {activeFamilyListId === l.id ? (
+                  <Badge color="green" variant="light">Active</Badge>
+                ) : (
+                  <Button
+                    size="xs"
+                    onClick={async () => {
+                      if (!familyId) return;
+                      try {
+                        const res = await setActivePackingList(familyId, l.id);
+                        if (!res.response.ok) {
+                          showNotification({ title: 'Error', message: 'Failed to set active list', color: 'red' });
+                          return;
+                        }
+                        setActiveFamilyListId(l.id);
+                        showNotification({ title: 'Updated', message: 'Active list updated', color: 'green' });
+                        await reload();
+                      } catch {
+                        showNotification({ title: 'Error', message: 'Failed to set active list', color: 'red' });
+                      }
+                    }}
+                    disabled={!familyId}
+                  >
+                    Set as active
+                  </Button>
+                )}
                 <Button size="xs" onClick={() => openEditFor(l)}>Edit</Button>
                 <Button size="xs" onClick={() => openCopyFor(l)}>Copy</Button>
                 <Button size="xs" color="red" onClick={() => doDelete(l.id)}>Delete</Button>

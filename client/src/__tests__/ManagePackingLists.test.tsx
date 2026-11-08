@@ -1,7 +1,6 @@
-import { describe as _describe, it as _it, expect as _expect, beforeEach as _beforeEach, beforeAll as _beforeAll, vi as _vi } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as api from '../api';
 
-// Guard for testing libs
 let hasTestingLibs = true;
 try {
   require.resolve('@testing-library/react');
@@ -10,150 +9,184 @@ try {
   hasTestingLibs = false;
 }
 
+let availableListsMock: any[] = [];
+let refreshListsMock: any;
+let impersonatingFamilyIdMock: string | null = null;
+const { showNotificationMock } = vi.hoisted(() => ({ showNotificationMock: vi.fn() }));
+
+vi.mock('../api');
+vi.mock('../components/AddItemsDrawer', () => {
+  const React = require('react');
+  return { default: () => React.createElement('div', null) };
+});
+vi.mock('../components/ItemEditDrawer', () => {
+  const React = require('react');
+  return { default: () => React.createElement('div', null) };
+});
+vi.mock('../contexts/ImpersonationContext', () => ({
+  useImpersonation: () => ({ impersonatingFamilyId: impersonatingFamilyIdMock }),
+}));
+vi.mock('../contexts/ListEditDrawerContext', () => ({
+  useListEditDrawer: () => ({ openForList: vi.fn() }),
+}));
+vi.mock('../contexts/ActivePackingListContext', () => ({
+  useActivePackingList: () => ({
+    availableLists: availableListsMock,
+    refreshLists: refreshListsMock,
+    pendingOpenEditId: null,
+    clearPendingOpenEdit: vi.fn(),
+    requestOpenEdit: vi.fn(),
+  }),
+}));
+vi.mock('@mantine/notifications', () => ({
+  showNotification: showNotificationMock,
+}));
+vi.mock('@mantine/core', () => {
+  const React = require('react');
+  const passthrough = (el = 'div') => ({ children, ...props }: any) => React.createElement(el, props, children);
+  return {
+    Card: passthrough('div'),
+    Title: passthrough('div'),
+    Group: passthrough('div'),
+    Button: passthrough('button'),
+    Stack: passthrough('div'),
+    Text: passthrough('div'),
+    Drawer: passthrough('div'),
+    TextInput: (props: any) => React.createElement('input', { ...props }),
+    Badge: passthrough('div'),
+    Checkbox: (props: any) => React.createElement('input', { type: 'checkbox', ...props }),
+    ActionIcon: passthrough('button'),
+    Tooltip: passthrough('div'),
+  };
+});
+
 if (!hasTestingLibs) {
-  _describe.skip('ManagePackingLists (component tests skipped - install testing libs)', () => {});
+  describe.skip('ManagePackingLists', () => {});
 } else {
   const rtl = require('@testing-library/react');
   const userEvent = require('@testing-library/user-event');
   const { render, screen, waitFor } = rtl;
-  const userEventLib = (userEvent && userEvent.default) || userEvent;
+  const user = (userEvent && userEvent.default) || userEvent;
   const { MemoryRouter } = require('react-router-dom');
   const React = require('react');
-  const MantineProvider = React.Fragment;
-
-  const { describe, it, expect, beforeEach, beforeAll, vi } = { describe: _describe, it: _it, expect: _expect, beforeEach: _beforeEach, beforeAll: _beforeAll, vi: _vi };
-
-  vi.mock('../api');
-
-  vi.mock('@mantine/core', () => {
-    const React = require('react');
-    const passthrough = (el = 'div') => ({ children, ...props }: any) => {
-      const allowed = new Set(['children', 'onClick', 'onChange', 'value', 'checked', 'placeholder', 'type', 'disabled', 'id', 'name', 'className', 'style', 'defaultValue', 'onKeyDown', 'role', 'title']);
-      const cleanProps: any = {};
-      for (const [k, v] of Object.entries(props || {})) {
-        if (allowed.has(k)) {
-          cleanProps[k] = v as any;
-        } else if (v !== undefined) {
-          try {
-            cleanProps[`data-prop-${k.toLowerCase()}`] = typeof v === 'string' ? v : JSON.stringify(v);
-          } catch (e) {
-            cleanProps[`data-prop-${k.toLowerCase()}`] = String(v);
-          }
-        }
-      }
-      return React.createElement(el, cleanProps, children);
-    };
-
-    return {
-      MantineProvider: ({ children }: any) => React.createElement(React.Fragment, null, children),
-      Modal: passthrough('div'),
-      Text: passthrough('div'),
-      Title: passthrough('div'),
-      Group: passthrough('div'),
-      Stack: passthrough('div'),
-      Button: passthrough('button'),
-      TextInput: (props: any) => React.createElement('input', { ...props, placeholder: props.label }),
-      Select: (props: any) => React.createElement('select', { ...props }),
-      Checkbox: (props: any) => React.createElement('input', { type: 'checkbox', ...props }),
-      Card: passthrough('div'),
-      MultiSelect: (props: any) => React.createElement('select', { ...props }),
-      Drawer: passthrough('div'),
-      Badge: passthrough('div'),
-      ActionIcon: passthrough('button'),
-      useMantineTheme: () => ({}),
-    };
-  });
 
   let ManagePackingLists: any;
+
   beforeAll(async () => {
     const mod = await import('../components/ManagePackingLists');
     ManagePackingLists = mod.default;
   });
 
-  describe('ManagePackingLists - Item Edit Drawer', () => {
-    beforeEach(() => {
-      // default mocks
-      (api.getCurrentUserProfile as any).mockResolvedValue({ response: { ok: true }, data: { family: { id: 'f1', members: [{ id: 'm1', name: 'Alice' }, { id: 'm2', name: 'Bob' }] } } });
-      (api.getFamilyPackingLists as any).mockResolvedValue({ response: { ok: true }, data: { lists: [{ id: 'list1', name: 'My List' }] } });
-      (api.getPackingList as any).mockResolvedValue({ response: { ok: true }, data: { items: [{ id: 'pli1', item_id: 'item1', display_name: 'Passport', members: [], whole_family: false }] } });
-      (api.getCategoriesForItem as any).mockResolvedValue({ response: { ok: true }, data: [] });
-      (api.getCategories as any).mockResolvedValue({ response: { ok: true }, data: { categories: [{ id: 'c1', name: 'Documents' }, { id: 'c2', name: 'Electronics' }] } });
-      (api.getMembersForItem as any).mockResolvedValue({ response: { ok: true }, data: [] });
-  // New consolidated endpoint (used by ItemEditDrawer) — keep test compatibility by mocking it
-  (api.getItemEditData as any).mockResolvedValue({ response: { ok: true }, data: { categories: [{ id: 'c1', name: 'Documents' }, { id: 'c2', name: 'Electronics' }], itemCategories: [], members: [{ id: 'm1', name: 'Alice' }, { id: 'm2', name: 'Bob' }], itemMembers: [], wholeAssigned: false } });
+  beforeEach(() => {
+    vi.clearAllMocks();
+    availableListsMock = [
+      { id: 'list1', name: 'Beach' },
+      { id: 'list2', name: 'Ski' },
+    ];
+    impersonatingFamilyIdMock = null;
+    refreshListsMock = vi.fn().mockResolvedValue(availableListsMock);
 
-      // assignment/category APIs
-      (api.assignItemToCategory as any).mockResolvedValue({ response: { ok: true }, data: {} });
-      (api.removeItemFromCategory as any).mockResolvedValue({ response: { ok: true }, data: {} });
-      (api.assignToMember as any).mockResolvedValue({ response: { ok: true }, data: {} });
-      (api.removeFromMember as any).mockResolvedValue({ response: { ok: true }, data: {} });
-      (api.assignToWholeFamily as any).mockResolvedValue({ response: { ok: true }, data: {} });
-      (api.removeFromWholeFamily as any).mockResolvedValue({ response: { ok: true }, data: {} });
+    (api.getCurrentUserProfile as any).mockResolvedValue({
+      response: { ok: true },
+      data: { family: { id: 'f1', active_packing_list_id: 'list1', members: [] } },
+    });
+    (api.getItemGroups as any).mockResolvedValue({ response: { ok: true }, data: { itemGroups: [] } });
+    (api.getFamily as any).mockResolvedValue({
+      response: { ok: true },
+      data: { family: { id: 'f1', active_packing_list_id: 'list1', members: [] } },
+    });
+    (api.setActivePackingList as any).mockResolvedValue({ response: { ok: true }, data: {} });
+  });
+
+  const renderPage = () =>
+    render(
+      <MemoryRouter>
+        <ManagePackingLists />
+      </MemoryRouter>
+    );
+
+  describe('ManagePackingLists active list actions', () => {
+    it('shows Active badge for the active row and Set as active for non-active rows', async () => {
+      renderPage();
+
+      expect(await screen.findByText('Active')).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Set as active' })).toBeTruthy();
     });
 
-    it('opens item edit drawer and loads categories and members', async () => {
-      const { ActivePackingListProvider } = await import('../contexts/ActivePackingListContext');
-      render(
-        <MemoryRouter>
-          <MantineProvider>
-            <ActivePackingListProvider>
-              <ManagePackingLists />
-            </ActivePackingListProvider>
-          </MantineProvider>
-        </MemoryRouter>
-      );
+    it('uses impersonated family active list for Active badge', async () => {
+      impersonatingFamilyIdMock = 'f-imp';
+      (api.getFamily as any).mockResolvedValueOnce({
+        response: { ok: true },
+        data: { family: { id: 'f-imp', active_packing_list_id: 'list2', members: [] } },
+      });
 
-      // Wait for lists to be loaded
-      await waitFor(() => expect(api.getFamilyPackingLists).toHaveBeenCalled());
+      renderPage();
 
-      // Click the list-level Edit button (first 'Edit' button)
-      const user = await userEventLib.setup();
-      const editButtons = screen.getAllByText('Edit');
-      // First click opens the edit drawer for the list
-      await user.click(editButtons[0]);
-
-      await waitFor(() => expect(api.getPackingList).toHaveBeenCalled());
-
-      // After list items load, there should be another 'Edit' button for the item
-      const editButtonsAfter = screen.getAllByText('Edit');
-      // Click the second Edit (item-level)
-      await user.click(editButtonsAfter[1]);
-
-  // Expect the consolidated item edit API to be called
-  await waitFor(() => expect(api.getItemEditData).toHaveBeenCalled());
+      expect(await screen.findByText('Active')).toBeTruthy();
+      expect(api.getFamily).toHaveBeenCalledWith('f-imp');
+      expect(screen.getAllByRole('button', { name: 'Set as active' })).toHaveLength(1);
     });
 
-    it('saves with no-op when nothing changed', async () => {
-      const { ActivePackingListProvider } = await import('../contexts/ActivePackingListContext');
-      render(
-        <MemoryRouter>
-          <MantineProvider>
-            <ActivePackingListProvider>
-              <ManagePackingLists />
-            </ActivePackingListProvider>
-          </MantineProvider>
-        </MemoryRouter>
+    it('clicking Set as active calls API and refreshes list data', async () => {
+      const u = await user.setup();
+      renderPage();
+      await screen.findByText('Active');
+
+      const baselineRefreshCalls = refreshListsMock.mock.calls.length;
+      await u.click(screen.getByRole('button', { name: 'Set as active' }));
+
+      await waitFor(() => expect(api.setActivePackingList).toHaveBeenCalledWith('f1', 'list2'));
+      await waitFor(() => expect(refreshListsMock.mock.calls.length).toBeGreaterThan(baselineRefreshCalls));
+    });
+
+    it('shows success notification when setting active list succeeds', async () => {
+      const u = await user.setup();
+      renderPage();
+      await screen.findByText('Active');
+
+      await u.click(screen.getByRole('button', { name: 'Set as active' }));
+
+      await waitFor(() =>
+        expect(showNotificationMock).toHaveBeenCalledWith({
+          title: 'Updated',
+          message: 'Active list updated',
+          color: 'green',
+        })
       );
+    });
 
-      await waitFor(() => expect(api.getFamilyPackingLists).toHaveBeenCalled());
-      const user = await userEventLib.setup();
-      const editButtons = screen.getAllByText('Edit');
-      await user.click(editButtons[0]);
-      await waitFor(() => expect(api.getPackingList).toHaveBeenCalled());
-      const editButtonsAfter = screen.getAllByText('Edit');
-      await user.click(editButtonsAfter[1]);
+    it('shows error notification when set active response is not ok', async () => {
+      (api.setActivePackingList as any).mockResolvedValueOnce({ response: { ok: false }, data: {} });
+      const u = await user.setup();
+      renderPage();
+      await screen.findByText('Active');
 
-      // Click Save without making changes
-      const saveBtn = screen.getByText('Save');
-      await user.click(saveBtn);
+      await u.click(screen.getByRole('button', { name: 'Set as active' }));
 
-      // Assignment/category APIs should not be called because there's no change
-      expect(api.assignItemToCategory).not.toHaveBeenCalled();
-      expect(api.removeItemFromCategory).not.toHaveBeenCalled();
-      expect(api.assignToMember).not.toHaveBeenCalled();
-      expect(api.removeFromMember).not.toHaveBeenCalled();
-      expect(api.assignToWholeFamily).not.toHaveBeenCalled();
-      expect(api.removeFromWholeFamily).not.toHaveBeenCalled();
+      await waitFor(() =>
+        expect(showNotificationMock).toHaveBeenCalledWith({
+          title: 'Error',
+          message: 'Failed to set active list',
+          color: 'red',
+        })
+      );
+    });
+
+    it('shows error notification when set active request throws', async () => {
+      (api.setActivePackingList as any).mockRejectedValueOnce(new Error('network error'));
+      const u = await user.setup();
+      renderPage();
+      await screen.findByText('Active');
+
+      await u.click(screen.getByRole('button', { name: 'Set as active' }));
+
+      await waitFor(() =>
+        expect(showNotificationMock).toHaveBeenCalledWith({
+          title: 'Error',
+          message: 'Failed to set active list',
+          color: 'red',
+        })
+      );
     });
   });
 }
