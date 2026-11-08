@@ -257,28 +257,46 @@ describe('TripDetailPage', () => {
     expect(within(dialog).getByText('seat grid leg-2')).toBeTruthy();
   });
 
-  it('edits legs through updateElement and syncLegs and keeps the dialog open', async () => {
+  it('edits a leg inline through syncLegs only and keeps the dialog open', async () => {
     const user = userEvent.setup();
     api.listElements.mockResolvedValue([twoLegFlight()]);
-    api.updateElement.mockResolvedValue({});
     api.syncLegs.mockResolvedValue([]);
     renderPage();
 
     await user.click(await screen.findByRole('button', { name: 'Open DEN → DAL → SJD' }));
     const dialog = await screen.findByRole('dialog', { name: 'DEN → DAL → SJD' });
-    await user.click(within(dialog).getByRole('button', { name: 'Edit' }));
-    await user.click(within(dialog).getByRole('button', { name: 'mock bump last flight number' }));
-    await user.click(within(dialog).getByRole('button', { name: 'Save changes' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Edit leg 2' }));
+    const code = within(dialog).getByLabelText('Flight #');
+    await user.clear(code);
+    await user.type(code, 'WN201');
+    await user.click(within(dialog).getByRole('button', { name: 'Save leg' }));
 
-    await waitFor(() => {
-      expect(api.updateElement).toHaveBeenCalledWith('trip-1', 'el-7', expect.objectContaining({ name: 'DEN → DAL → SJD' }));
+    await waitFor(() =>
       expect(api.syncLegs).toHaveBeenCalledWith('trip-1', 'el-7', [
-        expect.objectContaining({ id: 'leg-1', flightNumber: '100' }),
-        expect.objectContaining({ id: 'leg-2', flightNumber: '201', departureAirport: 'DAL', arrivalAirport: 'SJD' }),
-      ]);
-    });
+        expect.objectContaining({ id: 'leg-1', airline: 'WN', flightNumber: '100' }),
+        expect.objectContaining({ id: 'leg-2', airline: 'WN', flightNumber: '201', departureAirport: 'DAL', arrivalAirport: 'SJD' }),
+      ])
+    );
+    expect(api.updateElement).not.toHaveBeenCalled();
     expect(await screen.findByRole('dialog', { name: 'DEN → DAL → SJD' })).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Save changes' })).toBeNull();
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Save leg' })).toBeNull());
+  });
+
+  it('edits notes inline and clears them when emptied', async () => {
+    const user = userEvent.setup();
+    api.listElements.mockResolvedValue([flightEl({ notes: 'Window seats' })]);
+    api.updateElement.mockResolvedValue({});
+    renderPage();
+
+    await user.click(await screen.findByRole('button', { name: 'Open Delta 45' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Delta 45' });
+    await user.click(within(dialog).getByRole('button', { name: 'Edit notes' }));
+    const notes = within(dialog).getByLabelText('Notes');
+    await user.clear(notes);
+    await user.click(within(dialog).getByRole('button', { name: 'Save notes' }));
+
+    await waitFor(() => expect(api.updateElement).toHaveBeenCalledWith('trip-1', 'el-1', { notes: null }));
+    await waitFor(() => expect(within(dialog).queryByRole('button', { name: 'Save notes' })).toBeNull());
   });
 
   it('deletes a flight after confirming and closes the dialog', async () => {
@@ -289,7 +307,7 @@ describe('TripDetailPage', () => {
 
     await user.click(await screen.findByRole('button', { name: 'Open Delta 45' }));
     const dialog = await screen.findByRole('dialog', { name: 'Delta 45' });
-    await user.click(within(dialog).getByRole('button', { name: 'Delete' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Delete flight' }));
     api.listElements.mockResolvedValue([]);
     await user.click(within(dialog).getByRole('button', { name: 'Confirm' }));
 
