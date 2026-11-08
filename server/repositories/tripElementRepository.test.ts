@@ -70,7 +70,7 @@ describe('TripElementRepository', () => {
       expect(element.id).toBeTruthy();
       expect(element.tripId).toBe(tripId);
       expect(element.elementType).toBe('flight');
-      expect(element.name).toBe('Flight to LA');
+      expect(element.name).toBe('JFK → LAX');
       expect(element.bookingReference).toBe('BOOK123');
       expect(element.sortPosition).toBe(1);
       expect((element as any).legs).toHaveLength(1);
@@ -572,6 +572,38 @@ describe('TripElementRepository', () => {
         typeSpecificData: { legs: [{ legOrder: 1, ...baseLeg }] },
       });
     }
+
+    it('renames the flight from the first origin and last destination', async () => {
+      const element = await createFlight();
+      await repo.syncLegs(element.id, [
+        { id: (element as any).legs[0].id, ...baseLeg },
+        { departureAirport: 'DAL', departureDatetime: '2026-11-10T12:15', arrivalAirport: 'SJD', arrivalDatetime: '2026-11-10T14:00' },
+      ]);
+      const reloaded = await repo.getElementById(element.id);
+      expect(reloaded!.name).toBe('DEN → SJD');
+    });
+
+    it('keeps the existing name when an end airport is TBD', async () => {
+      const element = await repo.createElement(tripId, {
+        elementType: 'flight',
+        name: 'Home',
+        typeSpecificData: { legs: [{ legOrder: 1, flightDate: '2026-09-05', airline: 'WN', flightNumber: '721' }] },
+      });
+      expect(element.name).toBe('Home');
+    });
+
+    it('names a new flight from its legs when no name is given', async () => {
+      const element = await repo.createElement(tripId, {
+        elementType: 'flight',
+        typeSpecificData: { legs: [{ legOrder: 1, ...baseLeg }] },
+      });
+      expect(element.name).toBe('DEN → DAL');
+    });
+
+    it('falls back to "Flight" for a new flight with no name and no derivable title', async () => {
+      const element = await repo.createElement(tripId, { elementType: 'flight' });
+      expect(element.name).toBe('Flight');
+    });
 
     it('updates existing legs, adds new ones, and computes layover minutes', async () => {
       const element = await createFlight();

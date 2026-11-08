@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import { getDb } from '../db';
+import { flightTitle } from '../utils/flightTitle';
 
 export interface TripElement {
   id: string;
@@ -103,7 +104,7 @@ export class TripElementRepository {
 
   async createElement(tripId: string, element: {
     elementType: 'flight' | 'hotel' | 'car_rental' | 'activity';
-    name: string;
+    name?: string;
     bookingReference?: string;
     bookingUrl?: string;
     priceCash?: number;
@@ -123,7 +124,7 @@ export class TripElementRepository {
     await db.run(
       `INSERT INTO trip_elements (id, trip_id, element_type, name, booking_reference, booking_url, price_cash, price_points, loyalty_program, total_cash, total_points, notes, sort_position, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
-      [id, tripId, element.elementType, element.name, element.bookingReference || null, element.bookingUrl || null,
+      [id, tripId, element.elementType, element.name?.trim() || (element.elementType === 'flight' ? 'Flight' : ''), element.bookingReference || null, element.bookingUrl || null,
        element.priceCash ?? null, element.pricePoints ?? null, element.loyaltyProgram || null,
        element.totalCash ?? null, element.totalPoints ?? null, element.notes || null, sortPos]
     );
@@ -149,6 +150,7 @@ export class TripElementRepository {
         );
       }
       await this.recomputeLayovers(id, true);
+      await this.refreshFlightTitle(id);
     } else if (element.elementType === 'hotel' && element.typeSpecificData) {
       await db.run(
         `INSERT INTO hotel_element_details (element_id, address, check_in_date, check_out_date, room_type, booking_source, advertised_price_cash, advertised_price_points, advertised_loyalty_program, created_at, updated_at)
@@ -385,12 +387,27 @@ export class TripElementRepository {
       }
 
       await this.recomputeLayovers(elementId);
+      await this.refreshFlightTitle(elementId);
       await db.run('COMMIT');
     } catch (error) {
       try { await db.run('ROLLBACK'); } catch (e) {}
       throw error;
     }
     return (((await this.getElementById(elementId)) as any)?.legs ?? []) as FlightLeg[];
+  }
+
+  // Keeps a flight's name in sync with its legs; leaves the name alone when the title can't be derived.
+  private async refreshFlightTitle(elementId: string): Promise<void> {
+    const db = await this.db;
+    const legs = await db.all(
+      `SELECT departure_airport as departureAirport, arrival_airport as arrivalAirport
+       FROM flight_legs WHERE element_id = ? ORDER BY leg_order ASC`,
+      [elementId]
+    );
+    const title = flightTitle(legs);
+    if (title) {
+      await db.run(`UPDATE trip_elements SET name = ? WHERE id = ?`, [title, elementId]);
+    }
   }
 
   private async recomputeLayovers(elementId: string, onlyMissing = false): Promise<void> {

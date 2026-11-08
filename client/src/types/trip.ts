@@ -164,11 +164,11 @@ export interface Booking {
 }
 
 export interface CreateBookingPayload {
-  confirmationNumber?: string;
-  advertisedPriceCash?: number;
-  advertisedPricePoints?: number;
-  loyaltyProgram?: string;
-  notes?: string;
+  confirmationNumber?: string | null;
+  advertisedPriceCash?: number | null;
+  advertisedPricePoints?: number | null;
+  loyaltyProgram?: string | null;
+  notes?: string | null;
   elementIds: string[];
   travelerIds: string[];
 }

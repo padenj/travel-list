@@ -1,76 +1,181 @@
-import { FlightLeg, FlightLegPayload } from '../types/trip';
+import { FlightAutofillDetails, FlightLeg, FlightLegPayload } from '../types/trip';
+
+export type ArrivalDayOffset = 0 | 1 | 2;
 
 export interface FlightLegDraft {
   id?: string;
-  flightDate: string;
-  airline: string;
-  flightNumber: string;
+  flightCode: string;
+  date: string;
+  departureTime: string;
+  arrivalTime: string;
+  arrivalDayOffset: ArrivalDayOffset;
   departureAirport: string;
-  departureDatetime: string;
   arrivalAirport: string;
-  arrivalDatetime: string;
   checkPriceUrl: string;
 }
 
-export function emptyLegDraft(flightDate = ''): FlightLegDraft {
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const TIME_RE = /^\d{2}:\d{2}$/;
+
+export function addDays(date: string, days: number): string {
+  if (!DATE_RE.test(date)) return date;
+  const d = new Date(`${date}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+function dayDiff(from: string, to: string): number {
+  return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86400000);
+}
+
+function clampOffset(days: number): ArrivalDayOffset {
+  return Math.min(2, Math.max(0, days)) as ArrivalDayOffset;
+}
+
+// Stored datetimes are wall-clock "YYYY-MM-DDTHH:mm[...]" values.
+function splitDatetime(value?: string | null): { date: string; time: string } {
+  const match = value?.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/);
+  return match ? { date: match[1], time: match[2] } : { date: '', time: '' };
+}
+
+function cleanAirport(value?: string | null): string {
+  return value && value !== 'TBD' ? value : '';
+}
+
+// "WN1234" -> WN + 1234; "SWA1234" -> SWA + 1234; unparseable input is kept as the flight number.
+export function parseFlightCode(code: string): { airline?: string; flightNumber?: string } {
+  const clean = code.replace(/[\s-]/g, '').toUpperCase();
+  if (!clean) return {};
+  const icao = clean.match(/^([A-Z]{3})(\d.*)$/);
+  if (icao) return { airline: icao[1], flightNumber: icao[2] };
+  const iata = clean.match(/^([A-Z0-9]{2})(\d.*)$/);
+  if (iata && /[A-Z]/.test(iata[1])) return { airline: iata[1], flightNumber: iata[2] };
+  return { flightNumber: clean };
+}
+
+export function formatFlightCode(airline?: string | null, flightNumber?: string | null): string {
+  const cleanAirline = (airline ?? '').trim().toUpperCase();
+  const cleanNumber = (flightNumber ?? '').replace(/[\s-]/g, '').toUpperCase();
+  if (cleanAirline && cleanNumber.startsWith(cleanAirline)) return flightNumber ?? '';
+  return `${airline ?? ''}${flightNumber ?? ''}`;
+}
+
+export function emptyLegDraft(previous?: FlightLegDraft): FlightLegDraft {
   return {
-    flightDate,
-    airline: '',
-    flightNumber: '',
-    departureAirport: '',
-    departureDatetime: '',
+    flightCode: '',
+    date: previous?.date ? addDays(previous.date, previous.arrivalDayOffset) : '',
+    departureTime: '',
+    arrivalTime: '',
+    arrivalDayOffset: 0,
+    departureAirport: previous?.arrivalAirport ?? '',
     arrivalAirport: '',
-    arrivalDatetime: '',
     checkPriceUrl: '',
   };
 }
 
-// <input type="datetime-local"> values are "YYYY-MM-DDTHH:mm"
-export function toDatetimeLocalValue(value?: string | null): string {
-  return value ? value.slice(0, 16) : '';
+// Toggles Same day <-> +1 when times change; a manual +2 is left alone.
+export function autoArrivalOffset(departureTime: string, arrivalTime: string, current: ArrivalDayOffset): ArrivalDayOffset {
+  if (!TIME_RE.test(departureTime) || !TIME_RE.test(arrivalTime) || current === 2) return current;
+  return arrivalTime < departureTime ? 1 : 0;
 }
 
 export function legToDraft(leg: FlightLeg): FlightLegDraft {
-  const departure = toDatetimeLocalValue(leg.departureDatetime);
+  const departure = splitDatetime(leg.departureDatetime);
+  const arrival = splitDatetime(leg.arrivalDatetime);
+  const isPlaceholder = leg.departureDatetime === leg.arrivalDatetime;
   return {
     id: leg.id,
-    flightDate: departure.slice(0, 10),
-    airline: leg.airline ?? '',
-    flightNumber: leg.flightNumber ?? '',
-    departureAirport: leg.departureAirport && leg.departureAirport !== 'TBD' ? leg.departureAirport : '',
-    departureDatetime: departure,
-    arrivalAirport: leg.arrivalAirport && leg.arrivalAirport !== 'TBD' ? leg.arrivalAirport : '',
-    arrivalDatetime: toDatetimeLocalValue(leg.arrivalDatetime),
+    flightCode: formatFlightCode(leg.airline, leg.flightNumber),
+    date: departure.date,
+    departureTime: isPlaceholder ? '' : departure.time,
+    arrivalTime: isPlaceholder ? '' : arrival.time,
+    arrivalDayOffset: departure.date && arrival.date ? clampOffset(dayDiff(departure.date, arrival.date)) : 0,
+    departureAirport: cleanAirport(leg.departureAirport),
+    arrivalAirport: cleanAirport(leg.arrivalAirport),
     checkPriceUrl: leg.checkPriceUrl ?? '',
   };
 }
 
+// For legs that are not being edited: send back exactly what is stored.
+export function legToPayload(leg: FlightLeg): FlightLegPayload {
+  return {
+    id: leg.id,
+    departureAirport: leg.departureAirport,
+    departureDatetime: leg.departureDatetime,
+    arrivalAirport: leg.arrivalAirport,
+    arrivalDatetime: leg.arrivalDatetime,
+    airline: leg.airline || undefined,
+    flightNumber: leg.flightNumber || undefined,
+    checkPriceUrl: leg.checkPriceUrl || undefined,
+  };
+}
+
+// Assumes validateDraft(draft) returned null.
 export function draftToPayload(draft: FlightLegDraft): FlightLegPayload {
-  const fallback = draft.flightDate ? `${draft.flightDate}T00:00` : '';
-  const departure = draft.departureDatetime || fallback;
+  const { airline, flightNumber } = parseFlightCode(draft.flightCode);
   return {
     id: draft.id,
-    departureAirport: draft.departureAirport.trim().toUpperCase() || 'TBD',
-    departureDatetime: departure,
-    arrivalAirport: draft.arrivalAirport.trim().toUpperCase() || 'TBD',
-    arrivalDatetime: draft.arrivalDatetime || departure,
-    airline: draft.airline.trim().toUpperCase() || undefined,
-    flightNumber: draft.flightNumber.trim() || undefined,
+    departureAirport: draft.departureAirport.trim().toUpperCase(),
+    departureDatetime: `${draft.date}T${draft.departureTime}`,
+    arrivalAirport: draft.arrivalAirport.trim().toUpperCase(),
+    arrivalDatetime: `${addDays(draft.date, draft.arrivalDayOffset)}T${draft.arrivalTime}`,
+    airline,
+    flightNumber,
     checkPriceUrl: draft.checkPriceUrl.trim() || undefined,
   };
 }
 
-export function draftHasDate(draft: FlightLegDraft): boolean {
-  return Boolean(draft.departureDatetime || draft.flightDate);
+export function validateDraft(draft: FlightLegDraft): string | null {
+  if (!DATE_RE.test(draft.date)) return 'Enter the flight date';
+  if (!draft.departureAirport.trim() || !draft.arrivalAirport.trim()) return 'Enter both airport codes';
+  if (!TIME_RE.test(draft.departureTime) || !TIME_RE.test(draft.arrivalTime)) return 'Enter the departure and arrival times';
+  if (draft.arrivalDayOffset === 0 && draft.arrivalTime < draft.departureTime) {
+    return 'Arrival is before departure — choose +1 for a next-day arrival';
+  }
+  return null;
 }
 
-export function buildFlightName(
-  drafts: Pick<FlightLegDraft, 'departureAirport' | 'arrivalAirport'>[]
-): string {
-  const first = drafts[0]?.departureAirport.trim().toUpperCase();
-  const stops = drafts.map(d => d.arrivalAirport.trim().toUpperCase());
-  if (!first || stops.length === 0 || stops.some(s => !s)) return '';
-  return [first, ...stops].join(' → ');
+export function applyLookup(draft: FlightLegDraft, details: FlightAutofillDetails): FlightLegDraft {
+  const departure = splitDatetime(details.departureDatetime);
+  const arrival = splitDatetime(details.arrivalDatetime);
+  return {
+    ...draft,
+    flightCode: formatFlightCode(details.airlineCode, details.flightNumber) || draft.flightCode,
+    date: departure.date || details.flightDate || draft.date,
+    departureTime: departure.time || draft.departureTime,
+    arrivalTime: arrival.time || draft.arrivalTime,
+    arrivalDayOffset: departure.date && arrival.date ? clampOffset(dayDiff(departure.date, arrival.date)) : draft.arrivalDayOffset,
+    departureAirport: details.departureAirport || draft.departureAirport,
+    arrivalAirport: details.arrivalAirport || draft.arrivalAirport,
+  };
+}
+
+export function draftLayover(previous: FlightLegDraft, next: FlightLegDraft): number | null {
+  if (!previous.date || !previous.arrivalTime || !next.date || !next.departureTime) return null;
+  return layoverMinutes(
+    `${addDays(previous.date, previous.arrivalDayOffset)}T${previous.arrivalTime}`,
+    `${next.date}T${next.departureTime}`
+  );
+}
+
+// "2026-08-29T08:00" or "08:00" -> "8:00a"
+export function formatClock(value?: string | null): string {
+  const match = value?.match(/(\d{2}):(\d{2})/);
+  if (!match) return '';
+  const hour = Number(match[1]);
+  return `${hour % 12 || 12}:${match[2]}${hour < 12 ? 'a' : 'p'}`;
+}
+
+// "WN1234 · DEN 8:00a → DAL 10:00a +1"
+export function formatLegLine(leg: FlightLeg): string {
+  const departure = splitDatetime(leg.departureDatetime);
+  const arrival = splitDatetime(leg.arrivalDatetime);
+  const offset = departure.date && arrival.date ? dayDiff(departure.date, arrival.date) : 0;
+  const from = [leg.departureAirport, formatClock(leg.departureDatetime)].filter(Boolean).join(' ');
+  const to = [leg.arrivalAirport, formatClock(leg.arrivalDatetime)].filter(Boolean).join(' ');
+  const route = `${from} → ${to}${offset > 0 ? ` +${offset}` : ''}`;
+  const code = formatFlightCode(leg.airline, leg.flightNumber);
+  return code ? `${code} · ${route}` : route;
 }
 
 export function formatLayover(minutes: number): string {

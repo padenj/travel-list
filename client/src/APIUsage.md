@@ -53,7 +53,7 @@ This document maps functions exported from `client/src/api.ts` to the client-sid
   - client/src/components/ItemEditDrawer.tsx
   - client/src/components/BulkEditDrawer.tsx
 
-- `getFamilyPackingLists`, `getPackingList`, `getPackingListAudit`, `getPackingListItemAudit`, `createPackingList`, `addItemToPackingList`, `populatePackingListFromTemplate`, `deletePackingListItem`, `togglePackingListItemCheck`, `setPackingListItemNotNeeded`, `setPackingListItemNotNeededForMember`, `updatePackingList`, `deletePackingList`:
+- `getFamilyPackingLists`, `getPackingList`, `getPackingListAudit`, `getPackingListItemAudit`, `createPackingList`, `addItemToPackingList`, `populatePackingListFromTemplate`, `deletePackingListItem`, `togglePackingListItemCheck`, `setPackingListItemNotNeeded`, `setPackingListItemNotNeededForMember`, `updatePackingList`, `deletePackingList`, `setActivePackingList`:
   - client/src/components/ManagePackingLists.tsx
   - client/src/components/GlobalListEditDrawer.tsx
   - client/src/components/Dashboard.tsx
@@ -96,19 +96,37 @@ Keep this checklist updated as you complete migration verification and removal s
   - client/src/components/ItemEditDrawer.tsx
 
 ### Trip tracking (`client/src/api/tripApi.ts`)
-- `getTrips`, `getTrip`, `createTrip`, `updateTrip`, `deleteTrip`, `listElements`, `getElement`, `createElement`, `updateElement`, `syncLegs`, `deleteElement`, `lookupFlightAutofill`, `addConfirmation`, `listConfirmations`, `updateConfirmation`, `deleteConfirmation`:
+- `getTrips`, `createTrip`, `updateTrip`, `deleteTrip`:
   - client/src/pages/TripsPage.tsx
+- `getTrip`, `listElements`, `listParticipants`:
   - client/src/pages/TripDetailPage.tsx
-- `listParticipants`, `createParticipant`, `updateParticipant`, `deleteParticipant`:
-  - client/src/pages/TripDetailPage.tsx
-  - client/src/components/TripParticipantsPanel.tsx
-  - client/src/components/BookingCard.tsx (inline "+ New traveler" creation)
-- `listBookings`, `getBooking`, `createBooking`, `updateBooking`, `deleteBooking`, `linkBookingElement`, `unlinkBookingElement`, `addBookingTraveler`, `removeBookingTraveler`:
-  - client/src/components/BookingCard.tsx
-- `listBookingTransactions`, `addBookingTransaction`, `updateBookingTransaction`, `deleteBookingTransaction`:
-  - client/src/components/BookingTransactionList.tsx (rendered inside `BookingCard.tsx`)
+- `createElement`:
+  - client/src/components/AddElementDialog.tsx (flight `name` omitted; the server titles flights from their legs)
+- `updateElement` (notes only, `null` clears), `deleteElement`:
+  - client/src/components/FlightDetailsTab.tsx
+- `syncLegs`:
+  - client/src/components/FlightLegList.tsx (inline add/edit/delete of a leg sends the full leg list)
+- `lookupFlightAutofill`:
+  - client/src/components/FlightLegForm.tsx
+- `createParticipant`, `deleteParticipant`:
+  - client/src/components/TripParticipantsPanel.tsx (rendered in the `TripTravelersStrip` Manage modal)
+  - client/src/components/BookingForm.tsx (inline "+ New traveler" creation)
+- `updateParticipant`:
+  - not used by the UI (kept for API completeness)
+- `listBookings`:
+  - client/src/pages/TripDetailPage.tsx (trip-wide list passed to `BookingCard`)
+- `createBooking`, `updateBooking` (scalars + full `elementIds`/`travelerIds` replacement; 409 on traveler conflicts):
+  - client/src/components/BookingForm.tsx
+- `deleteBooking`:
+  - client/src/components/BookingBlock.tsx
+- `getBooking`, `linkBookingElement`, `unlinkBookingElement`, `addBookingTraveler`, `removeBookingTraveler`:
+  - not used by the UI (kept for API completeness)
+- `listBookingTransactions`, `addBookingTransaction`, `deleteBookingTransaction`:
+  - client/src/components/BookingTransactionList.tsx (rendered inside `BookingBlock.tsx`)
+- `updateBookingTransaction`:
+  - not used by the UI (kept for API completeness)
 - `listSeatsForLeg`, `assignSeat`, `removeSeat`:
-  - client/src/components/FlightSeatGrid.tsx (rendered in `pages/TripDetailPage.tsx`, once per flight leg)
+  - client/src/components/FlightSeatGrid.tsx (rendered in `components/FlightSeatsTab.tsx`, once per flight leg)
 
 ---
 

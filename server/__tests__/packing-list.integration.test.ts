@@ -147,4 +147,60 @@ describe('Packing lists routes', () => {
     expect(putRes.status).toBe(400);
     expect(putRes.body).toEqual({ error: 'notes must be a string' });
   });
+
+  it('sets active packing list for the family and persists active_packing_list_id', async () => {
+    const createRes = await request(app)
+      .post(`/api/families/${testFamilyId}/packing-lists`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ name: 'Active Trip' });
+
+    expect(createRes.status).toBe(200);
+    const listId = createRes.body.list.id as string;
+
+    const patchRes = await request(app)
+      .patch(`/api/families/${testFamilyId}/active-packing-list`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ listId });
+
+    expect(patchRes.status).toBe(200);
+
+    const meRes = await request(app)
+      .get('/api/users/me')
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(meRes.status).toBe(200);
+    expect(meRes.body.family.active_packing_list_id).toBe(listId);
+  });
+
+  it('rejects setting active list from another family', async () => {
+    const otherFamilyId = uuidv4();
+    await familyRepo.create({
+      id: otherFamilyId,
+      name: 'Other Family',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+
+    const foreignListRes = await request(app)
+      .post(`/api/families/${otherFamilyId}/packing-lists`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ name: 'Foreign List' });
+
+    expect(foreignListRes.status).toBe(200);
+    const foreignListId = foreignListRes.body.list.id as string;
+
+    const patchRes = await request(app)
+      .patch(`/api/families/${testFamilyId}/active-packing-list`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ listId: foreignListId });
+
+    expect(patchRes.status).toBe(404);
+
+    const meRes = await request(app)
+      .get('/api/users/me')
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(meRes.status).toBe(200);
+    expect(meRes.body.family.active_packing_list_id ?? null).toBeNull();
+  });
 });

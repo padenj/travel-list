@@ -1,497 +1,195 @@
-import { useState, useEffect } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { Trip, TripElement, TripParticipant, FlightLegPayload } from '../types/trip';
+import { Alert, Button, Container, Loader, Text } from '@mantine/core';
+import { Booking, Trip, TripElement, TripParticipant } from '../types/trip';
 import { tripApi } from '../api/tripApi';
-import { TripParticipantsPanel } from '../components/TripParticipantsPanel';
+import { buildFlightRows, flightTotals } from '../utils/flightRows';
+import { TripHeader } from '../components/TripHeader';
+import { TripTravelersStrip } from '../components/TripTravelersStrip';
+import { FlightsSection } from '../components/FlightsSection';
+import { ElementDialog } from '../components/ElementDialog';
+import { FlightDetailsTab } from '../components/FlightDetailsTab';
+import { FlightSeatsTab } from '../components/FlightSeatsTab';
+import { AddElementDialog } from '../components/AddElementDialog';
 import { BookingCard } from '../components/BookingCard';
-import { FlightSeatGrid } from '../components/FlightSeatGrid';
-import { FlightLegsEditor } from '../components/FlightLegsEditor';
-import { FlightLegDraft, buildFlightName, draftHasDate, draftToPayload, emptyLegDraft, formatLayover, formatLegTime, legToDraft } from '../utils/flightLegs';
 import '../styles/trips.css';
-
-type TripElementPayload = Partial<TripElement> & {
-  typeSpecificData?: {
-    legs?: FlightLegPayload[];
-  };
-};
-
-function parseNumberInput(value: string): number | undefined {
-  if (!value.trim()) return undefined;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : undefined;
-}
 
 export function TripDetailPage() {
   const { tripId } = useParams<{ tripId: string }>();
   const [trip, setTrip] = useState<Trip | null>(null);
   const [elements, setElements] = useState<TripElement[]>([]);
-  const [showAddElementForm, setShowAddElementForm] = useState(false);
-  const [creatingElement, setCreatingElement] = useState(false);
-  const [newElementType, setNewElementType] = useState<TripElement['elementType']>('flight');
-  const [newElementName, setNewElementName] = useState('');
-  const [newElementNotes, setNewElementNotes] = useState('');
-  const [newBookingReference, setNewBookingReference] = useState('');
-  const [newPriceCash, setNewPriceCash] = useState('');
-  const [newPricePoints, setNewPricePoints] = useState('');
-  const [newLegs, setNewLegs] = useState<FlightLegDraft[]>([emptyLegDraft()]);
-  const [editingLegs, setEditingLegs] = useState<FlightLegDraft[]>([]);
-  const [nameManuallyEdited, setNameManuallyEdited] = useState(false);
   const [participants, setParticipants] = useState<TripParticipant[]>([]);
+  const [bookings, setBookings] = useState<Booking[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [reloadError, setReloadError] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [editingDetails, setEditingDetails] = useState(false);
+  const [editingBookings, setEditingBookings] = useState(false);
   const [bookingsVersion, setBookingsVersion] = useState(0);
   const [participantsVersion, setParticipantsVersion] = useState(0);
-  const [editingElementId, setEditingElementId] = useState<string | null>(null);
-  const [editingName, setEditingName] = useState('');
-  const [editingNotes, setEditingNotes] = useState('');
-  const [editingBookingReference, setEditingBookingReference] = useState('');
-  const [editingPriceCash, setEditingPriceCash] = useState('');
-  const [editingPricePoints, setEditingPricePoints] = useState('');
-  const [savingEdit, setSavingEdit] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
-  const handleBookingsChanged = () => setBookingsVersion(v => v + 1);
+  // Silent reload keeps open dialogs mounted; only the first load shows the spinner.
+  const load = useCallback(async (id: string, initial = false) => {
+    try {
+      if (initial) setLoading(true);
+      const [tripData, elementsData, participantsData, bookingsData] = await Promise.all([
+        tripApi.getTrip(id),
+        tripApi.listElements(id),
+        tripApi.listParticipants(id),
+        tripApi.listBookings(id),
+      ]);
+      setTrip(tripData);
+      setElements(elementsData);
+      setParticipants(participantsData);
+      setBookings(bookingsData);
+      setLoadError(null);
+      setReloadError(null);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to load trip';
+      if (initial) setLoadError(message);
+      else setReloadError(message);
+    } finally {
+      if (initial) setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (tripId) load(tripId, true);
+  }, [tripId, load]);
+
+  const reload = useCallback(async () => {
+    if (tripId) await load(tripId);
+  }, [tripId, load]);
+
+  // Bumping bookingsVersion makes each booking's transaction list refetch too.
+  const reloadBookings = useCallback(async () => {
+    if (!tripId) return;
+    try {
+      setBookings(await tripApi.listBookings(tripId));
+      setBookingsVersion(v => v + 1);
+    } catch (err) {
+      setReloadError(err instanceof Error ? err.message : 'Failed to reload bookings');
+    }
+  }, [tripId]);
+
   const handleParticipantsFromBooking = (next: TripParticipant[]) => {
     setParticipants(next);
     setParticipantsVersion(v => v + 1);
   };
 
-  const loadTripData = async (id: string) => {
-    try {
-      setLoading(true);
-      setError(null);
-      const [tripData, elementsData, participantsData] = await Promise.all([
-        tripApi.getTrip(id),
-        tripApi.listElements(id),
-        tripApi.listParticipants(id),
-      ]);
-      setTrip(tripData);
-      setElements(elementsData);
-      setParticipants(participantsData);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load trip');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    if (!tripId) return;
-    loadTripData(tripId);
-  }, [tripId]);
-
-  useEffect(() => {
-    if (newElementType !== 'flight' || nameManuallyEdited) return;
-    const generated = buildFlightName(newLegs);
-    if (generated) setNewElementName(generated);
-  }, [newElementType, newLegs, nameManuallyEdited]);
-
-  const createElement = async () => {
-    if (!tripId) return;
-    if (!newElementName.trim()) {
-      setError('Element name is required');
-      return;
-    }
-    if (newElementType === 'flight' && !newLegs.every(draftHasDate)) {
-      setError('Each flight needs a flight date or departure time');
-      return;
-    }
-
-    try {
-      setCreatingElement(true);
-      setError(null);
-
-      const payload: TripElementPayload = {
-        elementType: newElementType,
-        name: newElementName.trim(),
-        notes: newElementNotes.trim() || undefined,
-      };
-
-      if (newElementType !== 'flight') {
-        payload.bookingReference = newBookingReference.trim() || undefined;
-        payload.priceCash = parseNumberInput(newPriceCash);
-        payload.pricePoints = parseNumberInput(newPricePoints);
-      }
-
-      if (newElementType === 'flight') {
-        payload.typeSpecificData = {
-          legs: newLegs.map((draft, index) => ({ ...draftToPayload(draft), legOrder: index + 1 })),
-        };
-      }
-
-      await tripApi.createElement(tripId, payload);
-      setNewElementName('');
-      setNewElementNotes('');
-      setNewBookingReference('');
-      setNewPriceCash('');
-      setNewPricePoints('');
-      setNewLegs([emptyLegDraft()]);
-      setNameManuallyEdited(false);
-      setNewElementType('flight');
-      setShowAddElementForm(false);
-      await loadTripData(tripId);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to add element');
-    } finally {
-      setCreatingElement(false);
-    }
-  };
-
-  const startEditingElement = (element: TripElement) => {
-    setEditingElementId(element.id);
-    setEditingName(element.name);
-    setEditingNotes(element.notes || '');
-    setEditingBookingReference(element.bookingReference || '');
-    setEditingPriceCash(element.priceCash !== undefined && element.priceCash !== null ? String(element.priceCash) : '');
-    setEditingPricePoints(element.pricePoints !== undefined && element.pricePoints !== null ? String(element.pricePoints) : '');
-    setEditingLegs(element.elementType === 'flight' && element.legs?.length ? element.legs.map(legToDraft) : [emptyLegDraft()]);
-  };
-
-  const cancelEditingElement = () => {
-    setEditingElementId(null);
-    setEditingName('');
-    setEditingNotes('');
-    setEditingBookingReference('');
-    setEditingPriceCash('');
-    setEditingPricePoints('');
-    setEditingLegs([]);
-  };
-
-  const saveElementEdits = async (elementId: string) => {
-    if (!tripId) return;
-    if (!editingName.trim()) {
-      setError('Element name is required');
-      return;
-    }
-    if (elements.find(e => e.id === elementId)?.elementType === 'flight' && !editingLegs.every(draftHasDate)) {
-      setError('Each flight needs a flight date or departure time');
-      return;
-    }
-
-    try {
-      setSavingEdit(true);
-      setError(null);
-      const editingElement = elements.find(e => e.id === elementId);
-      const payload: Partial<TripElement> = {
-        name: editingName.trim(),
-        notes: editingNotes.trim() || undefined,
-      };
-      if (editingElement?.elementType !== 'flight') {
-        payload.bookingReference = editingBookingReference.trim() || undefined;
-        payload.priceCash = parseNumberInput(editingPriceCash);
-        payload.pricePoints = parseNumberInput(editingPricePoints);
-      }
-      await tripApi.updateElement(tripId, elementId, payload);
-      if (editingElement?.elementType === 'flight') {
-        await tripApi.syncLegs(tripId, elementId, editingLegs.map(draftToPayload));
-      }
-      cancelEditingElement();
-      await loadTripData(tripId);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save element');
-    } finally {
-      setSavingEdit(false);
-    }
-  };
+  const rows = useMemo(() => buildFlightRows(elements, bookings), [elements, bookings]);
+  const totals = useMemo(() => flightTotals(elements, bookings), [elements, bookings]);
+  const hiddenCount = elements.filter(e => e.elementType !== 'flight').length;
+  const selected = elements.find(e => e.id === selectedId) ?? null;
+  const selectedBookingCount = selected ? bookings.filter(b => b.elementIds.includes(selected.id)).length : 0;
 
   if (loading) {
-    return <div className="trip-detail-page"><p>Loading...</p></div>;
+    return <Container size="lg" py="md"><Loader size="sm" aria-label="Loading" /></Container>;
   }
 
-  if (error) {
-    return <div className="trip-detail-page"><p className="error">Error: {error}</p></div>;
+  if (loadError) {
+    return (
+      <Container size="lg" py="md">
+        <Alert color="red" title="Couldn't load trip">{loadError}</Alert>
+        <Button mt="sm" variant="default" onClick={() => tripId && load(tripId, true)}>Retry</Button>
+      </Container>
+    );
   }
 
-  if (!trip) {
-    return <div className="trip-detail-page"><p>Trip not found</p></div>;
+  if (!trip || !tripId) {
+    return <Container size="lg" py="md"><Text>Trip not found</Text></Container>;
   }
-
-  // Group elements by type
-  const firstDeparture = (el: TripElement) => el.legs?.[0]?.departureDatetime ?? '';
-  const groupedByType = elements.reduce((acc, el) => {
-    if (!acc[el.elementType]) acc[el.elementType] = [];
-    acc[el.elementType].push(el);
-    return acc;
-  }, {} as Record<string, TripElement[]>);
-  if (groupedByType.flight) {
-    groupedByType.flight.sort((a, b) => firstDeparture(a).localeCompare(firstDeparture(b)));
-  }
-
-  const typeLabels: Record<string, string> = {
-    flight: 'Flights',
-    hotel: 'Hotels',
-    car_rental: 'Car Rentals',
-    activity: 'Activities',
-  };
 
   return (
-    <div className="trip-detail-page">
-      <div className="trip-header">
-        <h1>{trip.name}</h1>
-        {trip.description && <p className="trip-description">{trip.description}</p>}
-        <div className="trip-metadata">
-          {trip.tripType && <span className="trip-type">{trip.tripType}</span>}
-          {trip.startDate && trip.endDate && (
-            <span className="trip-dates">
-              {trip.startDate} to {trip.endDate}
-            </span>
-          )}
-        </div>
-        <button
-          className="create-trip-btn"
-          onClick={() => setShowAddElementForm(prev => !prev)}
-          type="button"
-        >
-          {showAddElementForm ? 'Cancel' : 'Add Element'}
-        </button>
-      </div>
+    <Container size="lg" py="md">
+      <TripHeader trip={trip} onAdd={() => setAdding(true)} />
+      <TripTravelersStrip
+        tripId={tripId}
+        participants={participants}
+        refreshKey={participantsVersion}
+        onParticipantsChanged={setParticipants}
+      />
 
-      {tripId && (
-        <TripParticipantsPanel
-          tripId={tripId}
-          refreshKey={participantsVersion}
-          onParticipantsChanged={setParticipants}
+      {reloadError && (
+        <Alert color="red" mt="sm" withCloseButton onClose={() => setReloadError(null)}>{reloadError}</Alert>
+      )}
+
+      {rows.length === 0 ? (
+        <Button mt="md" variant="light" onClick={() => setAdding(true)}>Add your first flight</Button>
+      ) : (
+        <FlightsSection rows={rows} totalLabel={totals.label} onOpen={setSelectedId} />
+      )}
+
+      {hiddenCount > 0 && (
+        <Text size="sm" c="dimmed" mt="sm">
+          {hiddenCount === 1
+            ? '1 other element hidden until its section is built'
+            : `${hiddenCount} other elements hidden until their sections are built`}
+        </Text>
+      )}
+
+      <AddElementDialog
+        tripId={tripId}
+        opened={adding}
+        onClose={() => setAdding(false)}
+        onCreated={async () => {
+          setAdding(false);
+          await reload();
+        }}
+      />
+
+      {selected && (
+        <ElementDialog
+          opened
+          onClose={() => setSelectedId(null)}
+          title={selected.name}
+          swipeEnabled={!editingDetails && !editingBookings}
+          tabs={[
+            {
+              value: 'details',
+              label: 'Details',
+              content: (
+                <FlightDetailsTab
+                  key={selected.id}
+                  tripId={tripId}
+                  element={selected}
+                  onChanged={reload}
+                  onDeleted={async () => {
+                    setSelectedId(null);
+                    await reload();
+                  }}
+                  onEditingChange={setEditingDetails}
+                />
+              ),
+            },
+            {
+              value: 'bookings',
+              label: 'Bookings',
+              count: selectedBookingCount,
+              content: (
+                <BookingCard
+                  tripId={tripId}
+                  elementId={selected.id}
+                  elements={elements}
+                  participants={participants}
+                  bookings={bookings}
+                  onParticipantsChanged={handleParticipantsFromBooking}
+                  refreshKey={bookingsVersion}
+                  onBookingsChanged={reloadBookings}
+                  onEditingChange={setEditingBookings}
+                />
+              ),
+            },
+            {
+              value: 'seats',
+              label: 'Seats',
+              content: <FlightSeatsTab tripId={tripId} element={selected} travelers={participants} />,
+            },
+          ]}
         />
       )}
-
-      {showAddElementForm && (
-        <div className="create-element-form">
-          <div className="create-element-field">
-            <label htmlFor="element-type">Type</label>
-            <select
-              id="element-type"
-              value={newElementType}
-              onChange={(e) => setNewElementType(e.target.value as TripElement['elementType'])}
-            >
-              <option value="flight">Flight</option>
-              <option value="hotel">Hotel</option>
-              <option value="car_rental">Car Rental</option>
-              <option value="activity">Activity</option>
-            </select>
-          </div>
-          <div className="create-element-field">
-            <label htmlFor="element-name">Name</label>
-            <input
-              id="element-name"
-              type="text"
-              value={newElementName}
-              onChange={(e) => {
-                setNewElementName(e.target.value);
-                setNameManuallyEdited(true);
-              }}
-              placeholder="e.g. Southwest Flight 1234"
-            />
-          </div>
-          <div className="create-element-field">
-            <label htmlFor="element-notes">Notes</label>
-            <input
-              id="element-notes"
-              type="text"
-              value={newElementNotes}
-              onChange={(e) => setNewElementNotes(e.target.value)}
-              placeholder="Optional"
-            />
-          </div>
-          {newElementType !== 'flight' && (
-            <>
-              <div className="create-element-field">
-                <label htmlFor="element-booking-reference">Booking or itinerary reference</label>
-                <input
-                  id="element-booking-reference"
-                  type="text"
-                  value={newBookingReference}
-                  onChange={(e) => setNewBookingReference(e.target.value)}
-                  placeholder="e.g. Expedia itinerary # 12345"
-                />
-              </div>
-              <div className="create-element-field">
-                <label htmlFor="element-price-cash">Price cash</label>
-                <input
-                  id="element-price-cash"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={newPriceCash}
-                  onChange={(e) => setNewPriceCash(e.target.value)}
-                  placeholder="Optional"
-                />
-              </div>
-              <div className="create-element-field">
-                <label htmlFor="element-price-points">Price points</label>
-                <input
-                  id="element-price-points"
-                  type="number"
-                  min="0"
-                  step="1"
-                  value={newPricePoints}
-                  onChange={(e) => setNewPricePoints(e.target.value)}
-                  placeholder="Optional"
-                />
-              </div>
-            </>
-          )}
-          {newElementType === 'flight' && (
-            <>
-              {tripId && <FlightLegsEditor tripId={tripId} legs={newLegs} onChange={setNewLegs} idPrefix="new-leg" />}
-              <p className="element-notes">
-                Confirmation number, pricing, and travelers are entered per-booking below after saving this element.
-              </p>
-            </>
-          )}
-          <button className="create-trip-submit-btn" type="button" onClick={createElement} disabled={creatingElement}>
-            {creatingElement ? 'Saving...' : 'Save Element'}
-          </button>
-        </div>
-      )}
-
-      <div className="elements-section">
-        {Object.entries(groupedByType).length === 0 ? (
-          <p className="no-elements">No elements added yet</p>
-        ) : (
-          Object.entries(groupedByType).map(([type, items]) => (
-            <div key={type} className="element-group">
-              <h2>{typeLabels[type] || type}</h2>
-              <div className="element-list">
-                {items.map(item => (
-                  <div key={item.id} className="element-card">
-                    <div className="element-header">
-                      <h3>{item.name}</h3>
-                      {item.elementType !== 'flight' && item.bookingReference && (
-                        <span className="booking-ref">{item.bookingReference}</span>
-                      )}
-                    </div>
-                    {item.elementType === 'flight' && item.legs && item.legs.length > 0 && (
-                      <div className="element-flight-legs">
-                        {item.legs.map((leg, index) => (
-                          <div key={leg.id}>
-                            <div className="flight-leg-summary">
-                              <strong>{leg.departureAirport || '—'} → {leg.arrivalAirport || '—'}</strong>{' '}
-                              <span>
-                                {[leg.airline, leg.flightNumber].filter(Boolean).join(' ')}
-                                {leg.departureDatetime ? ` · ${formatLegTime(leg.departureDatetime)}` : ''}
-                                {leg.arrivalDatetime ? ` → ${formatLegTime(leg.arrivalDatetime)}` : ''}
-                              </span>
-                              {leg.checkPriceUrl && (
-                                <>
-                                  {' '}
-                                  <a href={leg.checkPriceUrl} target="_blank" rel="noreferrer">Check price</a>
-                                </>
-                              )}
-                            </div>
-                            {tripId && <FlightSeatGrid tripId={tripId} legId={leg.id} travelers={participants} />}
-                            {index < item.legs!.length - 1 && leg.layoverMinutesAfter != null && (
-                              <p className="flight-layover">Layover: {formatLayover(leg.layoverMinutesAfter)}</p>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                    {item.notes && <p className="element-notes">{item.notes}</p>}
-                    {item.elementType !== 'flight' && (
-                      <div className="element-pricing">
-                        {item.priceCash !== undefined && item.priceCash !== null && (
-                          <span className="price">${item.priceCash.toFixed(2)}</span>
-                        )}
-                        {item.pricePoints !== undefined && item.pricePoints !== null && (
-                          <span className="points">{item.pricePoints} points</span>
-                        )}
-                      </div>
-                    )}
-                    {item.elementType === 'flight' && tripId && (
-                      <>
-                        <BookingCard
-                          tripId={tripId}
-                          elementId={item.id}
-                          elements={elements}
-                          participants={participants}
-                          onParticipantsChanged={handleParticipantsFromBooking}
-                          refreshKey={bookingsVersion}
-                          onBookingsChanged={handleBookingsChanged}
-                        />
-                      </>
-                    )}
-                    <button className="edit-link" type="button" onClick={() => startEditingElement(item)}>
-                      View/Edit
-                    </button>
-                    {editingElementId === item.id && (
-                      <div className="edit-element-form">
-                        <div className="create-element-field">
-                          <label htmlFor={`edit-name-${item.id}`}>Name</label>
-                          <input
-                            id={`edit-name-${item.id}`}
-                            type="text"
-                            value={editingName}
-                            onChange={(e) => setEditingName(e.target.value)}
-                          />
-                        </div>
-                        {item.elementType === 'flight' && tripId && (
-                          <FlightLegsEditor tripId={tripId} legs={editingLegs} onChange={setEditingLegs} idPrefix={`edit-leg-${item.id}`} />
-                        )}
-                        {item.elementType !== 'flight' && (
-                          <>
-                            <div className="create-element-field">
-                              <label htmlFor={`edit-booking-reference-${item.id}`}>Booking or itinerary reference</label>
-                              <input
-                                id={`edit-booking-reference-${item.id}`}
-                                type="text"
-                                value={editingBookingReference}
-                                onChange={(e) => setEditingBookingReference(e.target.value)}
-                              />
-                            </div>
-                            <div className="create-element-field">
-                              <label htmlFor={`edit-price-cash-${item.id}`}>Price cash</label>
-                              <input
-                                id={`edit-price-cash-${item.id}`}
-                                type="number"
-                                min="0"
-                                step="0.01"
-                                value={editingPriceCash}
-                                onChange={(e) => setEditingPriceCash(e.target.value)}
-                              />
-                            </div>
-                            <div className="create-element-field">
-                              <label htmlFor={`edit-price-points-${item.id}`}>Price points</label>
-                              <input
-                                id={`edit-price-points-${item.id}`}
-                                type="number"
-                                min="0"
-                                step="1"
-                                value={editingPricePoints}
-                                onChange={(e) => setEditingPricePoints(e.target.value)}
-                              />
-                            </div>
-                          </>
-                        )}
-                        <div className="create-element-field edit-notes-field">
-                          <label htmlFor={`edit-notes-${item.id}`}>Notes</label>
-                          <input
-                            id={`edit-notes-${item.id}`}
-                            type="text"
-                            value={editingNotes}
-                            onChange={(e) => setEditingNotes(e.target.value)}
-                          />
-                        </div>
-                        <div className="edit-element-actions">
-                          <button
-                            className="create-trip-submit-btn"
-                            type="button"
-                            onClick={() => saveElementEdits(item.id)}
-                            disabled={savingEdit}
-                          >
-                            {savingEdit ? 'Saving...' : 'Save Changes'}
-                          </button>
-                          <button className="view-toggle-btn" type="button" onClick={cancelEditingElement}>
-                            Cancel
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))
-        )}
-      </div>
-    </div>
+    </Container>
   );
 }

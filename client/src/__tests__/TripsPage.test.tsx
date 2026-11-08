@@ -1,6 +1,6 @@
 /* @vitest-environment jsdom */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { screen, fireEvent, waitFor } from '@testing-library/react';
 
 vi.mock('../api/tripApi', () => ({
   tripApi: {
@@ -9,6 +9,7 @@ vi.mock('../api/tripApi', () => ({
   },
 }));
 
+import { renderWithMantine } from '../test-utils/renderWithMantine';
 import { tripApi } from '../api/tripApi';
 import { TripsPage } from '../pages/TripsPage';
 
@@ -20,7 +21,7 @@ describe('TripsPage', () => {
   it('shows a create trip button', async () => {
     (tripApi.listTrips as any).mockResolvedValue([]);
 
-    render(<TripsPage />);
+    renderWithMantine(<TripsPage />);
 
     expect(await screen.findByRole('button', { name: /create trip/i })).toBeTruthy();
   });
@@ -49,7 +50,7 @@ describe('TripsPage', () => {
       updatedAt: '',
     });
 
-    render(<TripsPage />);
+    renderWithMantine(<TripsPage />);
 
     fireEvent.click(await screen.findByRole('button', { name: /create trip/i }));
     fireEvent.change(screen.getByPlaceholderText(/trip name/i), { target: { value: 'Cabo' } });
@@ -67,5 +68,14 @@ describe('TripsPage', () => {
       );
     });
     expect(await screen.findByText('Cabo')).toBeTruthy();
+  });
+
+  it('shows an inline error and keeps the Create Trip button when loading fails', async () => {
+    (tripApi.listTrips as any).mockRejectedValue(new Error('Boom'));
+
+    renderWithMantine(<TripsPage />);
+
+    expect(await screen.findByText('Boom')).toBeTruthy();
+    expect(screen.getByRole('button', { name: /create trip/i })).toBeTruthy();
   });
 });

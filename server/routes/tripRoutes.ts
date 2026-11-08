@@ -3,7 +3,7 @@ import { TripRepository } from '../repositories/tripRepository';
 import { TripElementRepository } from '../repositories/tripElementRepository';
 import { TripElementConfirmationRepository } from '../repositories/tripElementConfirmationRepository';
 import { TripParticipantRepository } from '../repositories/tripParticipantRepository';
-import { BookingRepository } from '../repositories/bookingRepository';
+import { BookingRepository, BookingConflictError } from '../repositories/bookingRepository';
 import { BookingTransactionRepository } from '../repositories/bookingTransactionRepository';
 import { FlightTravelerSeatRepository } from '../repositories/flightTravelerSeatRepository';
 import { authMiddleware } from '../middleware';
@@ -118,7 +118,7 @@ tripRouter.post('/:tripId/flight-autofill', authMiddleware, tripAccessMiddleware
 tripRouter.post('/:tripId/elements', authMiddleware, tripAccessMiddleware, async (req: Request, res: Response) => {
   try {
     const { elementType, name, bookingReference, bookingUrl, priceCash, pricePoints, loyaltyProgram, totalCash, totalPoints, notes, sortPosition, typeSpecificData } = req.body;
-    if (!elementType || !name) {
+    if (!elementType || (!name && elementType !== 'flight')) {
       return res.status(400).json({ error: 'Missing required fields: elementType, name' });
     }
     const element = await tripElementRepository.createElement(req.trip!.id, {
@@ -328,6 +328,26 @@ tripRouter.delete('/:tripId/participants/:id', authMiddleware, tripAccessMiddlew
 
 // ===== Bookings =====
 
+// Returns an error message when any id does not belong to the trip.
+async function findForeignBookingRef(tripId: string, elementIds: string[] = [], travelerIds: string[] = []): Promise<string | null> {
+  for (const elementId of elementIds) {
+    const element = await tripElementRepository.getElementById(elementId);
+    if (!element || element.tripId !== tripId) return `Element not found: ${elementId}`;
+  }
+  for (const participantId of travelerIds) {
+    const participant = await tripParticipantRepository.getParticipantById(participantId);
+    if (!participant || participant.tripId !== tripId) return `Participant not found: ${participantId}`;
+  }
+  return null;
+}
+
+function sendBookingError(res: Response, error: unknown, fallback: string) {
+  if (error instanceof BookingConflictError) {
+    return res.status(409).json({ error: error.message });
+  }
+  return res.status(500).json({ error: fallback });
+}
+
 tripRouter.get('/:tripId/bookings', authMiddleware, tripAccessMiddleware, async (req: Request, res: Response) => {
   try {
     const elementId = typeof req.query.elementId === 'string' ? req.query.elementId : undefined;
@@ -347,17 +367,9 @@ tripRouter.post('/:tripId/bookings', authMiddleware, tripAccessMiddleware, async
     if (!Array.isArray(travelerIds) || travelerIds.length === 0) {
       return res.status(400).json({ error: 'At least one travelerId is required' });
     }
-    for (const elementId of elementIds) {
-      const element = await tripElementRepository.getElementById(elementId);
-      if (!element || element.tripId !== req.trip!.id) {
-        return res.status(404).json({ error: `Element not found: ${elementId}` });
-      }
-    }
-    for (const participantId of travelerIds) {
-      const participant = await tripParticipantRepository.getParticipantById(participantId);
-      if (!participant || participant.tripId !== req.trip!.id) {
-        return res.status(404).json({ error: `Participant not found: ${participantId}` });
-      }
+    const foreign = await findForeignBookingRef(req.trip!.id, elementIds, travelerIds);
+    if (foreign) {
+      return res.status(404).json({ error: foreign });
     }
     const booking = await bookingRepository.createBooking(req.trip!.id, {
       confirmationNumber,
@@ -370,7 +382,7 @@ tripRouter.post('/:tripId/bookings', authMiddleware, tripAccessMiddleware, async
     });
     res.status(201).json(booking);
   } catch (error) {
-    res.status(500).json({ error: 'Failed to create booking' });
+    sendBookingError(res, error, 'Failed to create booking');
   }
 });
 
@@ -392,10 +404,26 @@ tripRouter.patch('/:tripId/bookings/:id', authMiddleware, tripAccessMiddleware, 
     if (!booking || booking.tripId !== req.trip!.id) {
       return res.status(404).json({ error: 'Booking not found' });
     }
-    const updated = await bookingRepository.updateBooking(req.params.id, req.body);
+    const { confirmationNumber, advertisedPriceCash, advertisedPricePoints, loyaltyProgram, notes, elementIds, travelerIds } = req.body ?? {};
+    if (elementIds !== undefined && (!Array.isArray(elementIds) || elementIds.length === 0)) {
+      return res.status(400).json({ error: 'At least one elementId is required' });
+    }
+    if (travelerIds !== undefined && (!Array.isArray(travelerIds) || travelerIds.length === 0)) {
+      return res.status(400).json({ error: 'At least one travelerId is required' });
+    }
+    const foreign = await findForeignBookingRef(req.trip!.id, elementIds, travelerIds);
+    if (foreign) {
+      return res.status(404).json({ error: foreign });
+    }
+    const updates: Record<string, unknown> = {};
+    const fields = { confirmationNumber, advertisedPriceCash, advertisedPricePoints, loyaltyProgram, notes, elementIds, travelerIds };
+    for (const [key, value] of Object.entries(fields)) {
+      if (key in (req.body ?? {})) updates[key] = value;
+    }
+    const updated = await bookingRepository.updateBooking(req.params.id, updates);
     res.json(updated);
   } catch (error) {
-    res.status(500).json({ error: 'Failed to update booking' });
+    sendBookingError(res, error, 'Failed to update booking');
   }
 });
 
@@ -429,7 +457,7 @@ tripRouter.post('/:tripId/bookings/:id/elements', authMiddleware, tripAccessMidd
     await bookingRepository.linkElement(req.params.id, elementId);
     res.json(await bookingRepository.getBookingById(req.params.id));
   } catch (error) {
-    res.status(500).json({ error: 'Failed to link element to booking' });
+    sendBookingError(res, error, 'Failed to link element to booking');
   }
 });
 
@@ -463,7 +491,7 @@ tripRouter.post('/:tripId/bookings/:id/travelers', authMiddleware, tripAccessMid
     await bookingRepository.addTraveler(req.params.id, participantId);
     res.json(await bookingRepository.getBookingById(req.params.id));
   } catch (error) {
-    res.status(500).json({ error: 'Failed to add traveler to booking' });
+    sendBookingError(res, error, 'Failed to add traveler to booking');
   }
 });
 

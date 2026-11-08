@@ -1,114 +1,142 @@
 /* @vitest-environment jsdom */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { useState } from 'react';
-import { cleanup, render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { describe, it, expect, afterEach, vi } from 'vitest';
+import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { renderWithMantine } from '../test-utils/renderWithMantine';
 
-vi.mock('../api/tripApi', () => ({
-  tripApi: { lookupFlightAutofill: vi.fn() },
-}));
+vi.mock('../api/tripApi', () => ({ tripApi: { lookupFlightAutofill: vi.fn() } }));
 
 import { tripApi } from '../api/tripApi';
 import { FlightLegsEditor } from '../components/FlightLegsEditor';
 import { FlightLegDraft, emptyLegDraft } from '../utils/flightLegs';
 
-function Harness({ initial, spy }: { initial?: FlightLegDraft[]; spy?: (legs: FlightLegDraft[]) => void }) {
-  const [legs, setLegs] = useState<FlightLegDraft[]>(initial ?? [emptyLegDraft()]);
-  return (
-    <FlightLegsEditor
-      tripId="trip-1"
-      legs={legs}
-      onChange={(next) => {
-        setLegs(next);
-        spy?.(next);
-      }}
-    />
-  );
+const filled: FlightLegDraft = {
+  flightCode: 'WN100', date: '2026-11-10', departureTime: '08:00', arrivalTime: '10:00', arrivalDayOffset: 0,
+  departureAirport: 'DEN', arrivalAirport: 'DAL', checkPriceUrl: '',
+};
+
+let latest: FlightLegDraft[];
+
+function Harness({ initial }: { initial: FlightLegDraft[] }) {
+  const [legs, setLegs] = useState(initial);
+  latest = legs;
+  return <FlightLegsEditor tripId="trip-1" legs={legs} onChange={setLegs} />;
 }
 
 describe('FlightLegsEditor', () => {
   afterEach(() => cleanup());
-  beforeEach(() => vi.clearAllMocks());
 
-  it('lets the user type airports and times manually', () => {
-    const spy = vi.fn();
-    render(<Harness spy={spy} />);
-    fireEvent.change(screen.getByLabelText(/from \(airport/i), { target: { value: 'DEN' } });
-    fireEvent.change(screen.getByLabelText(/^departs$/i), { target: { value: '2026-11-10T08:00' } });
-    const last = spy.mock.calls[spy.mock.calls.length - 1][0] as FlightLegDraft[];
-    expect(last[0]).toMatchObject({ departureAirport: 'DEN', departureDatetime: '2026-11-10T08:00' });
+  it('renders one titled form per leg without a remove button for a single leg', () => {
+    renderWithMantine(<Harness initial={[emptyLegDraft()]} />);
+    expect(screen.getByText('Leg 1')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Remove leg 1' })).toBeNull();
   });
 
-  it('rewrites departure and arrival dates when the flight date changes', () => {
-    const spy = vi.fn();
-    render(
-      <Harness
-        spy={spy}
-        initial={[
-          { ...emptyLegDraft('2026-11-10'), departureAirport: 'DEN', arrivalAirport: 'LHR', departureDatetime: '2026-11-10T23:00', arrivalDatetime: '2026-11-11T05:00' },
-        ]}
-      />
+  it('adds a leg that starts where the previous one ended', async () => {
+    const user = userEvent.setup();
+    renderWithMantine(<Harness initial={[filled]} />);
+    await user.click(screen.getByRole('button', { name: '+ Leg' }));
+    expect(latest).toHaveLength(2);
+    expect(latest[1]).toMatchObject({ date: '2026-11-10', departureAirport: 'DAL', arrivalAirport: '' });
+    expect(screen.getByText('Leg 2')).toBeTruthy();
+  });
+
+  it('shows the layover between legs', () => {
+    renderWithMantine(<Harness initial={[filled, { ...filled, flightCode: 'WN200', departureTime: '12:15', arrivalTime: '14:00', departureAirport: 'DAL', arrivalAirport: 'SJD' }]} />);
+    expect(screen.getByText('Layover in DAL: 2h 15m')).toBeTruthy();
+  });
+
+  it('removes a leg', async () => {
+    const user = userEvent.setup();
+    renderWithMantine(<Harness initial={[filled, { ...filled, departureAirport: 'DAL', arrivalAirport: 'SJD' }]} />);
+    await user.click(screen.getByRole('button', { name: 'Remove leg 1' }));
+    expect(latest).toHaveLength(1);
+    expect(latest[0].arrivalAirport).toBe('SJD');
+  });
+
+  it('applies a lookup to the correct leg even if another leg was added before it resolved', async () => {
+    const user = userEvent.setup();
+    let resolveLookup!: (value: any) => void;
+    (tripApi.lookupFlightAutofill as any).mockImplementation(
+      () => new Promise(resolve => { resolveLookup = resolve; }),
     );
-    fireEvent.change(screen.getByLabelText(/flight date/i), { target: { value: '2026-12-01' } });
-    const last = spy.mock.calls[spy.mock.calls.length - 1][0] as FlightLegDraft[];
-    expect(last[0]).toMatchObject({
-      flightDate: '2026-12-01',
-      departureDatetime: '2026-12-01T23:00',
-      arrivalDatetime: '2026-12-02T05:00',
+    renderWithMantine(<Harness initial={[emptyLegDraft(), { ...filled, flightCode: 'WN200' }]} />);
+
+    await user.type(screen.getAllByLabelText('Flight #')[0], 'WN1234');
+    fireEvent.change(screen.getAllByLabelText('Date')[0], { target: { value: '2026-08-29' } });
+    await user.click(screen.getAllByRole('button', { name: 'Look up' })[0]);
+    await waitFor(() => expect(tripApi.lookupFlightAutofill).toHaveBeenCalled());
+
+    // Add a third leg before the lookup for leg 1 resolves.
+    await user.click(screen.getByRole('button', { name: '+ Leg' }));
+    expect(latest).toHaveLength(3);
+
+    resolveLookup({
+      airlineCode: 'WN', flightNumber: '1234', flightDate: '2026-08-29',
+      departureAirport: 'DEN', arrivalAirport: 'DAL',
+      departureDatetime: '2026-08-29T08:00:00.000', arrivalDatetime: '2026-08-29T10:00:00.000',
+      statusText: 'Scheduled', sourceUrl: 'https://fs',
     });
+
+    await waitFor(() => expect(screen.getAllByRole('status')[0]?.textContent).toMatch(/Filled from FlightStats/));
+    expect(latest).toHaveLength(3);
+    expect(latest[0]).toMatchObject({ departureAirport: 'DEN', arrivalAirport: 'DAL', departureTime: '08:00', arrivalTime: '10:00' });
   });
 
-  it('leaves empty datetimes empty when the flight date changes', () => {
-    const spy = vi.fn();
-    render(<Harness spy={spy} />);
-    fireEvent.change(screen.getByLabelText(/flight date/i), { target: { value: '2026-12-01' } });
-    const last = spy.mock.calls[spy.mock.calls.length - 1][0] as FlightLegDraft[];
-    expect(last[0]).toMatchObject({ flightDate: '2026-12-01', departureDatetime: '', arrivalDatetime: '' });
+  it('keeps per-leg lookup state tied to leg identity when a leg is removed', async () => {
+    const user = userEvent.setup();
+    (tripApi.lookupFlightAutofill as any).mockResolvedValue({
+      airlineCode: 'WN', flightNumber: '1234', flightDate: '2026-08-29',
+      departureAirport: 'DEN', arrivalAirport: 'DAL',
+      departureDatetime: '2026-08-29T08:00:00.000', arrivalDatetime: '2026-08-29T10:00:00.000',
+      statusText: 'Scheduled', sourceUrl: 'https://fs',
+    });
+    const legB: FlightLegDraft = { ...filled, flightCode: 'WN999', departureAirport: 'SJD', arrivalAirport: 'LAX' };
+    renderWithMantine(<Harness initial={[emptyLegDraft(), legB]} />);
+
+    await user.type(screen.getAllByLabelText('Flight #')[0], 'WN1234');
+    fireEvent.change(screen.getAllByLabelText('Date')[0], { target: { value: '2026-08-29' } });
+    await user.click(screen.getAllByRole('button', { name: 'Look up' })[0]);
+    await waitFor(() => expect(screen.getByRole('status').textContent).toMatch(/Filled from FlightStats/));
+
+    await user.click(screen.getByRole('button', { name: 'Remove leg 1' }));
+
+    expect(screen.queryByRole('status')).toBeNull();
+    expect((screen.getByLabelText('Flight #') as HTMLInputElement).value).toBe('WN999');
   });
 
-  it('adds a connecting flight, shows the layover, and removes legs', () => {
-    render(
-      <Harness
-        initial={[
-          { ...emptyLegDraft('2026-11-10'), departureAirport: 'DEN', arrivalAirport: 'DAL', departureDatetime: '2026-11-10T08:00', arrivalDatetime: '2026-11-10T10:00' },
-          { ...emptyLegDraft('2026-11-10'), departureAirport: 'DAL', arrivalAirport: 'SJD', departureDatetime: '2026-11-10T12:15', arrivalDatetime: '2026-11-10T14:00' },
-        ]}
-      />
+  it('applies a lookup to the leg it was started on, not the leg that shifted into its index, when an earlier leg is removed', async () => {
+    const user = userEvent.setup();
+    let resolveLookup!: (value: any) => void;
+    (tripApi.lookupFlightAutofill as any).mockImplementation(
+      () => new Promise(resolve => { resolveLookup = resolve; }),
     );
-    expect(screen.getByText(/layover.*2h 15m/i)).toBeTruthy();
-    fireEvent.click(screen.getAllByRole('button', { name: /remove flight/i })[1]);
-    expect(screen.queryByText(/layover/i)).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: /add connecting flight/i }));
-    expect(screen.getAllByLabelText(/airline code/i)).toHaveLength(2);
-  });
+    const legA: FlightLegDraft = { ...filled, flightCode: 'WN111', departureAirport: 'DEN', arrivalAirport: 'DAL' };
+    const legB: FlightLegDraft = { ...filled, flightCode: 'WN555', departureAirport: 'DAL', arrivalAirport: 'SJD' };
+    const legC: FlightLegDraft = { ...filled, flightCode: 'WN777', departureAirport: 'SJD', arrivalAirport: 'LAX' };
+    renderWithMantine(<Harness initial={[legA, legB, legC]} />);
 
-  it('fills the leg from a lookup result', async () => {
-    (tripApi.lookupFlightAutofill as any).mockResolvedValue({
-      airlineCode: 'WN', flightNumber: '722', flightDate: '2026-10-24',
-      departureAirport: 'DEN', arrivalAirport: 'SJD',
-      departureDatetime: '2026-10-24T09:00', arrivalDatetime: '2026-10-24T11:00',
-      statusText: 'On time', sourceUrl: 'https://example.com',
+    // Start a lookup on leg B (index 1).
+    await user.click(screen.getAllByRole('button', { name: 'Look up' })[1]);
+    await waitFor(() => expect(tripApi.lookupFlightAutofill).toHaveBeenCalled());
+
+    // Remove leg A (index 0) before the lookup resolves; B shifts to index 0, C to index 1.
+    await user.click(screen.getByRole('button', { name: 'Remove leg 1' }));
+    expect(latest).toHaveLength(2);
+
+    resolveLookup({
+      airlineCode: 'WN', flightNumber: '555', flightDate: filled.date,
+      departureAirport: 'AAA', arrivalAirport: 'BBB',
+      departureDatetime: `${filled.date}T09:00:00.000`, arrivalDatetime: `${filled.date}T11:00:00.000`,
+      statusText: 'Scheduled', sourceUrl: 'https://fs',
     });
-    render(<Harness initial={[{ ...emptyLegDraft('2026-10-24'), airline: 'WN', flightNumber: '722' }]} />);
-    fireEvent.click(screen.getByRole('button', { name: /look up flight details/i }));
-    await waitFor(() => expect((screen.getByLabelText(/from \(airport/i) as HTMLInputElement).value).toBe('DEN'));
-    expect((screen.getByLabelText(/^arrives$/i) as HTMLInputElement).value).toBe('2026-10-24T11:00');
-    expect(screen.getByRole('status').textContent).toMatch(/on time/i);
-  });
 
-  it('tells the user when the lookup finds no schedule', async () => {
-    (tripApi.lookupFlightAutofill as any).mockResolvedValue({
-      airlineCode: 'WN', flightNumber: '1234', flightDate: '2026-11-10', sourceUrl: 'https://example.com/fs',
-    });
-    render(<Harness initial={[{ ...emptyLegDraft('2026-11-10'), airline: 'WN', flightNumber: '1234' }]} />);
-    fireEvent.click(screen.getByRole('button', { name: /look up flight details/i }));
-    expect(await screen.findByText(/no schedule found/i)).toBeTruthy();
-    expect(screen.getByRole('link', { name: /flightstats/i }).getAttribute('href')).toBe('https://example.com/fs');
-  });
-
-  it('shows an error when the lookup request fails', async () => {
-    (tripApi.lookupFlightAutofill as any).mockRejectedValue(new Error('boom'));
-    render(<Harness initial={[{ ...emptyLegDraft('2026-11-10'), airline: 'WN', flightNumber: '1' }]} />);
-    fireEvent.click(screen.getByRole('button', { name: /look up flight details/i }));
-    expect(await screen.findByText(/boom/)).toBeTruthy();
+    await waitFor(() => expect(screen.getAllByRole('status')[0]?.textContent).toMatch(/Filled from FlightStats/));
+    expect(latest).toHaveLength(2);
+    const updatedB = latest.find(leg => leg.flightCode === 'WN555')!;
+    expect(updatedB).toMatchObject({ departureAirport: 'AAA', arrivalAirport: 'BBB', departureTime: '09:00', arrivalTime: '11:00' });
+    const unchangedC = latest.find(leg => leg.flightCode === 'WN777')!;
+    expect(unchangedC).toMatchObject({ departureAirport: 'SJD', arrivalAirport: 'LAX' });
   });
 });

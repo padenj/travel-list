@@ -1,0 +1,138 @@
+.section {
+  margin-top: var(--mantine-spacing-md);
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-sm);
+  overflow: hidden;
+}
+
+.band {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--mantine-spacing-sm);
+  padding: 6px 10px;
+  background: var(--mantine-color-default-hover);
+}
+
+.bandTitle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) 0.8fr minmax(0, 1.5fr) minmax(0, 1.4fr) minmax(0, 1fr) auto;
+  column-gap: var(--mantine-spacing-sm);
+  align-items: baseline;
+  padding: 4px 10px;
+}
+
+.columns {
+  font-size: var(--mantine-font-size-xs);
+  color: var(--mantine-color-dimmed);
+  border-bottom: 1px solid var(--mantine-color-default-border);
+}
+
+.row {
+  cursor: pointer;
+  font-size: var(--mantine-font-size-sm);
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
+.row[data-tone='a'] {
+  background: var(--mantine-color-green-light);
+}
+
+.row[data-tone='b'] {
+  background: var(--mantine-color-blue-light);
+}
+
+.row:hover {
+  filter: brightness(0.96);
+}
+
+.row:focus-visible {
+  outline: 2px solid var(--mantine-color-blue-filled);
+  outline-offset: -2px;
+}
+
+.name {
+  grid-column: 1;
+}
+
+.date {
+  grid-column: 2;
+}
+
+.times {
+  grid-column: 3;
+}
+
+.price {
+  grid-column: 4;
+}
+
+.confirm {
+  grid-column: 5;
+}
+
+.badges {
+  grid-column: 6;
+}
+
+.strong {
+  font-weight: 700;
+}
+
+.muted {
+  color: var(--mantine-color-dimmed);
+}
+
+.legLabel {
+  grid-column: 1;
+  padding-left: 1.25rem;
+}
+
+.legTimes {
+  grid-column: 3;
+}
+
+.note {
+  grid-column: 1 / -1;
+  padding-left: 1.25rem;
+  font-size: var(--mantine-font-size-xs);
+}
+
+@media (max-width: 48em) {
+  .grid {
+    grid-template-columns: 1fr auto;
+  }
+
+  .columns {
+    display: none;
+  }
+
+  .name,
+  .price,
+  .legLabel {
+    grid-column: 1;
+  }
+
+  .date,
+  .confirm {
+    grid-column: 2;
+    text-align: right;
+  }
+
+  .badges,
+  .legTimes {
+    grid-column: 1 / -1;
+  }
+
+  .legTimes {
+    padding-left: 1.25rem;
+    color: var(--mantine-color-dimmed);
+  }
+}

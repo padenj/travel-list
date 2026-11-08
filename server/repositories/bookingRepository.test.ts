@@ -1,7 +1,8 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { getDb, closeDb } from '../db';
-import { BookingRepository } from './bookingRepository';
+import { BookingRepository, BookingConflictError } from './bookingRepository';
 import { TripParticipantRepository } from './tripParticipantRepository';
+import { TripElementRepository } from './tripElementRepository';
 import { v4 as uuidv4 } from 'uuid';
 
 describe('BookingRepository', () => {
@@ -132,6 +133,57 @@ describe('BookingRepository', () => {
       expect(updated.confirmationNumber).toBe('NEW123');
       expect(updated.advertisedPriceCash).toBe(69);
     });
+
+    it('clears fields set to null', async () => {
+      const booking = await repo.createBooking(tripId, { confirmationNumber: 'ABC', notes: 'n', elementIds: [elementId], travelerIds: [participantAId] });
+      const updated = await repo.updateBooking(booking.id, { confirmationNumber: null, notes: null });
+      expect(updated.confirmationNumber).toBeNull();
+      expect(updated.notes).toBeNull();
+    });
+
+    it('replaces linked flights and travelers', async () => {
+      const booking = await repo.createBooking(tripId, { elementIds: [elementId], travelerIds: [participantAId] });
+      const updated = await repo.updateBooking(booking.id, { elementIds: [elementId2], travelerIds: [participantAId, participantBId] });
+      expect(updated.elementIds).toEqual([elementId2]);
+      expect(updated.travelerIds.sort()).toEqual([participantAId, participantBId].sort());
+    });
+
+    it('rejects a replacement that conflicts with another booking and changes nothing', async () => {
+      await repo.createBooking(tripId, { confirmationNumber: 'OTHER', elementIds: [elementId2], travelerIds: [participantAId] });
+      const booking = await repo.createBooking(tripId, { confirmationNumber: 'MINE', elementIds: [elementId], travelerIds: [participantAId] });
+      await expect(
+        repo.updateBooking(booking.id, { confirmationNumber: 'CHANGED', elementIds: [elementId, elementId2] })
+      ).rejects.toBeInstanceOf(BookingConflictError);
+      const reloaded = await repo.getBookingById(booking.id);
+      expect(reloaded!.confirmationNumber).toBe('MINE');
+      expect(reloaded!.elementIds).toEqual([elementId]);
+    });
+
+    it('does not count the booking itself as a conflict', async () => {
+      const booking = await repo.createBooking(tripId, { elementIds: [elementId], travelerIds: [participantAId] });
+      await expect(repo.updateBooking(booking.id, { elementIds: [elementId], travelerIds: [participantAId] })).resolves.toBeTruthy();
+    });
+
+    it('rejects empty replacement lists', async () => {
+      const booking = await repo.createBooking(tripId, { elementIds: [elementId], travelerIds: [participantAId] });
+      await expect(repo.updateBooking(booking.id, { elementIds: [] })).rejects.toThrow('At least one flight is required');
+      await expect(repo.updateBooking(booking.id, { travelerIds: [] })).rejects.toThrow('At least one traveler is required');
+    });
+
+    it('rolls back link replacement when a write fails midway', async () => {
+      const booking = await repo.createBooking(tripId, { elementIds: [elementId], travelerIds: [participantAId] });
+      const db: any = await (repo as any).db;
+      const realRun = db.run.bind(db);
+      const spy = vi.spyOn(db, 'run').mockImplementation(async (sql: string, ...args: any[]) => {
+        if (/^\s*INSERT INTO booking_travelers/i.test(sql)) throw new Error('boom');
+        return realRun(sql, ...args);
+      });
+      await expect(repo.updateBooking(booking.id, { elementIds: [elementId2], travelerIds: [participantBId] })).rejects.toThrow('boom');
+      spy.mockRestore();
+      const reloaded = await repo.getBookingById(booking.id);
+      expect(reloaded!.elementIds).toEqual([elementId]);
+      expect(reloaded!.travelerIds).toEqual([participantAId]);
+    });
   });
 
   describe('deleteBooking', () => {
@@ -153,6 +205,52 @@ describe('BookingRepository', () => {
       expect(linkCount.count).toBe(0);
       expect(travelerCount.count).toBe(0);
       expect(txnCount.count).toBe(0);
+    });
+  });
+
+  describe('traveler conflicts', () => {
+    it('rejects a second booking for the same flight and traveler with a readable message', async () => {
+      await repo.createBooking(tripId, { confirmationNumber: 'ABC123', elementIds: [elementId], travelerIds: [participantAId] });
+      await expect(
+        repo.createBooking(tripId, { elementIds: [elementId], travelerIds: [participantAId] })
+      ).rejects.toThrow(new BookingConflictError('A is already on booking ABC123 for Departure Flights'));
+    });
+
+    it('allows the same traveler on a different flight', async () => {
+      await repo.createBooking(tripId, { elementIds: [elementId], travelerIds: [participantAId] });
+      await expect(repo.createBooking(tripId, { elementIds: [elementId2], travelerIds: [participantAId] })).resolves.toBeTruthy();
+    });
+
+    it('allows a different traveler on the same flight (separate per-traveler bookings)', async () => {
+      await repo.createBooking(tripId, { elementIds: [elementId], travelerIds: [participantAId] });
+      await expect(repo.createBooking(tripId, { elementIds: [elementId], travelerIds: [participantBId] })).resolves.toBeTruthy();
+    });
+
+    it('describes a conflicting booking without a confirmation number', async () => {
+      await repo.createBooking(tripId, { elementIds: [elementId], travelerIds: [participantAId] });
+      await expect(
+        repo.createBooking(tripId, { elementIds: [elementId], travelerIds: [participantAId] })
+      ).rejects.toThrow('A is already on another booking without a confirmation number for Departure Flights');
+    });
+
+    it('findTravelerConflicts ignores the excluded booking', async () => {
+      const booking = await repo.createBooking(tripId, { elementIds: [elementId], travelerIds: [participantAId] });
+      expect(await repo.findTravelerConflicts(tripId, [elementId], [participantAId], booking.id)).toEqual([]);
+      const conflicts = await repo.findTravelerConflicts(tripId, [elementId], [participantAId]);
+      expect(conflicts).toHaveLength(1);
+      expect(conflicts[0]).toMatchObject({ bookingId: booking.id, elementId, participantId: participantAId, travelerName: 'A', elementName: 'Departure Flights' });
+    });
+
+    it('linkElement rejects linking a flight where a traveler is already booked', async () => {
+      await repo.createBooking(tripId, { elementIds: [elementId2], travelerIds: [participantAId] });
+      const booking = await repo.createBooking(tripId, { elementIds: [elementId], travelerIds: [participantAId] });
+      await expect(repo.linkElement(booking.id, elementId2)).rejects.toBeInstanceOf(BookingConflictError);
+    });
+
+    it('addTraveler rejects adding a traveler already booked on one of the flights', async () => {
+      await repo.createBooking(tripId, { elementIds: [elementId], travelerIds: [participantBId] });
+      const booking = await repo.createBooking(tripId, { elementIds: [elementId], travelerIds: [participantAId] });
+      await expect(repo.addTraveler(booking.id, participantBId)).rejects.toBeInstanceOf(BookingConflictError);
     });
   });
 
@@ -178,6 +276,42 @@ describe('BookingRepository', () => {
       const reloaded = await repo.getBookingById(booking.id);
       expect(reloaded!.actualTotalCash).toBe(138);
       expect(reloaded!.currentConfirmationNumber).toBe('REBOOKED');
+    });
+  });
+
+  describe('soft-deleted flights', () => {
+    let elementRepo: TripElementRepository;
+
+    beforeEach(() => {
+      elementRepo = new TripElementRepository();
+    });
+
+    it('excludes a soft-deleted flight from elementIds', async () => {
+      const booking = await repo.createBooking(tripId, { elementIds: [elementId, elementId2], travelerIds: [participantAId] });
+      await elementRepo.deleteElement(elementId2);
+
+      const reloaded = await repo.getBookingById(booking.id);
+      expect(reloaded!.elementIds).toEqual([elementId]);
+    });
+
+    it('does not report conflicts for a soft-deleted flight but still reports them for an active flight', async () => {
+      const booking = await repo.createBooking(tripId, { elementIds: [elementId, elementId2], travelerIds: [participantAId] });
+      await elementRepo.deleteElement(elementId2);
+
+      expect(await repo.findTravelerConflicts(tripId, [elementId2], [participantAId])).toEqual([]);
+
+      const conflicts = await repo.findTravelerConflicts(tripId, [elementId], [participantAId]);
+      expect(conflicts).toHaveLength(1);
+      expect(conflicts[0]).toMatchObject({ bookingId: booking.id, elementId, participantId: participantAId });
+    });
+
+    it('updateBooking with notes only succeeds when a linked flight is soft-deleted', async () => {
+      const booking = await repo.createBooking(tripId, { elementIds: [elementId, elementId2], travelerIds: [participantAId] });
+      await elementRepo.deleteElement(elementId2);
+
+      const updated = await repo.updateBooking(booking.id, { notes: 'updated notes' });
+      expect(updated.notes).toBe('updated notes');
+      expect(updated.elementIds).toEqual([elementId]);
     });
   });
 });
