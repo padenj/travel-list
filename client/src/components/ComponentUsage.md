@@ -180,11 +180,11 @@ Lists/add/removes trip travelers (family members and outside guests). Exports `f
 **Used in:**
   - `pages/TripDetailPage.tsx` (Bookings tab of the flight dialog)
 
-Displays existing bookings (confirmation number, per-person advertised price, actual total from transactions, "Also covers" links to other linked elements) and a form to create a new booking with traveler multi-select, inline new-traveler creation, and multi-element linking. Renders `BookingTransactionList` per booking.
+Displays existing bookings (confirmation number, per-person advertised price, actual total from transactions, "Also covers" links to other linked elements) and a form to create a new booking with traveler multi-select, inline new-traveler creation, and multi-element linking. Renders `BookingTransactionList` per booking and uses `utils/bookingSummary.ts` for the one-line money summary. Add forms start collapsed.
 
 ### BookingTransactionList
 **Used in:**
-  - `BookingCard`
+  - `BookingCard` (only consumer)
 
 Lists/add/removes transactions for a single booking with a running total; supports recording price-drop rebookings (negative amount + new confirmation number) and free-text fee/tax breakdown notes.
 

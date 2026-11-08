@@ -56,70 +56,12 @@
   padding: 0.65rem 0.75rem;
 }
 
-.element-card {
-  background-color: var(--ctp-mocha-surface0);
-  padding: 1.25rem;
-  border-radius: 6px;
-  border-left: 3px solid var(--ctp-mocha-green);
-  transition: all 0.2s;
-}
-
-.element-card:hover {
-  background-color: var(--ctp-mocha-surface1);
-  transform: translateX(4px);
-}
-
-.element-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: start;
-  margin-bottom: 0.5rem;
-  gap: 1rem;
-}
-
-.element-card h3 {
-  margin: 0;
-  color: var(--ctp-mocha-text);
-  font-size: 1.1rem;
-}
-
-.no-elements {
-  color: var(--ctp-mocha-subtext);
-  font-style: italic;
-  padding: 2rem;
-  text-align: center;
-}
-
 .error {
   color: var(--mantine-color-red-6);
   background-color: light-dark(var(--mantine-color-red-0), rgba(250, 82, 82, 0.1));
   padding: 1rem;
   border-radius: 6px;
   border-left: 4px solid var(--mantine-color-red-6);
-}
-
-/* Responsive */
-@media (max-width: 768px) {
-  .element-header {
-    flex-direction: column;
-  }
-}
-
-.txn-notes {
-  white-space: pre-wrap;
-  margin: 0.25rem 0 0.75rem;
-  color: var(--ctp-mocha-subtext);
-  font-size: 0.9rem;
-}
-
-.booking-transaction-list textarea {
-  width: 100%;
-  background-color: var(--ctp-mocha-base);
-  color: inherit;
-  border: 1px solid var(--ctp-mocha-surface1);
-  border-radius: 6px;
-  padding: 0.5rem;
-  font: inherit;
 }
 
 .flight-legs-editor {
