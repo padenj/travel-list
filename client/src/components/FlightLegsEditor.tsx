@@ -1,3 +1,4 @@
+import { useRef } from 'react';
 import { ActionIcon, Button, Group, Paper, Stack, Text } from '@mantine/core';
 import { IconTrash } from '@tabler/icons-react';
 import { FlightLegForm } from './FlightLegForm';
@@ -12,15 +13,45 @@ interface FlightLegsEditorProps {
 
 // Stack of leg forms used when creating a flight.
 export function FlightLegsEditor({ tripId, legs, onChange, idPrefix = 'leg' }: FlightLegsEditorProps) {
+  // Tracks the latest legs array so async lookups (which call update/remove well
+  // after the render that created their closures) never write back a stale list.
+  const legsRef = useRef(legs);
+  legsRef.current = legs;
+
+  // Stable per-leg identity, independent of list position, so FlightLegForm's
+  // internal lookup state stays with the leg it belongs to when legs are removed.
+  const keySeqRef = useRef(0);
+  const nextKey = () => `k${++keySeqRef.current}`;
+  const keysRef = useRef<string[]>(legs.map(() => nextKey()));
+  if (keysRef.current.length !== legs.length) {
+    keysRef.current = legs.map(() => nextKey());
+  }
+
+  const emit = (next: FlightLegDraft[]) => {
+    legsRef.current = next;
+    onChange(next);
+  };
+
   const update = (index: number, draft: FlightLegDraft) =>
-    onChange(legs.map((leg, i) => (i === index ? draft : leg)));
+    emit(legsRef.current.map((leg, i) => (i === index ? draft : leg)));
+
+  const remove = (index: number) => {
+    keysRef.current = keysRef.current.filter((_, i) => i !== index);
+    emit(legsRef.current.filter((_, i) => i !== index));
+  };
+
+  const add = () => {
+    keysRef.current = [...keysRef.current, nextKey()];
+    emit([...legsRef.current, emptyLegDraft(legsRef.current[legsRef.current.length - 1])]);
+  };
 
   return (
     <Stack gap="xs">
       {legs.map((leg, index) => {
         const layover = index > 0 ? draftLayover(legs[index - 1], leg) : null;
+        const key = keysRef.current[index];
         return (
-          <div key={`leg-${index}`}>
+          <div key={key}>
             {layover !== null && (
               <Text size="sm" c="dimmed" ta="center" mb="xs">
                 {`Layover${leg.departureAirport ? ` in ${leg.departureAirport}` : ''}: ${formatLayover(layover)}`}
@@ -34,13 +65,13 @@ export function FlightLegsEditor({ tripId, legs, onChange, idPrefix = 'leg' }: F
                     variant="subtle"
                     color="red"
                     aria-label={`Remove leg ${index + 1}`}
-                    onClick={() => onChange(legs.filter((_, i) => i !== index))}
+                    onClick={() => remove(index)}
                   >
                     <IconTrash size={16} />
                   </ActionIcon>
                 )}
               </Group>
-              <FlightLegForm tripId={tripId} draft={leg} onChange={draft => update(index, draft)} idPrefix={`${idPrefix}-${index}`} />
+              <FlightLegForm tripId={tripId} draft={leg} onChange={draft => update(index, draft)} idPrefix={`${idPrefix}-${key}`} />
             </Paper>
           </div>
         );
@@ -49,7 +80,7 @@ export function FlightLegsEditor({ tripId, legs, onChange, idPrefix = 'leg' }: F
         variant="light"
         size="compact-sm"
         style={{ alignSelf: 'flex-start' }}
-        onClick={() => onChange([...legs, emptyLegDraft(legs[legs.length - 1])])}
+        onClick={add}
       >
         + Leg
       </Button>
