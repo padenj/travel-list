@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback, useId } from 'react';
+import { ActionIcon, Alert, Button, Group, SimpleGrid, Table, Text, TextInput, Textarea } from '@mantine/core';
+import { IconTrash } from '@tabler/icons-react';
 import { BookingTransaction } from '../types/trip';
 import { tripApi } from '../api/tripApi';
 import { formatMoney } from '../utils/money';
@@ -19,6 +21,8 @@ function parseAmount(value: string): number | undefined {
 
 export function BookingTransactionList({ tripId, bookingId, originalConfirmationNumber = null, refreshKey = 0, onChanged }: BookingTransactionListProps) {
   const [transactions, setTransactions] = useState<BookingTransaction[]>([]);
+  const [showForm, setShowForm] = useState(false);
+  const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const [amountCash, setAmountCash] = useState('');
   const [amountPoints, setAmountPoints] = useState('');
   const [transactionDate, setTransactionDate] = useState('');
@@ -43,9 +47,6 @@ export function BookingTransactionList({ tripId, bookingId, originalConfirmation
     return { transaction: t, confirmation: carriedConfirmation };
   });
 
-  const runningTotalCash = transactions.reduce((sum, t) => sum + t.amountCash, 0);
-  const runningTotalPoints = transactions.reduce((sum, t) => sum + t.amountPoints, 0);
-
   const addTransaction = async () => {
     const cash = parseAmount(amountCash);
     const points = parseAmount(amountPoints);
@@ -68,6 +69,7 @@ export function BookingTransactionList({ tripId, bookingId, originalConfirmation
       setTransactionDate('');
       setConfirmationNumber('');
       setNotes('');
+      setShowForm(false);
       await load();
       onChanged();
     } catch (err) {
@@ -78,53 +80,76 @@ export function BookingTransactionList({ tripId, bookingId, originalConfirmation
   };
 
   const removeTransaction = async (id: string) => {
-    await tripApi.deleteBookingTransaction(tripId, bookingId, id);
-    await load();
-    onChanged();
+    try {
+      setError(null);
+      await tripApi.deleteBookingTransaction(tripId, bookingId, id);
+      setConfirmingId(null);
+      await load();
+      onChanged();
+    } catch (err) {
+      setConfirmingId(null);
+      setError(err instanceof Error ? err.message : 'Failed to remove transaction');
+    }
   };
 
   return (
-    <div className="booking-transaction-list">
-      <h4>Transactions</h4>
-      {error && <p className="error">{error}</p>}
-      <ul>
-        {rows.map(({ transaction: t, confirmation }) => (
-          <li key={t.id}>
-            <span>{t.transactionDate}</span>{' '}
-            {t.amountCash !== 0 && <span>{formatMoney(t.amountCash)}</span>}{' '}
-            {t.amountPoints !== 0 && <span>{`${t.amountPoints} pts`}</span>}{' '}
-            {confirmation && <span>{`Conf: ${confirmation}`}</span>}{' '}
-            <button type="button" className="view-toggle-btn" onClick={() => removeTransaction(t.id)}>Remove</button>
-            {t.notes && <div className="txn-notes">{t.notes}</div>}
-          </li>
-        ))}
-      </ul>
-      <p className="booking-transaction-total">
-        Total paid: {formatMoney(runningTotalCash)}{runningTotalPoints !== 0 ? ` + ${runningTotalPoints} pts` : ''}
-      </p>
-      <div className="create-element-field">
-        <label htmlFor={`${uid}-cash`}>Amount (cash)</label>
-        <input id={`${uid}-cash`} type="number" step="0.01" value={amountCash} onChange={(e) => setAmountCash(e.target.value)} />
-      </div>
-      <div className="create-element-field">
-        <label htmlFor={`${uid}-points`}>Amount (points)</label>
-        <input id={`${uid}-points`} type="number" step="1" value={amountPoints} onChange={(e) => setAmountPoints(e.target.value)} />
-      </div>
-      <div className="create-element-field">
-        <label htmlFor={`${uid}-date`}>Date</label>
-        <input id={`${uid}-date`} type="date" value={transactionDate} onChange={(e) => setTransactionDate(e.target.value)} />
-      </div>
-      <div className="create-element-field">
-        <label htmlFor={`${uid}-conf`}>New confirmation number</label>
-        <input id={`${uid}-conf`} type="text" value={confirmationNumber} onChange={(e) => setConfirmationNumber(e.target.value)} placeholder="Optional, e.g. for rebooking" />
-      </div>
-      <div className="create-element-field">
-        <label htmlFor={`${uid}-notes`}>Notes</label>
-        <textarea id={`${uid}-notes`} rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Optional, e.g. paste the fee/tax breakdown" />
-      </div>
-      <button type="button" className="view-toggle-btn" onClick={addTransaction} disabled={saving}>
-        {saving ? 'Saving...' : 'Add Transaction'}
-      </button>
+    <div>
+      <Group justify="space-between" mt="xs" mb={4}>
+        <Text size="sm" fw={600}>Transactions</Text>
+        <Button size="compact-xs" variant="subtle" onClick={() => setShowForm(prev => !prev)}>
+          {showForm ? 'Cancel' : '+ Transaction'}
+        </Button>
+      </Group>
+
+      {error && <Alert color="red" mb="xs">{error}</Alert>}
+
+      {rows.length === 0 ? (
+        <Text size="sm" c="dimmed">No transactions yet</Text>
+      ) : (
+        <Table fz="sm" verticalSpacing={2} horizontalSpacing="xs" withRowBorders={false}>
+          <Table.Tbody>
+            {rows.map(({ transaction: t, confirmation }) => (
+              <Table.Tr key={t.id}>
+                <Table.Td>
+                  <span>{t.transactionDate}</span>
+                  {t.notes && <Text size="xs" c="dimmed" style={{ whiteSpace: 'pre-wrap' }}>{t.notes}</Text>}
+                </Table.Td>
+                <Table.Td>
+                  {t.amountCash !== 0 && <span>{formatMoney(t.amountCash)}</span>}{' '}
+                  {t.amountPoints !== 0 && <span>{`${t.amountPoints} pts`}</span>}
+                </Table.Td>
+                <Table.Td c="dimmed">{confirmation}</Table.Td>
+                <Table.Td ta="right">
+                  {confirmingId === t.id ? (
+                    <Group gap={4} justify="flex-end" wrap="nowrap">
+                      <Text size="xs">Remove?</Text>
+                      <Button size="compact-xs" color="red" onClick={() => removeTransaction(t.id)}>Confirm</Button>
+                      <Button size="compact-xs" variant="default" onClick={() => setConfirmingId(null)}>Cancel</Button>
+                    </Group>
+                  ) : (
+                    <ActionIcon variant="subtle" color="red" size="sm" aria-label="Remove transaction" onClick={() => setConfirmingId(t.id)}>
+                      <IconTrash size={14} />
+                    </ActionIcon>
+                  )}
+                </Table.Td>
+              </Table.Tr>
+            ))}
+          </Table.Tbody>
+        </Table>
+      )}
+
+      {showForm && (
+        <div>
+          <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="xs" mt="xs">
+            <TextInput id={`${uid}-cash`} label="Amount (cash)" type="number" step="0.01" value={amountCash} onChange={e => setAmountCash(e.currentTarget.value)} />
+            <TextInput id={`${uid}-points`} label="Amount (points)" type="number" step="1" value={amountPoints} onChange={e => setAmountPoints(e.currentTarget.value)} />
+            <TextInput id={`${uid}-date`} label="Date" type="date" value={transactionDate} onChange={e => setTransactionDate(e.currentTarget.value)} />
+            <TextInput id={`${uid}-conf`} label="New confirmation number" placeholder="Optional, e.g. for rebooking" value={confirmationNumber} onChange={e => setConfirmationNumber(e.currentTarget.value)} />
+          </SimpleGrid>
+          <Textarea id={`${uid}-notes`} mt="xs" label="Notes" rows={3} placeholder="Optional, e.g. paste the fee/tax breakdown" value={notes} onChange={e => setNotes(e.currentTarget.value)} />
+          <Button mt="xs" size="xs" onClick={addTransaction} loading={saving}>Add transaction</Button>
+        </div>
+      )}
     </div>
   );
 }
