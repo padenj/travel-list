@@ -290,13 +290,26 @@ describe('TripDetailPage', () => {
 
     await user.click(await screen.findByRole('button', { name: 'Open Delta 45' }));
     const dialog = await screen.findByRole('dialog', { name: 'Delta 45' });
-    await user.click(within(dialog).getByRole('button', { name: 'Edit notes' }));
+    await user.click(within(dialog).getByRole('button', { name: /edit notes/i }));
     const notes = within(dialog).getByLabelText('Notes');
     await user.clear(notes);
     await user.click(within(dialog).getByRole('button', { name: 'Save notes' }));
 
     await waitFor(() => expect(api.updateElement).toHaveBeenCalledWith('trip-1', 'el-1', { notes: null }));
     await waitFor(() => expect(within(dialog).queryByRole('button', { name: 'Save notes' })).toBeNull());
+  });
+
+  it('focuses the notes textarea when the notes editor opens', async () => {
+    const user = userEvent.setup();
+    api.listElements.mockResolvedValue([flightEl({ notes: 'Window seats' })]);
+    renderPage();
+
+    await user.click(await screen.findByRole('button', { name: 'Open Delta 45' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Delta 45' });
+    await user.click(within(dialog).getByRole('button', { name: /edit notes/i }));
+
+    const notes = within(dialog).getByLabelText('Notes');
+    expect(document.activeElement).toBe(notes);
   });
 
   it('deletes a flight after confirming and closes the dialog', async () => {
@@ -312,6 +325,24 @@ describe('TripDetailPage', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Confirm' }));
 
     await waitFor(() => expect(api.deleteElement).toHaveBeenCalledWith('trip-1', 'el-1'));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Delta 45' })).toBeNull());
+  });
+
+  it('disables the Confirm delete button while the delete request is in flight', async () => {
+    const user = userEvent.setup();
+    api.listElements.mockResolvedValue([flightEl()]);
+    let resolveDelete: (value: unknown) => void;
+    api.deleteElement.mockReturnValue(new Promise(resolve => { resolveDelete = resolve; }));
+    renderPage();
+
+    await user.click(await screen.findByRole('button', { name: 'Open Delta 45' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Delta 45' });
+    await user.click(within(dialog).getByRole('button', { name: 'Delete flight' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Confirm' }));
+
+    await waitFor(() => expect((within(dialog).getByRole('button', { name: 'Confirm' }) as HTMLButtonElement).disabled).toBe(true));
+
+    resolveDelete!(undefined);
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Delta 45' })).toBeNull());
   });
 
