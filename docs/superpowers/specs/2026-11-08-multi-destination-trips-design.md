@@ -32,6 +32,7 @@ New table `trip_destinations` (added by migration `server/migrations/migrations/
 - **One destination per person:** when members are written, the server returns 409 if a user is already a member of another destination's list in the same trip.
 - **Trip links:** each destination's list is also added to `trip_packing_lists`.
 - **Family users only:** only family users (`users` rows) can be assigned to a destination. External guests (participants with no `user_id`) cannot.
+- **Trip participants:** whenever a person is assigned to a destination, the server adds them as a trip participant if they aren't one already (`display_name` = the user's name).
 - **Item ownership is unchanged:** an item belongs to people through `item_members` on the master item. A person sees an item in a list when they are both assigned to the item and a member of the list.
 
 ## Server API
@@ -40,11 +41,11 @@ All routes require authentication and check that the trip belongs to the user's 
 
 | Route | Behavior |
 |---|---|
-| `GET /trips/:id/destinations` | Returns destinations ordered by `position`, each with `{ id, name, color, position, packingListId, memberIds }`. |
-| `POST /trips/:id/destinations` | Body: `{ name, memberIds, itemGroupIds?, packingListId? }`. Creates a new list named `"<trip name> – <destination name>"`, or adopts the existing `packingListId`. Then sets the members, adds the item groups using the existing populate-from-template logic, and links the list to the trip. |
-| `PUT /destinations/:id` | Body: any of `{ name, color, position, memberIds }`. Member changes enforce the one-destination rule. |
-| `DELETE /destinations/:id` | Body: `{ moveSharedItemsTo?: destinationId, deleteList?: boolean }`. Returns 409 if the list has items and neither option is given. Without `deleteList`, the list is kept as an ordinary list. |
-| `POST /trips/:id/split` | Body: `{ sourceListId, destinations: [{ name, memberIds }], sharedItemsDestinationIndex }`. See "Split" below. |
+| `GET /trips/:tripId/destinations` | Returns destinations ordered by `position`, each with `{ id, name, color, position, packingListId, memberIds }`. |
+| `POST /trips/:tripId/destinations` | Body: `{ name, memberIds, itemGroupIds?, packingListId? }`. Creates a new list named `"<trip name> – <destination name>"`, or adopts the existing `packingListId`. Then sets the members, adds the item groups using the existing populate-from-template logic, and links the list to the trip. |
+| `PUT /trips/:tripId/destinations/:destinationId` | Body: any of `{ name, color, position, memberIds }`. Member changes enforce the one-destination rule. |
+| `DELETE /trips/:tripId/destinations/:destinationId` | Body: `{ moveSharedItemsTo?: destinationId, deleteList?: boolean }`. Returns 409 if the list has items and neither option is given. Without `deleteList`, the list is kept as an ordinary list. |
+| `POST /trips/:tripId/split` | Body: `{ sourceListId, destinations: [{ name, memberIds }], sharedItemsDestinationIndex }`. See "Split" below. |
 | `POST /packing-lists/:listId/items/:pliId/move` | Body: `{ toListId }`. Both lists must be destinations of the same trip. See "Move" below. |
 | `GET /packing-lists/:id` | Adds `trip_destination: { tripId, tripName, destinations: [...] } \| null` to the response. |
 | `GET /families/:familyId/packing-lists` | Adds `trip_destination` (`{ tripId, tripName, destinationCount }` or null) to each list so the selector can group them. |
@@ -70,7 +71,7 @@ If any step fails, the whole transaction rolls back and the server returns 500. 
 
 ### Deleting a trip
 
-`trip_destinations` rows are deleted with the trip. Their packing lists are kept as ordinary lists.
+Trips are soft-deleted, so `TripRepository.deleteTrip` also soft-deletes the trip's `trip_destinations` rows. Their packing lists are kept as ordinary lists.
 
 ## Client: setup
 
@@ -78,28 +79,28 @@ If any step fails, the whole transaction rolls back and the server returns 500. 
 
 Opened from "Split by destination" in the dashboard list menu and in Manage Lists. Uses a Mantine `Modal`, full screen on phones.
 
-1. **Trip:** pick the trip already linked to the list, or create a new trip named after the list.
-2. **Who goes where:** destination chips that can be renamed (default two, "+" to add more, names suggested from `trip_locations`). Each person gets a row with a segmented control to choose their destination. "Next" stays disabled until every list member is assigned and every destination has at least one person.
+1. **Trip:** pick an existing trip (the one already linked to the list is selected first), or create a new trip with a name (defaults to the list name) and start and end dates (required by the trips API).
+2. **Who goes where:** destination chips that can be renamed (default two, named "Destination 1" and "Destination 2"; "+" adds more). Each person gets a row with a segmented control to choose their destination. "Next" stays disabled until every list member is assigned and every destination has at least one person.
 3. **Shared items:** "Where should the N shared items go?" with one radio button per destination. A note explains that personal items follow each person and that checks are kept.
 
-Confirming calls `POST /trips/:id/split`. When the user picked "new trip", the client first creates the trip with the existing create-trip API. If `skippedCount > 0`, the success notification says how many items were left in the first destination.
+Confirming calls `POST /trips/:tripId/split`. When the user picked "new trip", the client first creates the trip with the existing create-trip API. If `skippedCount > 0`, the success notification says how many items were left in the first destination.
 
 ### Trip page: Packing section (`TripPackingSection`)
 
 - **Destination cards:** shown on `TripDetailPage` below the travelers strip. Each card shows the colored bar, name, member names, item count and percent packed. Tapping a card makes that list active and opens the dashboard.
 - **Adding a destination (`AddDestinationDialog`):** the "+ Add destination" button (labeled "Set up packing" when the trip has no destinations) opens a dialog with a name field, member chips and optional item-group chips. A member already assigned elsewhere is dimmed. Tapping them asks "Move <name> from <destination>?" and confirming moves them.
 - **Use an existing list:** a link that adopts an existing list as a destination.
-- **Card menu:** Rename, Change members, Delete. Delete follows the rules for `DELETE /destinations/:id`.
+- **Card menu:** Rename, Change members, Delete. Delete follows the rules for `DELETE /trips/:tripId/destinations/:destinationId`.
 
 ## Client: dashboard
 
 ### Data
 
-New hook `useDashboardData(activeListId)` replaces the data loading currently inside `Dashboard.tsx`. It returns `{ groups: DestinationGroup[], trip: { id, name } | null, reload }`, where each `DestinationGroup` is `{ destinationId | null, name, color, listId, members, userLists, wholeFamilyItems, notNeededByUser, notNeededWhole, notes }`.
+The item-grouping logic inside `Dashboard.tsx`'s load effect moves into a pure helper, `buildDestinationGroup()` in `client/src/utils/dashboardGroups.ts`. The load effect stays in `Dashboard.tsx` (its notes tests depend on it) and now produces `groups: DestinationGroup[]` plus `trip: { id, name } | null`, where each `DestinationGroup` is `{ destinationId | null, name, color, listId, members, userLists, wholeFamilyItems, notNeededByUser, notNeededWhole, notes }`.
 
-- **Ordinary list:** the hook returns one group with `destinationId: null`.
+- **Ordinary list:** the load produces one group with `destinationId: null`.
 - **Split trip:** it loads all destination lists in parallel.
-- **Real-time updates:** the hook reloads when a `server-event` arrives for any list id in `groups`.
+- **Real-time updates:** the dashboard reloads when a `server-event` arrives for any list id in `groups`.
 
 ### Selector
 
@@ -164,7 +165,7 @@ Checking items and toggling not-needed work offline through the existing per-lis
 | `server/routes/tripRoutes.ts` | Destination, split and move routes. |
 | `client/src/api/tripApi.ts` | Helpers `getTripDestinations`, `createTripDestination`, `updateTripDestination`, `deleteTripDestination`, `splitListIntoTrip`. |
 | `client/src/api.ts` | Helper `movePackingListItem`. |
-| `client/src/hooks/useDashboardData.ts` (new folder) | Loads and groups data for the dashboard. |
+| `client/src/utils/dashboardGroups.ts` | Pure helpers: build one destination group from a list response; person ordering and counts for Person view. |
 | `client/src/components/PersonView.tsx` | Person-first view. |
 | `client/src/components/DestinationColumns.tsx` | Grouped columns. |
 | `client/src/components/SplitListDialog.tsx` | Three-step split dialog. |
@@ -182,11 +183,11 @@ Docs to update: `client/src/APIUsage.md`, `client/src/components/ComponentUsage.
   - `GET /packing-lists/:id` includes `trip_destination`.
   - Deleting a trip keeps its lists.
 - **Client (vitest):**
-  - `useDashboardData` grouping for ordinary lists and split trips.
+  - `buildDestinationGroup` and the person-ordering helpers, for ordinary lists and split trips.
   - PersonView: chip order, counts, the packed-items row, swiping.
   - DestinationColumns: header bands.
   - SplitListDialog: step validation.
-- **Playwright** at 390px width: split a list, check an item in Person view, move a shared item, and confirm it appears in the other destination.
+- **Manual check in a browser at 390px width** (the repo's Playwright setup is only a scaffold with no login): split a list, check an item in Person view, move a shared item, and confirm it appears in the other destination.
 
 ## Out of scope
 
