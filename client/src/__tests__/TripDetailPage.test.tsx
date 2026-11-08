@@ -27,53 +27,26 @@ vi.mock('../components/BookingCard', () => ({
 vi.mock('../components/FlightSeatGrid', () => ({
   FlightSeatGrid: ({ legId }: { legId: string }) => <div>seat grid {legId}</div>,
 }));
+const mockLeg = {
+  flightCode: 'WN123', date: '2026-09-12', departureTime: '08:00', arrivalTime: '11:00', arrivalDayOffset: 0,
+  departureAirport: 'DEN', arrivalAirport: 'SJD', checkPriceUrl: '',
+};
+
 vi.mock('../components/FlightLegsEditor', () => ({
   FlightLegsEditor: ({ legs, onChange }: { legs: any[]; onChange: (legs: any[]) => void }) => (
     <div>
       <span>legs in editor: {legs.length}</span>
-      <button
-        type="button"
-        onClick={() =>
-          onChange([{ ...legs[0], flightDate: '2026-09-12', departureAirport: 'DEN', arrivalAirport: 'SJD' }])
-        }
-      >
-        mock fill leg
-      </button>
+      <button type="button" onClick={() => onChange([{ ...mockLeg }])}>mock fill leg</button>
       <button
         type="button"
         onClick={() =>
           onChange([
-            {
-              ...legs[0],
-              flightDate: '2026-08-29',
-              airline: 'WN',
-              flightNumber: '722',
-              departureAirport: 'DEN',
-              arrivalAirport: 'SJD',
-              departureDatetime: '2026-08-29T15:10',
-              arrivalDatetime: '2026-08-29T18:05',
-            },
-          ])
-        }
-      >
-        mock autofill leg
-      </button>
-      <button
-        type="button"
-        onClick={() =>
-          onChange([
-            { ...legs[0], flightDate: '2026-11-10', departureAirport: 'DEN', arrivalAirport: 'DAL' },
-            { ...legs[0], id: undefined, flightDate: '2026-11-10', departureAirport: 'DAL', arrivalAirport: 'SJD' },
+            { ...mockLeg, flightCode: 'WN100', date: '2026-11-10', departureTime: '08:00', arrivalTime: '10:00', arrivalAirport: 'DAL' },
+            { ...mockLeg, flightCode: 'WN200', date: '2026-11-10', departureTime: '12:15', arrivalTime: '14:00', departureAirport: 'DAL' },
           ])
         }
       >
         mock two legs
-      </button>
-      <button
-        type="button"
-        onClick={() => onChange(legs.map((l, i) => (i === legs.length - 1 ? { ...l, flightNumber: '201' } : l)))}
-      >
-        mock bump last flight number
       </button>
     </div>
   ),
@@ -201,14 +174,14 @@ describe('TripDetailPage', () => {
     expect(await screen.findByText('2 other elements hidden until their sections are built')).toBeTruthy();
   });
 
-  it('creates a flight, closes the dialog and reloads elements', async () => {
+  it('creates a flight without a name, closes the dialog and reloads elements', async () => {
     const user = userEvent.setup();
     api.createElement.mockResolvedValue({ id: 'el-2' });
     renderPage();
 
     await user.click(await screen.findByRole('button', { name: 'Add flight' }));
     const dialog = await screen.findByRole('dialog', { name: 'Add flight' });
-    await user.type(within(dialog).getByLabelText('Name'), 'Southwest WN123');
+    expect(within(dialog).queryByLabelText('Name')).toBeNull();
     await user.click(within(dialog).getByRole('button', { name: 'mock fill leg' }));
     const callsBefore = api.listElements.mock.calls.length;
     await user.click(within(dialog).getByRole('button', { name: 'Save flight' }));
@@ -218,58 +191,28 @@ describe('TripDetailPage', () => {
         'trip-1',
         expect.objectContaining({
           elementType: 'flight',
-          name: 'Southwest WN123',
-          typeSpecificData: { legs: [expect.objectContaining({ legOrder: 1 })] },
-        })
-      )
-    );
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Add flight' })).toBeNull());
-    expect(api.listElements.mock.calls.length).toBeGreaterThan(callsBefore);
-  });
-
-  it('auto-names from legs until the name is edited manually', async () => {
-    const user = userEvent.setup();
-    renderPage();
-    await user.click(await screen.findByRole('button', { name: 'Add flight' }));
-    const dialog = await screen.findByRole('dialog', { name: 'Add flight' });
-    const name = within(dialog).getByLabelText('Name') as HTMLInputElement;
-
-    await user.click(within(dialog).getByRole('button', { name: 'mock fill leg' }));
-    await waitFor(() => expect(name.value).toBe('DEN → SJD'));
-
-    await user.clear(name);
-    await user.type(name, 'Custom name');
-    await user.click(within(dialog).getByRole('button', { name: 'mock two legs' }));
-    expect(name.value).toBe('Custom name');
-  });
-
-  it('sends autofilled lookup times in the create payload', async () => {
-    const user = userEvent.setup();
-    api.createElement.mockResolvedValue({ id: 'el-3' });
-    renderPage();
-    await user.click(await screen.findByRole('button', { name: 'Add flight' }));
-    const dialog = await screen.findByRole('dialog', { name: 'Add flight' });
-    await user.click(within(dialog).getByRole('button', { name: 'mock autofill leg' }));
-    await user.click(within(dialog).getByRole('button', { name: 'Save flight' }));
-
-    await waitFor(() =>
-      expect(api.createElement).toHaveBeenCalledWith(
-        'trip-1',
-        expect.objectContaining({
-          name: 'DEN → SJD',
           typeSpecificData: {
-            legs: [
-              expect.objectContaining({
-                departureAirport: 'DEN',
-                arrivalAirport: 'SJD',
-                departureDatetime: '2026-08-29T15:10',
-                arrivalDatetime: '2026-08-29T18:05',
-              }),
-            ],
+            legs: [expect.objectContaining({
+              legOrder: 1, airline: 'WN', flightNumber: '123', departureAirport: 'DEN', arrivalAirport: 'SJD',
+              departureDatetime: '2026-09-12T08:00', arrivalDatetime: '2026-09-12T11:00',
+            })],
           },
         })
       )
     );
+    expect(api.createElement.mock.calls[0][1]).not.toHaveProperty('name');
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Add flight' })).toBeNull());
+    expect(api.listElements.mock.calls.length).toBeGreaterThan(callsBefore);
+  });
+
+  it('blocks saving an incomplete leg with an inline message', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(await screen.findByRole('button', { name: 'Add flight' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Add flight' });
+    await user.click(within(dialog).getByRole('button', { name: 'Save flight' }));
+    expect(await within(dialog).findByText('Enter the flight date')).toBeTruthy();
+    expect(api.createElement).not.toHaveBeenCalled();
   });
 
   it('creates a two-leg flight with legOrder 1 and 2', async () => {
@@ -279,7 +222,6 @@ describe('TripDetailPage', () => {
     await user.click(await screen.findByRole('button', { name: 'Add flight' }));
     const dialog = await screen.findByRole('dialog', { name: 'Add flight' });
     await user.click(within(dialog).getByRole('button', { name: 'mock two legs' }));
-    await waitFor(() => expect((within(dialog).getByLabelText('Name') as HTMLInputElement).value).toBe('DEN → DAL → SJD'));
     await user.click(within(dialog).getByRole('button', { name: 'Save flight' }));
 
     await waitFor(() =>
