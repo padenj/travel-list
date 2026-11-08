@@ -26,6 +26,7 @@ export function TripDetailPage() {
   const [adding, setAdding] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editingDetails, setEditingDetails] = useState(false);
+  const [editingBookings, setEditingBookings] = useState(false);
   const [bookingsVersion, setBookingsVersion] = useState(0);
   const [participantsVersion, setParticipantsVersion] = useState(0);
 
@@ -58,14 +59,20 @@ export function TripDetailPage() {
     if (tripId) load(tripId, true);
   }, [tripId, load]);
 
-  useEffect(() => {
-    if (!tripId || bookingsVersion === 0) return;
-    tripApi.listBookings(tripId).then(setBookings).catch(() => undefined);
-  }, [tripId, bookingsVersion]);
-
   const reload = useCallback(async () => {
     if (tripId) await load(tripId);
   }, [tripId, load]);
+
+  // Bumping bookingsVersion makes each booking's transaction list refetch too.
+  const reloadBookings = useCallback(async () => {
+    if (!tripId) return;
+    try {
+      setBookings(await tripApi.listBookings(tripId));
+      setBookingsVersion(v => v + 1);
+    } catch (err) {
+      setReloadError(err instanceof Error ? err.message : 'Failed to reload bookings');
+    }
+  }, [tripId]);
 
   const handleParticipantsFromBooking = (next: TripParticipant[]) => {
     setParticipants(next);
@@ -138,7 +145,7 @@ export function TripDetailPage() {
           opened
           onClose={() => setSelectedId(null)}
           title={selected.name}
-          swipeEnabled={!editingDetails}
+          swipeEnabled={!editingDetails && !editingBookings}
           tabs={[
             {
               value: 'details',
@@ -167,9 +174,11 @@ export function TripDetailPage() {
                   elementId={selected.id}
                   elements={elements}
                   participants={participants}
+                  bookings={bookings}
                   onParticipantsChanged={handleParticipantsFromBooking}
                   refreshKey={bookingsVersion}
-                  onBookingsChanged={() => setBookingsVersion(v => v + 1)}
+                  onBookingsChanged={reloadBookings}
+                  onEditingChange={setEditingBookings}
                 />
               ),
             },

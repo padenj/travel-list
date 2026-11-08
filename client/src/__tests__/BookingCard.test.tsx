@@ -1,14 +1,15 @@
 /* @vitest-environment jsdom */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { MantineProvider } from '@mantine/core';
-import { cleanup, screen, waitFor, fireEvent } from '@testing-library/react';
+import { cleanup, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { renderWithMantine } from '../test-utils/renderWithMantine';
 import { Booking, TripElement, TripParticipant } from '../types/trip';
 
 vi.mock('../api/tripApi', () => ({
   tripApi: {
-    listBookings: vi.fn(),
     createBooking: vi.fn(),
+    updateBooking: vi.fn(),
+    deleteBooking: vi.fn(),
     createParticipant: vi.fn(),
     listBookingTransactions: vi.fn(),
     addBookingTransaction: vi.fn(),
@@ -19,131 +20,197 @@ vi.mock('../api/tripApi', () => ({
 import { tripApi } from '../api/tripApi';
 import { BookingCard } from '../components/BookingCard';
 
+const api = tripApi as any;
+
+const leg = (id: string, elementId: string, from: string, dep: string, to: string, arr: string, code: [string, string]) => ({
+  id, elementId, legOrder: 1, departureAirport: from, departureDatetime: dep, arrivalAirport: to, arrivalDatetime: arr,
+  airline: code[0], flightNumber: code[1], createdAt: '', updatedAt: '',
+});
+
 const elements: TripElement[] = [
-  { id: 'el-1', tripId: 'trip-1', elementType: 'flight', name: 'Departure Flights', sortPosition: 0, createdAt: '', updatedAt: '' },
-  { id: 'el-2', tripId: 'trip-1', elementType: 'flight', name: 'Return Flights', sortPosition: 1, createdAt: '', updatedAt: '' },
+  {
+    id: 'el-1', tripId: 'trip-1', elementType: 'flight', name: 'DEN → MCO', sortPosition: 0, createdAt: '', updatedAt: '',
+    legs: [
+      leg('l1', 'el-1', 'DEN', '2026-08-29T08:00', 'DAL', '2026-08-29T10:00', ['WN', '1234']),
+      leg('l2', 'el-1', 'DAL', '2026-08-29T11:30', 'MCO', '2026-08-29T15:05', ['WN', '567']),
+    ],
+  },
+  {
+    id: 'el-2', tripId: 'trip-1', elementType: 'flight', name: 'MCO → DEN', sortPosition: 1, createdAt: '', updatedAt: '',
+    legs: [leg('l3', 'el-2', 'MCO', '2026-09-05T18:00', 'DEN', '2026-09-05T20:10', ['WN', '890'])],
+  },
+  { id: 'h-1', tripId: 'trip-1', elementType: 'hotel', name: 'Diamante', sortPosition: 2, createdAt: '', updatedAt: '' },
 ];
 
 const participants: TripParticipant[] = [
   { id: 'p1', tripId: 'trip-1', displayName: 'Alice', createdAt: '' },
+  { id: 'p2', tripId: 'trip-1', displayName: 'Bob', createdAt: '' },
+  { id: 'p3', tripId: 'trip-1', displayName: 'Carol', createdAt: '' },
 ];
 
 function makeBooking(extra: Partial<Booking> = {}): Booking {
   return {
-    id: 'b1', tripId: 'trip-1', confirmationNumber: 'ABC123', advertisedPriceCash: 79, advertisedPricePoints: null,
+    id: 'b1', tripId: 'trip-1', confirmationNumber: 'ABC123', advertisedPriceCash: 412, advertisedPricePoints: null,
     loyaltyProgram: null, notes: null, createdAt: '', updatedAt: '',
-    elementIds: ['el-1'], travelerIds: ['p1'], currentConfirmationNumber: 'ABC123', actualTotalCash: 0, actualTotalPoints: 0,
+    elementIds: ['el-1', 'el-2'], travelerIds: ['p1'], currentConfirmationNumber: 'ABC123', actualTotalCash: 0, actualTotalPoints: 0,
     ...extra,
   };
 }
 
+const b1 = makeBooking();
+const b2 = makeBooking({ id: 'b2', confirmationNumber: 'XYZ999', currentConfirmationNumber: 'XYZ999', elementIds: ['el-2'], travelerIds: ['p2'] });
+
 function renderCard(props: Partial<React.ComponentProps<typeof BookingCard>> = {}) {
-  return renderWithMantine(
-    <BookingCard tripId="trip-1" elementId="el-1" elements={elements} participants={participants} onParticipantsChanged={() => {}} {...props} />
+  const handlers = {
+    onBookingsChanged: vi.fn(),
+    onParticipantsChanged: vi.fn(),
+    onEditingChange: vi.fn(),
+  };
+  renderWithMantine(
+    <BookingCard
+      tripId="trip-1"
+      elementId="el-1"
+      elements={elements}
+      participants={participants}
+      bookings={[b1, b2]}
+      refreshKey={0}
+      {...handlers}
+      {...props}
+    />
   );
+  return handlers;
 }
+
+const checkbox = (name: string) => screen.getByLabelText(name) as HTMLInputElement;
 
 describe('BookingCard', () => {
   afterEach(() => cleanup());
-
   beforeEach(() => {
-    vi.clearAllMocks();
-    (tripApi.listBookings as any).mockResolvedValue([]);
-    (tripApi.listBookingTransactions as any).mockResolvedValue([]);
+    vi.resetAllMocks();
+    api.listBookingTransactions.mockResolvedValue([]);
+    api.createBooking.mockResolvedValue({});
+    api.updateBooking.mockResolvedValue({});
+    api.deleteBooking.mockResolvedValue(undefined);
   });
 
-  it('shows "no bookings yet" and no redundant heading when there are none', async () => {
+  it('shows only this flight\'s bookings with what they cover and every leg', async () => {
     renderCard();
-    expect(await screen.findByText(/no bookings yet for this flight/i)).toBeTruthy();
-    expect(screen.queryByRole('heading', { name: /^bookings$/i })).toBeNull();
+    expect(screen.getByText('ABC123')).toBeTruthy();
+    expect(screen.queryByText('XYZ999')).toBeNull();
+    expect(screen.getByText('Covers: DEN → MCO (Aug 29) · MCO → DEN (Sep 5)')).toBeTruthy();
+    expect(screen.getByText('WN1234 · DEN 8:00a → DAL 10:00a')).toBeTruthy();
+    expect(screen.getByText('WN567 · DAL 11:30a → MCO 3:05p')).toBeTruthy();
+    expect(screen.getByText('WN890 · MCO 6:00p → DEN 8:10p')).toBeTruthy();
+    await screen.findAllByText(/no transactions yet/i);
   });
 
-  it('keeps the add form collapsed until "+ Booking" is clicked and collapses on cancel', async () => {
+  it('lists travelers not booked on this flight', async () => {
     renderCard();
-    await screen.findByText(/no bookings/i);
-    expect(screen.queryByLabelText(/confirmation number/i)).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: /\+ booking/i }));
-    expect(screen.getByLabelText(/confirmation number/i)).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: /^cancel$/i }));
-    expect(screen.queryByLabelText(/confirmation number/i)).toBeNull();
+    expect(screen.getByText('Not booked: Bob, Carol')).toBeTruthy();
+    await screen.findAllByText(/no transactions yet/i);
   });
 
-  it('creates a booking with an existing traveler, advertised per-person price, and a linked second element', async () => {
-    const created = makeBooking({ elementIds: ['el-1', 'el-2'] });
-    (tripApi.createBooking as any).mockResolvedValue(created);
-    (tripApi.listBookings as any).mockResolvedValueOnce([]).mockResolvedValueOnce([created]);
+  it('creates a booking with smart defaults and blocks already-booked travelers', async () => {
+    const user = userEvent.setup();
+    const { onBookingsChanged, onEditingChange } = renderCard();
+    await user.click(screen.getByRole('button', { name: '+ Booking' }));
+    expect(onEditingChange).toHaveBeenLastCalledWith(true);
 
+    expect(checkbox('DEN → MCO · Aug 29 · 2 legs').checked).toBe(true);
+    expect(checkbox('MCO → DEN · Sep 5 · 1 leg').checked).toBe(false);
+    expect(screen.queryByLabelText(/Diamante/)).toBeNull();
+    expect(checkbox('Alice (on ABC123)').disabled).toBe(true);
+    expect(checkbox('Alice (on ABC123)').checked).toBe(false);
+    expect(checkbox('Bob').checked).toBe(true);
+    expect(checkbox('Carol').checked).toBe(true);
+
+    await user.type(screen.getByLabelText('Confirmation number'), 'NEW1');
+    await user.click(screen.getByRole('button', { name: 'Save booking' }));
+
+    await waitFor(() => expect(api.createBooking).toHaveBeenCalledWith('trip-1', {
+      confirmationNumber: 'NEW1', loyaltyProgram: null, advertisedPriceCash: null, advertisedPricePoints: null, notes: null,
+      elementIds: ['el-1'], travelerIds: ['p2', 'p3'],
+    }));
+    expect(onBookingsChanged).toHaveBeenCalled();
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Save booking' })).toBeNull());
+    expect(onEditingChange).toHaveBeenLastCalledWith(false);
+  });
+
+  it('marks a checked traveler who is booked on another selected flight', async () => {
+    const user = userEvent.setup();
     renderCard();
-    await screen.findByText(/no bookings/i);
+    await user.click(screen.getByRole('button', { name: '+ Booking' }));
+    await user.click(checkbox('MCO → DEN · Sep 5 · 1 leg'));
+    const bob = checkbox('Bob (on XYZ999)');
+    expect(bob.checked).toBe(true);
+    expect(bob.disabled).toBe(false);
+  });
 
-    fireEvent.click(screen.getByRole('button', { name: /\+ booking/i }));
-    fireEvent.change(screen.getByLabelText(/confirmation number/i), { target: { value: 'ABC123' } });
-    fireEvent.change(screen.getByLabelText(/advertised price per person \(cash\)/i), { target: { value: '79' } });
-    fireEvent.click(screen.getByLabelText('Alice'));
-    fireEvent.click(screen.getByLabelText('Return Flights'));
-    fireEvent.click(screen.getByRole('button', { name: /save booking/i }));
+  it('edits a booking in place and saves flights and travelers in one call', async () => {
+    const user = userEvent.setup();
+    const { onBookingsChanged } = renderCard();
+    await user.click(screen.getByRole('button', { name: 'Edit booking' }));
 
-    await waitFor(() => expect(tripApi.createBooking).toHaveBeenCalledWith('trip-1', expect.objectContaining({
-      confirmationNumber: 'ABC123',
-      advertisedPriceCash: 79,
-      travelerIds: ['p1'],
-      elementIds: expect.arrayContaining(['el-1', 'el-2']),
+    expect((screen.getByLabelText('Confirmation number') as HTMLInputElement).value).toBe('ABC123');
+    expect(checkbox('Alice').checked).toBe(true);
+    expect(checkbox('Alice').disabled).toBe(false);
+    expect(checkbox('Bob (on XYZ999)').disabled).toBe(true);
+
+    await user.click(checkbox('MCO → DEN · Sep 5 · 1 leg'));
+    expect(checkbox('Bob').disabled).toBe(false);
+    await user.click(screen.getByRole('button', { name: 'Save booking' }));
+
+    await waitFor(() => expect(api.updateBooking).toHaveBeenCalledWith('trip-1', 'b1', expect.objectContaining({
+      confirmationNumber: 'ABC123', advertisedPriceCash: 412, elementIds: ['el-1'], travelerIds: ['p1'],
     })));
-    expect(await screen.findByText('ABC123')).toBeTruthy();
-    expect(screen.queryByLabelText(/confirmation number/i)).toBeNull();
+    expect(onBookingsChanged).toHaveBeenCalled();
   });
 
-  it('requires at least one traveler', async () => {
+  it('shows a conflict from the server inline and keeps the form open', async () => {
+    const user = userEvent.setup();
+    api.updateBooking.mockRejectedValue(new Error('Alice is already on booking XYZ999 for MCO → DEN'));
     renderCard();
-    await screen.findByText(/no bookings/i);
-    fireEvent.click(screen.getByRole('button', { name: /\+ booking/i }));
-    fireEvent.click(screen.getByRole('button', { name: /save booking/i }));
-    expect(await screen.findByText(/select or add at least one traveler/i)).toBeTruthy();
-    expect(tripApi.createBooking).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Edit booking' }));
+    await user.click(screen.getByRole('button', { name: 'Save booking' }));
+    expect(await screen.findByText('Alice is already on booking XYZ999 for MCO → DEN')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Save booking' })).toBeTruthy();
   });
 
-  it('renders a compact booking: confirmation, traveler chips and the money line', async () => {
-    (tripApi.listBookings as any).mockResolvedValue([makeBooking({ advertisedPriceCash: 200, actualTotalCash: 10 })]);
-    renderCard();
-    expect(await screen.findByText('ABC123')).toBeTruthy();
-    expect(screen.getByText('Alice')).toBeTruthy();
-    expect(screen.getByText('Advertised $200.00/person · Paid $10.00 ($10.00/person)')).toBeTruthy();
-    expect(screen.queryByText(/originally booked/i)).toBeNull();
-  });
-
-  it('shows "Also covers" for a booking linked to more than one element', async () => {
-    (tripApi.listBookings as any).mockResolvedValue([makeBooking({ elementIds: ['el-1', 'el-2'] })]);
-    renderCard();
-    expect(await screen.findByText(/also covers/i)).toBeTruthy();
-    expect(await screen.findByText('Return Flights')).toBeTruthy();
-  });
-
-  it('shows the original confirmation after a rebook changed the current one', async () => {
-    (tripApi.listBookings as any).mockResolvedValue([
-      makeBooking({ currentConfirmationNumber: 'XYZ789', actualTotalCash: 137.96 }),
+  it('deletes a booking after confirming, naming its transactions', async () => {
+    const user = userEvent.setup();
+    api.listBookingTransactions.mockResolvedValue([
+      { id: 't1', bookingId: 'b1', amountCash: 400, amountPoints: 0, transactionDate: '2026-01-01', confirmationNumber: null, notes: null, createdAt: '' },
+      { id: 't2', bookingId: 'b1', amountCash: 12, amountPoints: 0, transactionDate: '2026-01-02', confirmationNumber: null, notes: null, createdAt: '' },
     ]);
-    renderCard();
-    expect(await screen.findByText('XYZ789')).toBeTruthy();
-    expect(screen.getByText('orig ABC123')).toBeTruthy();
-    expect(screen.getByText(/\$137\.96 \(\$137\.96\/person\)/)).toBeTruthy();
+    const { onBookingsChanged } = renderCard();
+    await screen.findByText('$400.00');
+    await user.click(screen.getByRole('button', { name: 'Delete booking' }));
+    expect(screen.getByText('Delete booking ABC123 and its 2 transactions?')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Confirm' }));
+    await waitFor(() => expect(api.deleteBooking).toHaveBeenCalledWith('trip-1', 'b1'));
+    expect(onBookingsChanged).toHaveBeenCalled();
   });
 
-  it('shows a placeholder when a booking has no confirmation number', async () => {
-    (tripApi.listBookings as any).mockResolvedValue([
-      makeBooking({ confirmationNumber: null, currentConfirmationNumber: null }),
-    ]);
-    renderCard();
-    expect(await screen.findByText(/no confirmation number/i)).toBeTruthy();
+  it('creates a new traveler once even when saving is retried', async () => {
+    const user = userEvent.setup();
+    api.createParticipant.mockResolvedValue({ id: 'p4', tripId: 'trip-1', displayName: 'Dave', createdAt: '' });
+    api.createBooking.mockRejectedValueOnce(new Error('Network down')).mockResolvedValueOnce({});
+    const { onParticipantsChanged } = renderCard();
+    await user.click(screen.getByRole('button', { name: '+ Booking' }));
+    await user.type(screen.getByLabelText('+ New traveler'), 'Dave');
+    await user.click(screen.getByRole('button', { name: 'Save booking' }));
+    expect(await screen.findByText('Network down')).toBeTruthy();
+    expect(onParticipantsChanged).toHaveBeenCalledWith([...participants, expect.objectContaining({ id: 'p4' })]);
+
+    await user.click(screen.getByRole('button', { name: 'Save booking' }));
+    await waitFor(() => expect(api.createBooking).toHaveBeenCalledTimes(2));
+    expect(api.createParticipant).toHaveBeenCalledTimes(1);
+    expect(api.createBooking.mock.calls[1][1].travelerIds).toEqual(['p2', 'p3', 'p4']);
   });
 
-  it('refetches bookings when refreshKey changes', async () => {
-    const { rerender } = renderCard({ refreshKey: 0 });
-    await waitFor(() => expect(tripApi.listBookings).toHaveBeenCalledTimes(1));
-    rerender(
-      <MantineProvider env="test">
-        <BookingCard tripId="trip-1" elementId="el-1" elements={elements} participants={participants} onParticipantsChanged={() => {}} refreshKey={1} />
-      </MantineProvider>
-    );
-    await waitFor(() => expect(tripApi.listBookings).toHaveBeenCalledTimes(2));
+  it('shows an empty message when the flight has no bookings', () => {
+    renderCard({ bookings: [b2] });
+    expect(screen.getByText('No bookings yet for this flight')).toBeTruthy();
+    expect(screen.getByText('Not booked: Alice, Bob, Carol')).toBeTruthy();
   });
 });

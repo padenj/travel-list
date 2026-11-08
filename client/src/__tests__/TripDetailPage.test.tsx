@@ -22,7 +22,13 @@ vi.mock('../components/TripParticipantsPanel', () => ({
   TripParticipantsPanel: () => <div>participants panel</div>,
 }));
 vi.mock('../components/BookingCard', () => ({
-  BookingCard: ({ elementId }: { elementId: string }) => <div>booking card {elementId}</div>,
+  BookingCard: ({ elementId, bookings, onBookingsChanged }: { elementId: string; bookings: any[]; onBookingsChanged: () => void }) => (
+    <div>
+      booking card {elementId}
+      <span>{`${bookings.length} trip bookings`}</span>
+      <button type="button" onClick={() => onBookingsChanged()}>mock bookings changed</button>
+    </div>
+  ),
 }));
 vi.mock('../components/FlightSeatGrid', () => ({
   FlightSeatGrid: ({ legId }: { legId: string }) => <div>seat grid {legId}</div>,
@@ -255,6 +261,26 @@ describe('TripDetailPage', () => {
     await user.click(within(dialog).getByRole('tab', { name: 'Seats' }));
     expect(await within(dialog).findByText('seat grid leg-1')).toBeTruthy();
     expect(within(dialog).getByText('seat grid leg-2')).toBeTruthy();
+  });
+
+  it('passes trip bookings to the Bookings tab and reloads them on change', async () => {
+    const user = userEvent.setup();
+    const booking = {
+      id: 'b1', tripId: 'trip-1', confirmationNumber: 'ABC', advertisedPriceCash: null, advertisedPricePoints: null, loyaltyProgram: null,
+      notes: null, createdAt: '', updatedAt: '', elementIds: ['el-7'], travelerIds: [], currentConfirmationNumber: 'ABC', actualTotalCash: 0, actualTotalPoints: 0,
+    };
+    api.listElements.mockResolvedValue([twoLegFlight()]);
+    api.listBookings.mockResolvedValue([booking]);
+    renderPage();
+
+    await user.click(await screen.findByRole('button', { name: 'Open DEN → DAL → SJD' }));
+    const dialog = await screen.findByRole('dialog', { name: 'DEN → DAL → SJD' });
+    await user.click(within(dialog).getByRole('tab', { name: /Bookings/ }));
+    expect(await within(dialog).findByText('1 trip bookings')).toBeTruthy();
+
+    api.listBookings.mockResolvedValue([booking, { ...booking, id: 'b2' }]);
+    await user.click(within(dialog).getByRole('button', { name: 'mock bookings changed' }));
+    expect(await within(dialog).findByText('2 trip bookings')).toBeTruthy();
   });
 
   it('edits a leg inline through syncLegs only and keeps the dialog open', async () => {
