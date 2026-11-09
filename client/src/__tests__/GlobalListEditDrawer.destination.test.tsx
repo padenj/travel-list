@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import * as api from '../api';
 import { tripApi } from '../api/tripApi';
 import GlobalListEditDrawer from '../components/GlobalListEditDrawer';
@@ -62,8 +62,13 @@ async function tick(name: string) {
 }
 
 describe('GlobalListEditDrawer destination members', () => {
+  afterEach(async () => {
+    await act(async () => { await new Promise(r => setTimeout(r, 600)); });
+    cleanup();
+  });
+
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     (api.updatePackingList as any).mockResolvedValue(ok);
   });
 
@@ -158,5 +163,48 @@ describe('GlobalListEditDrawer destination members', () => {
     expect(box('Ann').checked).toBe(true);
     expect(box('Bob').checked).toBe(true);
     expect(showNotification).not.toHaveBeenCalled();
+  });
+
+  it('Move does not overwrite a newer tick made while its PUT is in flight', async () => {
+    const put = deferred();
+    (api.updatePackingList as any).mockResolvedValueOnce(conflict409).mockReturnValueOnce(put.promise).mockResolvedValue(ok);
+    (tripApi.listDestinations as any).mockResolvedValue([{ id: 'dest-2', name: 'Rome', memberIds: ['m2', 'm3'] }]);
+    (tripApi.updateDestination as any).mockResolvedValue({});
+    await setup();
+    await tick('Bob');
+    await act(async () => { fireEvent.click(await screen.findByText('Move')); });
+    await waitFor(() => expect(api.updatePackingList).toHaveBeenCalledTimes(2));
+    await act(async () => { fireEvent.click(box('Ann')); });
+    await act(async () => { put.resolve(ok); });
+    expect(box('Ann').checked).toBe(false);
+  });
+
+  it('Move does not re-save a stale selection after a tick during updateDestination', async () => {
+    const upd = deferred();
+    (api.updatePackingList as any).mockResolvedValueOnce(conflict409).mockResolvedValue(ok);
+    (tripApi.listDestinations as any).mockResolvedValue([{ id: 'dest-2', name: 'Rome', memberIds: ['m2', 'm3'] }]);
+    (tripApi.updateDestination as any).mockReturnValue(upd.promise);
+    await setup();
+    await tick('Bob');
+    await act(async () => { fireEvent.click(await screen.findByText('Move')); });
+    await act(async () => { fireEvent.click(box('Ann')); });
+    await act(async () => { upd.resolve({}); });
+    expect(box('Ann').checked).toBe(false);
+    expect(api.updatePackingList).toHaveBeenCalledTimes(1);
+  });
+
+  it('a stale success does not reset the rollback baseline', async () => {
+    const a = deferred();
+    (api.updatePackingList as any).mockReturnValueOnce(a.promise).mockResolvedValueOnce(ok)
+      .mockResolvedValueOnce({ response: { ok: false, status: 500 }, data: {} });
+    await setup([]);
+    await tick('Ann');
+    await act(async () => { fireEvent.click(box('Bob')); });
+    await act(async () => { await new Promise(r => setTimeout(r, 600)); });
+    await act(async () => { a.resolve(ok); });
+    await tick('Ann');
+    expect(api.updatePackingList).toHaveBeenCalledTimes(3);
+    expect(box('Ann').checked).toBe(true);
+    expect(box('Bob').checked).toBe(true);
   });
 });

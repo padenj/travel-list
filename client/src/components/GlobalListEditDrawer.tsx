@@ -34,6 +34,7 @@ export default function GlobalListEditDrawer() {
   const [conflict, setConflict] = useState<{ memberId: string; destinationId: string; destinationName: string; onlyMember: boolean; pending: string[] } | null>(null);
   const [moving, setMoving] = useState(false);
   const savedMemberIds = useRef<string[]>([]);
+  const newestSavedReq = useRef(0);
   const online = useOnline();
   const isDestination = !!tripId;
   const saveTimer = useRef<number | null>(null);
@@ -176,7 +177,10 @@ export default function GlobalListEditDrawer() {
     try {
       const res = await updatePackingList(listId, { memberIds: next });
       if (res.response && res.response.ok) {
-        savedMemberIds.current = next;
+        if (reqId >= newestSavedReq.current) {
+          newestSavedReq.current = reqId;
+          savedMemberIds.current = next;
+        }
         if (isLatest()) setConflict(null);
         setMembersSaved(true);
         if (saveTimer.current) window.clearTimeout(saveTimer.current);
@@ -230,12 +234,16 @@ export default function GlobalListEditDrawer() {
   const moveConflictMember = async () => {
     if (!conflict || !tripId) return;
     setMoving(true);
+    const startReq = memberReqCounter.current;
     try {
       const other = (await tripApi.listDestinations(tripId)).find(d => d.id === conflict.destinationId);
       if (other) {
         await tripApi.updateDestination(tripId, other.id, { memberIds: other.memberIds.filter(id => id !== conflict.memberId) });
       }
-      if (await putMembers(conflict.pending)) setSelectedMemberIds(conflict.pending);
+      if (memberReqCounter.current !== startReq) return;
+      if (await putMembers(conflict.pending) && memberReqCounter.current === startReq + 1) {
+        setSelectedMemberIds(conflict.pending);
+      }
     } catch (err) {
       console.error('Failed to move member', err);
       showNotification({ title: 'Failed', message: 'Could not move that person', color: 'red' });
