@@ -53,11 +53,11 @@ function ItemRow({ item, notNeeded, actions }: { item: DashboardItem; notNeeded:
         checked={item.checked}
         onChange={e => actions.onCheck(item.id, e.currentTarget.checked)}
         label={
-          <span style={notNeeded ? { textDecoration: 'line-through', color: 'var(--mantine-color-dimmed)' } : undefined}>
+          <span style={{ overflowWrap: 'anywhere', ...(notNeeded ? { textDecoration: 'line-through', color: 'var(--mantine-color-dimmed)' } : {}) }}>
             {item.name}
           </span>
         }
-        style={{ flex: 1 }}
+        style={{ flex: 1, minWidth: 0 }}
       />
       <Menu position="bottom-end">
         <Menu.Target>
@@ -142,7 +142,34 @@ export default function PersonView({
     if (selectedListId && onSelectedGroupChange) onSelectedGroupChange(selectedListId);
   }, [selectedListId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (!selected) return <Text c="dimmed">No travelers on this list yet.</Text>;
+  const sharedActionsFor = (g: DestinationGroup): RowActions => ({
+    onHistory: it => onItemHistory(g.listId, it.id, it.name),
+    online,
+    onMove: (itemId, toListId) => onMoveSharedItem(g.listId, itemId, toListId),
+    onCheck: (itemId, checked) => onCheckItem(g.listId, null, itemId, checked),
+    onToggleNotNeeded: itemId => onToggleNotNeeded(g.listId, null, itemId),
+    moveTargets: isTrip ? groups.filter(o => o.listId !== g.listId).map(o => ({ listId: o.listId, name: o.name })) : [],
+  });
+  const peopleListIds = new Set(people.map(p => p.listId));
+  const memberlessGroups = groups.filter(g => !peopleListIds.has(g.listId));
+  const renderMemberless = () => memberlessGroups
+    .filter(g => selected || g.wholeFamilyItems.length > 0)
+    .map(g => (
+      <ItemSection
+        key={`${g.listId}:shared`}
+        title={`${g.name} — shared`}
+        color={g.color}
+        items={g.wholeFamilyItems}
+        notNeededIds={g.notNeededWhole}
+        onAdd={() => onOpenAddDrawer(g.listId, null)}
+        actions={sharedActionsFor(g)}
+      />
+    ));
+
+  if (!selected) {
+    if (!groups.some(g => g.wholeFamilyItems.length > 0)) return <Text c="dimmed">No travelers on this list yet.</Text>;
+    return <Stack gap="md" data-testid="person-view">{renderMemberless()}</Stack>;
+  }
 
   const group = groups[selected.groupIndex];
   const personalItems = group.userLists.find(l => l.userId === selected.userId)?.items ?? [];
@@ -194,7 +221,7 @@ export default function PersonView({
         role="toolbar"
         aria-label="Travelers"
         data-no-swipe
-        style={{ position: 'sticky', top: 0, zIndex: 2, background: 'var(--mantine-color-body)', overflowX: 'auto', padding: '8px 0' }}
+        style={{ position: 'sticky', top: 'var(--app-shell-header-offset, 0px)', zIndex: 2, background: 'var(--mantine-color-body)', overflowX: 'auto', padding: '8px 0' }}
       >
         <Group wrap="nowrap" gap="xs">
           {people.map(p => {
@@ -220,6 +247,7 @@ export default function PersonView({
       </div>
       <Stack gap="md" mt="sm">
         <ItemSection
+          key={`${selected.userId}:personal`}
           title={isTrip ? `${selected.userName} · ${group.name}` : selected.userName}
           color={group.color}
           items={personalItems}
@@ -228,6 +256,7 @@ export default function PersonView({
           actions={personalActions}
         />
         <ItemSection
+          key={`${group.listId}:shared`}
           title={isTrip ? `${group.name} shared` : 'Shared'}
           color={group.color}
           items={group.wholeFamilyItems}
@@ -235,6 +264,7 @@ export default function PersonView({
           onAdd={() => onOpenAddDrawer(group.listId, null)}
           actions={sharedActions}
         />
+        {renderMemberless()}
       </Stack>
     </div>
   );

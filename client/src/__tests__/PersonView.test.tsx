@@ -109,4 +109,36 @@ describe('PersonView', () => {
     expect(screen.getByRole('region', { name: 'Dad' })).toBeTruthy();
     expect(screen.getByRole('region', { name: 'Shared' })).toBeTruthy();
   });
+
+  it('keeps the chip row below the app header', () => {
+    renderWithMantine(<PersonView groups={groups()} isTrip currentUserId="dad" {...handlers()} />);
+    const bar = screen.getByRole('toolbar', { name: 'Travelers' });
+    expect(bar.style.top).toBe('var(--app-shell-header-offset, 0px)');
+  });
+
+  it('resets expanded packed state when switching person', async () => {
+    renderWithMantine(<PersonView groups={groups()} isTrip currentUserId="dad" {...handlers()} />);
+    await userEvent.click(screen.getByText('▸ 1 packed'));
+    expect(screen.getByRole('checkbox', { name: 'Camera' })).toBeTruthy();
+    await userEvent.click(screen.getByRole('button', { name: /^Mom/ }));
+    expect(screen.getByText('▸ 1 packed')).toBeTruthy();
+    expect(screen.queryByRole('checkbox', { name: 'Scarf' })).toBeNull();
+  });
+
+  it('shows shared items of a memberless group', async () => {
+    const h = handlers();
+    const gs = groups();
+    gs[1] = { ...gs[1], members: [], userLists: [], wholeFamilyItems: [{ ...item('g9', 'Board game'), whole_family: true }] };
+    renderWithMantine(<PersonView groups={gs} isTrip currentUserId="dad" {...h} />);
+    expect(screen.getByRole('region', { name: "Grandma's — shared" })).toBeTruthy();
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Board game' }));
+    expect(h.onCheckItem).toHaveBeenCalledWith('list-grandma', null, 'g9', true);
+  });
+
+  it('shows shared items when no group has members', () => {
+    const gs = groups().map(g => ({ ...g, members: [], userLists: [] }));
+    renderWithMantine(<PersonView groups={gs} isTrip currentUserId={null} {...handlers()} />);
+    expect(screen.queryByText('No travelers on this list yet.')).toBeNull();
+    expect(screen.getByRole('checkbox', { name: 'Sunscreen' })).toBeTruthy();
+  });
 });
