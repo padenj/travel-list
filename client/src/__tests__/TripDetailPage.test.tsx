@@ -21,6 +21,9 @@ vi.mock('../api/tripApi', () => ({
 vi.mock('../components/TripParticipantsPanel', () => ({
   TripParticipantsPanel: () => <div>participants panel</div>,
 }));
+vi.mock('../components/TripPackingSection', () => ({
+  default: () => <div>packing section</div>,
+}));
 vi.mock('../components/BookingCard', () => ({
   BookingCard: ({ elementId, bookings, onBookingsChanged }: { elementId: string; bookings: any[]; onBookingsChanged: () => void }) => (
     <div>

@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
-import { ActionIcon, Alert, Button, Group, Loader, Modal, Radio, SegmentedControl, Select, Stack, Text, TextInput } from '@mantine/core';
+import { ActionIcon, Button, Group, Loader, Modal, Radio, SegmentedControl, Select, Stack, Text, TextInput } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import { IconX } from '@tabler/icons-react';
 import { showNotification } from '@mantine/notifications';
 import { getFamily, getPackingList } from '../api';
 import { tripApi, ApiConflictError } from '../api/tripApi';
 import { useOnline } from '../utils/useOnline';
+import { describeMemberConflict, destinationErrorText } from '../utils/destinationErrors';
+import MemberConflictAlert from './MemberConflictAlert';
 import type { SplitResult, Trip } from '../types/trip';
 
 export interface SplitListDialogProps {
@@ -31,11 +33,6 @@ export function canLeaveWhoGoesWhere(people: Person[], destinationNames: string[
 
 const DEFAULT_DESTINATIONS = ['Destination 1', 'Destination 2'];
 const FALLBACK_ERROR = "Couldn't split the list. Please try again.";
-const ERROR_TEXT: Record<string, string> = {
-  unassigned_member: 'Everyone on the list needs a destination.',
-  member_in_two_destinations: 'Someone is in two destinations.',
-  list_already_destination: 'This list is already part of a trip.',
-};
 
 interface MoveConflict {
   memberId: string;
@@ -165,22 +162,11 @@ export default function SplitListDialog({ opened, onClose, familyId, listId, lis
       if (err instanceof ApiConflictError && err.body?.error === 'member_in_other_destination') {
         const { memberId, destinationId } = err.body;
         setConflictLoading(true);
-        let destinationName = 'another destination';
-        let onlyMember = false;
-        try {
-          const found = (await tripApi.listDestinations(tripId())).find(d => d.id === destinationId);
-          if (found) {
-            destinationName = found.name;
-            onlyMember = found.memberIds.filter(id => id !== memberId).length === 0;
-          }
-        } catch {
-          // Moving re-fetches the destination, so fall back to offering it.
-        }
+        const { destinationName, onlyMember } = await describeMemberConflict(tripId(), memberId, destinationId);
         setConflictLoading(false);
         setConflict({ memberId, destinationId, destinationName, onlyMember });
       } else {
-        const code = err instanceof ApiConflictError ? err.body?.error : (err as Error)?.message;
-        setSplitError(ERROR_TEXT[code] ?? FALLBACK_ERROR);
+        setSplitError(destinationErrorText(err, FALLBACK_ERROR));
       }
     } finally {
       setSubmitting(false);
@@ -331,33 +317,16 @@ export default function SplitListDialog({ opened, onClose, familyId, listId, lis
           </Radio.Group>
           <Text size="sm" c="dimmed">Personal items follow each person, and anything already packed stays checked.</Text>
           {conflictLoading && <Loader size="sm" aria-label="Checking destinations" />}
-          {conflict && (() => {
-            const who = people.find(p => p.id === conflict.memberId)?.name ?? 'Someone';
-            return (
-              <Alert color="yellow">
-                <Stack gap="xs">
-                  {conflict.onlyMember ? (
-                    <>
-                      <Text size="sm">
-                        {`${who} is the only person in ${conflict.destinationName} on this trip. Remove that destination on the trip page first, or choose a different destination for ${who}.`}
-                      </Text>
-                      <Group gap="xs">
-                        <Button size="compact-sm" variant="default" onClick={() => setConflict(null)}>Got it</Button>
-                      </Group>
-                    </>
-                  ) : (
-                    <>
-                      <Text size="sm">{`${who} is already in ${conflict.destinationName} on this trip. Move them here?`}</Text>
-                      <Group gap="xs">
-                        <Button size="compact-sm" onClick={moveAndRetry} loading={submitting}>Move</Button>
-                        <Button size="compact-sm" variant="default" onClick={() => setConflict(null)}>Cancel</Button>
-                      </Group>
-                    </>
-                  )}
-                </Stack>
-              </Alert>
-            );
-          })()}
+          {conflict && (
+            <MemberConflictAlert
+              who={people.find(p => p.id === conflict.memberId)?.name ?? 'Someone'}
+              destinationName={conflict.destinationName}
+              onlyMember={conflict.onlyMember}
+              moving={submitting}
+              onMove={moveAndRetry}
+              onDismiss={() => setConflict(null)}
+            />
+          )}
           {splitError && <Text c="red" size="sm">{splitError}</Text>}
           <Group justify="space-between">
             <Button variant="default" onClick={() => setStep(1)}>Back</Button>

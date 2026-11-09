@@ -1,0 +1,192 @@
+/* @vitest-environment jsdom */
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
+import { act, cleanup, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { renderWithMantine, setMobileViewport } from '../test-utils/renderWithMantine';
+
+vi.mock('../api', () => ({ getItemGroups: vi.fn(), getFamilyPackingLists: vi.fn() }));
+vi.mock('../api/tripApi', () => ({
+  tripApi: { createDestination: vi.fn(), updateDestination: vi.fn(), listDestinations: vi.fn() },
+  ApiConflictError: class ApiConflictError extends Error {
+    constructor(message: string, public body: any) { super(message); }
+  },
+}));
+vi.mock('@mantine/notifications', () => ({ showNotification: vi.fn() }));
+
+import { getFamilyPackingLists, getItemGroups } from '../api';
+import { tripApi, ApiConflictError } from '../api/tripApi';
+import { showNotification } from '@mantine/notifications';
+import AddDestinationDialog from '../components/AddDestinationDialog';
+
+const trip = { id: 't1', familyId: 'f1', name: 'Spring Break', startDate: '2027-03-01', endDate: '2027-03-08', createdAt: '', updatedAt: '' };
+const familyMembers = [{ id: 'dad', name: 'Dad' }, { id: 'ava', name: 'Ava' }, { id: 'leo', name: 'Leo' }];
+const grandma = { id: 'd1', tripId: 't1', name: "Grandma's", color: 'green', position: 0, packingListId: 'l1', memberIds: ['ava', 'leo'] };
+
+const conflict = (memberId: string, destinationId: string) =>
+  new (ApiConflictError as any)('member_in_other_destination', { error: 'member_in_other_destination', memberId, destinationId });
+
+describe('AddDestinationDialog', () => {
+  beforeEach(() => {
+    (getItemGroups as any).mockResolvedValue({ response: { ok: true }, data: { itemGroups: [{ id: 'g1', name: 'Beach' }] } });
+    (getFamilyPackingLists as any).mockResolvedValue({ response: { ok: true }, data: { lists: [] } });
+    (tripApi.createDestination as any).mockResolvedValue({});
+    (tripApi.updateDestination as any).mockResolvedValue({});
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.clearAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it('creates a destination with travelers and item groups', async () => {
+    const onSaved = vi.fn();
+    renderWithMantine(
+      <AddDestinationDialog opened onClose={vi.fn()} trip={trip} destinations={[]} familyMembers={familyMembers} editing={null} onSaved={onSaved} />
+    );
+    await userEvent.type(screen.getByLabelText(/Destination name/), 'Paris');
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Dad' }));
+    await userEvent.click(await screen.findByRole('checkbox', { name: 'Beach' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(tripApi.createDestination).toHaveBeenCalledWith('t1', {
+      name: 'Paris', memberIds: ['dad'], itemGroupIds: ['g1'], packingListId: undefined,
+    });
+  });
+
+  it('moves a traveler out of another destination after confirming', async () => {
+    const confirm = vi.fn(() => true);
+    vi.stubGlobal('confirm', confirm);
+    const onSaved = vi.fn();
+    renderWithMantine(
+      <AddDestinationDialog opened onClose={vi.fn()} trip={trip} destinations={[grandma]} familyMembers={familyMembers} editing={null} onSaved={onSaved} />
+    );
+    await userEvent.type(screen.getByLabelText(/Destination name/), 'Paris');
+    await userEvent.click(screen.getByRole('checkbox', { name: "Ava (at Grandma's)" }));
+    expect(confirm).toHaveBeenCalledWith("Move Ava from Grandma's?");
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(tripApi.updateDestination).toHaveBeenCalledWith('t1', 'd1', { memberIds: ['leo'] });
+    expect(tripApi.createDestination).toHaveBeenCalledWith('t1', expect.objectContaining({ memberIds: ['ava'] }));
+  });
+
+  it('keeps the traveler where they are when the move is not confirmed', async () => {
+    vi.stubGlobal('confirm', vi.fn(() => false));
+    renderWithMantine(
+      <AddDestinationDialog opened onClose={vi.fn()} trip={trip} destinations={[grandma]} familyMembers={familyMembers} editing={null} onSaved={vi.fn()} />
+    );
+    const ava = screen.getByRole('checkbox', { name: "Ava (at Grandma's)" }) as HTMLInputElement;
+    await userEvent.click(ava);
+    expect(ava.checked).toBe(false);
+  });
+
+  it('refuses to empty another destination', async () => {
+    vi.stubGlobal('confirm', vi.fn(() => true));
+    renderWithMantine(
+      <AddDestinationDialog opened onClose={vi.fn()} trip={trip} destinations={[{ ...grandma, memberIds: ['ava'] }]} familyMembers={familyMembers} editing={null} onSaved={vi.fn()} />
+    );
+    await userEvent.type(screen.getByLabelText(/Destination name/), 'Paris');
+    await userEvent.click(screen.getByRole('checkbox', { name: "Ava (at Grandma's)" }));
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(showNotification).toHaveBeenCalled());
+    expect(tripApi.updateDestination).not.toHaveBeenCalled();
+    expect(tripApi.createDestination).not.toHaveBeenCalled();
+  });
+
+  it('renames and changes travelers when editing', async () => {
+    const onSaved = vi.fn();
+    renderWithMantine(
+      <AddDestinationDialog opened onClose={vi.fn()} trip={trip} destinations={[grandma]} familyMembers={familyMembers} editing={grandma} onSaved={onSaved} />
+    );
+    const name = screen.getByLabelText(/Destination name/);
+    await userEvent.clear(name);
+    await userEvent.type(name, 'Nana');
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Leo' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(tripApi.updateDestination).toHaveBeenCalledWith('t1', 'd1', { name: 'Nana', memberIds: ['ava'] });
+  });
+
+  it('asks to move a traveler the server says is already elsewhere, then retries', async () => {
+    const stale = [{ ...grandma, memberIds: ['leo'] }];
+    const fresh = [{ ...grandma, memberIds: ['ava', 'leo'] }];
+    (tripApi.listDestinations as any).mockResolvedValue(fresh);
+    (tripApi.createDestination as any).mockRejectedValueOnce(conflict('ava', 'd1')).mockResolvedValueOnce({});
+    const onSaved = vi.fn();
+    renderWithMantine(
+      <AddDestinationDialog opened onClose={vi.fn()} trip={trip} destinations={stale} familyMembers={familyMembers} editing={null} onSaved={onSaved} />
+    );
+    await userEvent.type(screen.getByLabelText(/Destination name/), 'Paris');
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Ava' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(await screen.findByText("Ava is already in Grandma's on this trip. Move them here?")).toBeTruthy();
+    expect(onSaved).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole('button', { name: 'Move' }));
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(tripApi.updateDestination).toHaveBeenCalledWith('t1', 'd1', { memberIds: ['leo'] });
+    expect(tripApi.createDestination).toHaveBeenCalledTimes(2);
+  });
+
+  it('explains when the conflicting traveler is the only one at the other destination', async () => {
+    (tripApi.listDestinations as any).mockResolvedValue([{ ...grandma, memberIds: ['ava'] }]);
+    (tripApi.createDestination as any).mockRejectedValueOnce(conflict('ava', 'd1'));
+    renderWithMantine(
+      <AddDestinationDialog opened onClose={vi.fn()} trip={trip} destinations={[]} familyMembers={familyMembers} editing={null} onSaved={vi.fn()} />
+    );
+    await userEvent.type(screen.getByLabelText(/Destination name/), 'Paris');
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Ava' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(await screen.findByText(/Ava is the only person in Grandma's on this trip/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Move' })).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: 'Got it' }));
+    expect(screen.queryByText(/Ava is the only person/)).toBeNull();
+    expect(tripApi.updateDestination).not.toHaveBeenCalled();
+  });
+
+  it('shows a readable message for server error codes', async () => {
+    (tripApi.createDestination as any).mockRejectedValueOnce(new Error('invalid_members'));
+    renderWithMantine(
+      <AddDestinationDialog opened onClose={vi.fn()} trip={trip} destinations={[]} familyMembers={familyMembers} editing={null} onSaved={vi.fn()} />
+    );
+    await userEvent.type(screen.getByLabelText(/Destination name/), 'Paris');
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Dad' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(showNotification).toHaveBeenCalledWith(expect.objectContaining({
+      message: 'Only family members can be travelers.',
+    })));
+  });
+
+  it('opens full screen on phones', async () => {
+    setMobileViewport(true);
+    try {
+      renderWithMantine(
+        <AddDestinationDialog opened onClose={vi.fn()} trip={trip} destinations={[]} familyMembers={familyMembers} editing={null} onSaved={vi.fn()} />
+      );
+      const dialog = await screen.findByRole('dialog');
+      expect(dialog.closest('[data-full-screen]') || dialog.querySelector('[data-full-screen]') || dialog.hasAttribute('data-full-screen')).toBeTruthy();
+    } finally {
+      setMobileViewport(false);
+    }
+  });
+
+  it('disables saving while offline', async () => {
+    renderWithMantine(
+      <AddDestinationDialog opened onClose={vi.fn()} trip={trip} destinations={[]} familyMembers={familyMembers} editing={null} onSaved={vi.fn()} />
+    );
+    await userEvent.type(screen.getByLabelText(/Destination name/), 'Paris');
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Dad' }));
+    act(() => { window.dispatchEvent(new Event('offline')); });
+    const btn = await screen.findByRole('button', { name: 'Needs a connection' });
+    expect((btn as HTMLButtonElement).disabled).toBe(true);
+    act(() => { window.dispatchEvent(new Event('online')); });
+    expect(await screen.findByRole('button', { name: 'Save' })).toBeTruthy();
+  });
+});
