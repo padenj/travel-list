@@ -268,4 +268,166 @@ describe('moveSharedItem', () => {
     expect((await listRows(grandmaList)).map(r => r.id).sort()).toEqual([a, b].sort());
     expect(await listRows(parisList)).toHaveLength(1);
   });
+
+  const insertAudit = async (listId: string, pliId: string) => {
+    await seed.db.run(
+      `INSERT INTO packing_list_audit_log (packing_list_id, packing_list_item_id, action, applies_to_scope) VALUES (?, ?, 'checked', 'family')`,
+      [listId, pliId]
+    );
+  };
+  const auditFor = (pliId: string) =>
+    seed.db.all(`SELECT packing_list_id, packing_list_item_id FROM packing_list_audit_log WHERE packing_list_item_id = ?`, [pliId]);
+  const insertNotNeeded = (pliId: string) =>
+    seed.db.run(
+      `INSERT INTO packing_list_item_not_needed (id, packing_list_item_id, member_id, not_needed) VALUES (?, ?, NULL, 1)`,
+      [uuidv4(), pliId]
+    );
+  const sharedItem = (name: string) => createMasterItem(seed.familyId, name, { wholeFamily: true });
+
+  it('rejects moving to the same list', async () => {
+    const row = await addToList(parisList, await sharedItem('Same'));
+    await expect(moveSharedItem({ fromListId: parisList, pliId: row, toListId: parisList }))
+      .rejects.toThrow('not_same_trip');
+  });
+
+  it('rejects a source list that is not a destination', async () => {
+    const other = await createList(seed.familyId, 'Other', [seed.dad]);
+    const row = await addToList(other, await sharedItem('Loose'));
+    await expect(moveSharedItem({ fromListId: other, pliId: row, toListId: grandmaList }))
+      .rejects.toThrow('not_same_trip');
+  });
+
+  it('rejects unknown items and items from a different list', async () => {
+    const row = await addToList(grandmaList, await sharedItem('Elsewhere'));
+    await expect(moveSharedItem({ fromListId: parisList, pliId: 'nope', toListId: grandmaList }))
+      .rejects.toThrow('item_not_found');
+    await expect(moveSharedItem({ fromListId: parisList, pliId: row, toListId: grandmaList }))
+      .rejects.toThrow('item_not_found');
+  });
+
+  it('carries not-needed and template rows on a plain move', async () => {
+    const row = await addToList(parisList, await sharedItem('Tent'));
+    const templateId = uuidv4();
+    await seed.db.run(`INSERT INTO templates (id, family_id, name) VALUES (?, ?, 'Camp')`, [templateId, seed.familyId]);
+    await seed.db.run(
+      `INSERT INTO packing_list_item_templates (packing_list_item_id, template_id, created_at) VALUES (?, ?, datetime('now'))`,
+      [row, templateId]
+    );
+    await insertNotNeeded(row);
+    await moveSharedItem({ fromListId: parisList, pliId: row, toListId: grandmaList });
+    expect(await seed.db.all(`SELECT template_id FROM packing_list_item_templates WHERE packing_list_item_id = ?`, [row]))
+      .toEqual([{ template_id: templateId }]);
+    expect(await seed.db.all(`SELECT member_id, not_needed FROM packing_list_item_not_needed WHERE packing_list_item_id = ?`, [row]))
+      .toEqual([{ member_id: null, not_needed: 1 }]);
+  });
+
+  it('keeps a merged row checked when only the target was checked', async () => {
+    const item = await sharedItem('Hat');
+    const source = await addToList(parisList, item);
+    const target = await addToList(grandmaList, item);
+    await setCheck(target, null, true);
+    await moveSharedItem({ fromListId: parisList, pliId: source, toListId: grandmaList });
+    expect(await checksFor(target)).toEqual([{ member_id: null, checked: 1 }]);
+  });
+
+  it('moves item history with a plain move', async () => {
+    const row = await addToList(parisList, await sharedItem('Kite'));
+    await insertAudit(parisList, row);
+    await moveSharedItem({ fromListId: parisList, pliId: row, toListId: grandmaList });
+    expect(await auditFor(row)).toEqual([{ packing_list_id: grandmaList, packing_list_item_id: row }]);
+  });
+
+  it('re-points item history to the surviving row on a merge', async () => {
+    const item = await sharedItem('Towel');
+    const source = await addToList(parisList, item);
+    const target = await addToList(grandmaList, item);
+    await insertAudit(parisList, source);
+    await moveSharedItem({ fromListId: parisList, pliId: source, toListId: grandmaList });
+    expect(await auditFor(source)).toEqual([]);
+    expect(await auditFor(target)).toEqual([{ packing_list_id: grandmaList, packing_list_item_id: target }]);
+  });
+
+  it('carries a whole-family not-needed row over on merge unless the target has one', async () => {
+    const a = await sharedItem('Cooler');
+    const aSource = await addToList(parisList, a);
+    const aTarget = await addToList(grandmaList, a);
+    await insertNotNeeded(aSource);
+    const b = await sharedItem('Radio');
+    const bSource = await addToList(parisList, b);
+    const bTarget = await addToList(grandmaList, b);
+    await insertNotNeeded(bSource);
+    await insertNotNeeded(bTarget);
+    await moveAllSharedItems(parisList, grandmaList);
+    const count = (id: string) =>
+      seed.db.get(`SELECT COUNT(*) AS n FROM packing_list_item_not_needed WHERE packing_list_item_id = ? AND member_id IS NULL AND not_needed = 1`, [id]);
+    expect((await count(aTarget)).n).toBe(1);
+    expect((await count(bTarget)).n).toBe(1);
+  });
+
+  it('merges in bulk when the target already holds one of the items', async () => {
+    const dup = await sharedItem('Dup');
+    const dupSource = await addToList(parisList, dup);
+    const dupTarget = await addToList(grandmaList, dup);
+    const only = await addToList(parisList, await sharedItem('Only'));
+    expect(await moveAllSharedItems(parisList, grandmaList)).toBe(2);
+    expect(await listRows(parisList)).toEqual([]);
+    expect((await listRows(grandmaList)).map(r => r.id).sort()).toEqual([dupTarget, only].sort());
+    expect(await listRows(grandmaList)).not.toContainEqual(expect.objectContaining({ id: dupSource }));
+  });
+
+  it('rejects a bulk move between lists of different trips even with no items', async () => {
+    const otherTripId = uuidv4();
+    const trip = await seed.db.get(`SELECT * FROM trips WHERE id = ?`, [seed.tripId]);
+    const cols = Object.keys(trip);
+    await seed.db.run(
+      `INSERT INTO trips (${cols.join(',')}) VALUES (${cols.map(() => '?').join(',')})`,
+      cols.map(c => (c === 'id' ? otherTripId : trip[c]))
+    );
+    const otherSource = await createList(seed.familyId, 'Other trip', [seed.dad, seed.mom, seed.ava, seed.leo]);
+    await splitListIntoTrip({
+      tripId: otherTripId, tripName: 'Other', familyId: seed.familyId, sourceListId: otherSource,
+      destinations: [{ name: 'Rome', memberIds: [seed.dad, seed.mom] }, { name: 'Oslo', memberIds: [seed.ava, seed.leo] }],
+      sharedItemsDestinationIndex: 0,
+    });
+    await expect(moveAllSharedItems(parisList, otherSource)).rejects.toBeInstanceOf(MoveValidationError);
+  });
+
+  it('notifies once per bulk move, and not when nothing moved', async () => {
+    await addToList(parisList, await sharedItem('N1'));
+    await addToList(parisList, await sharedItem('N2'));
+    const sse = await import('../sse');
+    const spy = vi.spyOn(sse, 'broadcastEvent').mockImplementation(() => undefined as never);
+    try {
+      await moveAllSharedItems(parisList, grandmaList);
+      expect(spy).toHaveBeenCalledTimes(2);
+      spy.mockClear();
+      await moveAllSharedItems(parisList, grandmaList);
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('rolls back a bulk move that fails partway', async () => {
+    await addToList(parisList, await sharedItem('R1'));
+    await addToList(parisList, await sharedItem('R2'));
+    const before = await listRows(parisList);
+    const db = await getDb();
+    const originalRun = db.run.bind(db);
+    let moves = 0;
+    const spy = vi.spyOn(db, 'run').mockImplementation(((sql: string, ...args: unknown[]) => {
+      if (typeof sql === 'string' && sql.startsWith('UPDATE packing_list_items SET packing_list_id') && ++moves === 2) {
+        return Promise.reject(new Error('boom'));
+      }
+      return (originalRun as (...a: unknown[]) => Promise<unknown>)(sql, ...args);
+    }) as typeof db.run);
+    try {
+      await expect(moveAllSharedItems(parisList, grandmaList)).rejects.toThrow('boom');
+    } finally {
+      spy.mockRestore();
+    }
+    expect(moves).toBe(2);
+    expect(await listRows(parisList)).toEqual(before);
+    expect(await listRows(grandmaList)).toEqual([]);
+  });
 });
