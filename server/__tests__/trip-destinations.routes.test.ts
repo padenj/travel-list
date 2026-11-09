@@ -240,4 +240,30 @@ describe('trip destination routes', () => {
     const row = await seed.db.get(`SELECT id FROM trip_participants WHERE trip_id = ? AND user_id = ?`, [seed.tripId, q.id]);
     expect(row).toBeTruthy();
   });
+
+  it('soft-deletes the destination when its list is deleted via the list route', async () => {
+    const { res } = await splitSource();
+    const [paris, grandma] = res.body.destinations;
+    const del = await request(app).delete(`/api/packing-lists/${paris.packingListId}`).set('Authorization', auth);
+    expect(del.status).toBe(200);
+
+    const listed = await request(app).get(`/api/trips/${seed.tripId}/destinations`).set('Authorization', auth);
+    expect(listed.body).toHaveLength(1);
+    const dest = await seed.db.get(`SELECT deleted_at FROM trip_destinations WHERE id = ?`, [paris.id]);
+    expect(dest.deleted_at).toBeTruthy();
+    const link = await seed.db.get(`SELECT 1 AS x FROM trip_packing_lists WHERE packing_list_id = ?`, [paris.packingListId]);
+    expect(link).toBeFalsy();
+
+    const lists = await request(app).get(`/api/families/${seed.familyId}/packing-lists`).set('Authorization', auth);
+    const remaining = lists.body.lists.find((l: any) => l.id === grandma.packingListId);
+    expect(remaining.trip_destination.destinationCount).toBe(1);
+  });
+
+  it('still deletes an ordinary list', async () => {
+    const listId = await createList(seed.familyId, 'Plain', [seed.dad]);
+    const del = await request(app).delete(`/api/packing-lists/${listId}`).set('Authorization', auth);
+    expect(del.status).toBe(200);
+    const row = await seed.db.get(`SELECT deleted_at FROM packing_lists WHERE id = ?`, [listId]);
+    expect(row.deleted_at).toBeTruthy();
+  });
 });

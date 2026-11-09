@@ -14,6 +14,7 @@ import { UserRepository, FamilyRepository, CategoryRepository, ItemRepository, u
 import { ERROR_CODES, USER_ROLES, HTTP_STATUS } from './constants';
 import { User, LoginRequest, ChangePasswordRequest } from './server-types';
 import { v4 as uuidv4 } from 'uuid';
+import { withTransaction } from './utils/transaction';
 import { tripRouter } from './routes/tripRoutes';
 import { TripDestinationRepository, DestinationConflictError, DestinationValidationError } from './repositories/tripDestinationRepository';
 import { moveSharedItem, MoveValidationError } from './services/tripSplitService';
@@ -918,7 +919,21 @@ router.delete('/packing-lists/:id', authMiddleware, async (req: Request, res: Re
     const existing = await packingListRepo.findById(id);
     if (!existing) return res.status(404).json({ error: 'Packing list not found' });
     if (req.user?.role !== 'SystemAdmin' && req.user?.familyId !== existing.family_id) return res.status(403).json({ error: 'Forbidden' });
-    await packingListRepo.softDelete(id);
+    const db = await getDb();
+    const destination = await db.get(
+      `SELECT id, trip_id AS tripId FROM trip_destinations WHERE packing_list_id = ? AND deleted_at IS NULL`,
+      [id]
+    );
+    if (destination) {
+      await withTransaction(db, async () => {
+        const now = new Date().toISOString();
+        await db.run(`UPDATE packing_lists SET deleted_at = ? WHERE id = ?`, [now, id]);
+        await db.run(`UPDATE trip_destinations SET deleted_at = ?, updated_at = ? WHERE id = ?`, [now, now, destination.id]);
+        await db.run(`DELETE FROM trip_packing_lists WHERE trip_id = ? AND packing_list_id = ?`, [destination.tripId, id]);
+      });
+    } else {
+      await packingListRepo.softDelete(id);
+    }
     return res.json({ message: 'Packing list deleted' });
   } catch (error) {
     console.error('Error deleting packing list:', error);

@@ -225,5 +225,18 @@ if (!hasTestingLibs) {
       await u.click(splitButtons[0]);
       expect(screen.getByText('split dialog for list3')).toBeTruthy();
     });
+
+    it('disables Split with "Needs a connection" while offline', async () => {
+      Object.defineProperty(navigator, 'onLine', { configurable: true, get: () => false });
+      try {
+        renderPage();
+        await screen.findByText('Spring Break · Paris');
+        const btn = screen.getByRole('button', { name: 'Needs a connection' }) as HTMLButtonElement;
+        expect(btn.disabled).toBe(true);
+        expect(screen.queryByRole('button', { name: 'Split' })).toBeNull();
+      } finally {
+        delete (navigator as any).onLine;
+      }
+    });
   });
 }

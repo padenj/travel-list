@@ -93,7 +93,8 @@ export class TripDestinationRepository {
     const rows = await db.all(
       `SELECT d.packing_list_id AS listId, d.trip_id AS tripId, t.name AS tripName, d.id AS destinationId,
               d.name AS destinationName, d.position,
-              (SELECT COUNT(*) FROM trip_destinations d2 WHERE d2.trip_id = d.trip_id AND d2.deleted_at IS NULL) AS destinationCount
+              (SELECT COUNT(*) FROM trip_destinations d2 JOIN packing_lists pl2 ON pl2.id = d2.packing_list_id
+                WHERE d2.trip_id = d.trip_id AND d2.deleted_at IS NULL AND pl2.deleted_at IS NULL) AS destinationCount
        FROM trip_destinations d JOIN trips t ON t.id = d.trip_id
        WHERE t.family_id = ? AND d.deleted_at IS NULL AND t.deleted_at IS NULL`,
       [familyId]
