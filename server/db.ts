@@ -271,6 +271,20 @@ const SCHEMAS = {
       FOREIGN KEY (packing_list_id) REFERENCES packing_lists(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS trip_destinations (
+      id TEXT PRIMARY KEY,
+      trip_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      color TEXT,
+      position INTEGER NOT NULL DEFAULT 0,
+      packing_list_id TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      deleted_at TEXT,
+      FOREIGN KEY (trip_id) REFERENCES trips(id) ON DELETE CASCADE,
+      FOREIGN KEY (packing_list_id) REFERENCES packing_lists(id)
+    );
+
     CREATE TABLE IF NOT EXISTS trip_elements (
       id TEXT PRIMARY KEY,
       trip_id TEXT NOT NULL,
@@ -438,6 +452,8 @@ const SCHEMAS = {
     CREATE INDEX IF NOT EXISTS idx_trip_participants_user ON trip_participants(user_id);
     CREATE INDEX IF NOT EXISTS idx_trip_packing_lists_trip ON trip_packing_lists(trip_id);
     CREATE INDEX IF NOT EXISTS idx_trip_packing_lists_packing_list ON trip_packing_lists(packing_list_id);
+    CREATE INDEX IF NOT EXISTS idx_trip_destinations_trip ON trip_destinations(trip_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_trip_destinations_list_active ON trip_destinations(packing_list_id) WHERE deleted_at IS NULL;
     CREATE INDEX IF NOT EXISTS idx_trip_elements_trip ON trip_elements(trip_id);
     CREATE INDEX IF NOT EXISTS idx_trip_elements_type ON trip_elements(element_type);
     CREATE INDEX IF NOT EXISTS idx_trip_elements_deleted ON trip_elements(deleted_at);
