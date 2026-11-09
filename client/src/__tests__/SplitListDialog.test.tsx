@@ -180,6 +180,28 @@ describe('SplitListDialog', () => {
     expect(tripApi.updateDestination).not.toHaveBeenCalled();
   });
 
+  it('does not move the only member when the first destination lookup failed', async () => {
+    (tripApi.listTrips as any).mockResolvedValue([{ id: 't9', name: 'Existing' }]);
+    (tripApi.splitList as any).mockRejectedValueOnce(new ApiConflictError('c', { error: 'member_in_other_destination', memberId: 'ava', destinationId: 'd1' }));
+    (tripApi.listDestinations as any)
+      .mockRejectedValueOnce(new Error('network'))
+      .mockResolvedValueOnce([{ id: 'd1', name: 'Rome', memberIds: ['ava'] }]);
+    open();
+    await userEvent.click(await screen.findByText('Existing trip'));
+    await userEvent.click(screen.getByRole('textbox', { name: 'Trip' }));
+    await userEvent.click(await screen.findByText('Existing'));
+    await userEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await screen.findByRole('group', { name: 'Destination for Ava' });
+    await assign('Dad', 'Destination 1');
+    await assign('Mom', 'Destination 1');
+    await assign('Ava', 'Destination 2');
+    await userEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Split list' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Move' }));
+    expect(await screen.findByText(/Ava is the only person in Rome on this trip/)).toBeTruthy();
+    expect(tripApi.updateDestination).not.toHaveBeenCalled();
+  });
+
   it('updates the created trip when details change after a failed split', async () => {
     (tripApi.splitList as any).mockRejectedValueOnce(new Error('boom'));
     (tripApi.updateTrip as any).mockResolvedValue({ id: 'trip-1' });

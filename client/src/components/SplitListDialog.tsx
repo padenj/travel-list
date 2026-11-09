@@ -194,7 +194,13 @@ export default function SplitListDialog({ opened, onClose, familyId, listId, lis
       const destinations = await tripApi.listDestinations(tripId());
       const source = destinations.find(d => d.id === conflict.destinationId);
       if (!source) throw new Error('missing destination');
-      await tripApi.updateDestination(tripId(), source.id, { memberIds: source.memberIds.filter(id => id !== conflict.memberId) });
+      const remaining = source.memberIds.filter(id => id !== conflict.memberId);
+      if (remaining.length === 0) {
+        setConflict({ ...conflict, destinationName: source.name, onlyMember: true });
+        setSubmitting(false);
+        return;
+      }
+      await tripApi.updateDestination(tripId(), source.id, { memberIds: remaining });
     } catch {
       setConflict(null);
       setSplitError(FALLBACK_ERROR);
