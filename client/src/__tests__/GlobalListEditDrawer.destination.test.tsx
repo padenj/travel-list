@@ -124,4 +124,39 @@ describe('GlobalListEditDrawer destination members', () => {
     expect(box('Bob').disabled).toBe(true);
     expect(screen.getByText('Needs a connection')).toBeTruthy();
   });
+
+  const deferred = () => {
+    let resolve!: (v: any) => void;
+    const promise = new Promise(r => { resolve = r; });
+    return { promise, resolve };
+  };
+
+  it('a late success does not overwrite newer ticks', async () => {
+    const a = deferred();
+    (api.updatePackingList as any).mockReturnValueOnce(a.promise).mockResolvedValue(ok);
+    await setup([]);
+    await act(async () => { fireEvent.click(box('Ann')); });
+    await act(async () => { await new Promise(r => setTimeout(r, 600)); });
+    expect(api.updatePackingList).toHaveBeenCalledTimes(1);
+    await act(async () => { fireEvent.click(box('Bob')); });
+    await act(async () => { a.resolve(ok); });
+    expect(box('Ann').checked).toBe(true);
+    expect(box('Bob').checked).toBe(true);
+    await act(async () => { await new Promise(r => setTimeout(r, 600)); });
+    expect(api.updatePackingList).toHaveBeenCalledTimes(2);
+    expect(api.updatePackingList).toHaveBeenLastCalledWith('list-1', { memberIds: ['m1', 'm2'] });
+  });
+
+  it('a late failure after a newer tick does not roll back or alert', async () => {
+    const a = deferred();
+    (api.updatePackingList as any).mockReturnValueOnce(a.promise).mockResolvedValue(ok);
+    await setup([]);
+    await act(async () => { fireEvent.click(box('Ann')); });
+    await act(async () => { await new Promise(r => setTimeout(r, 600)); });
+    await act(async () => { fireEvent.click(box('Bob')); });
+    await act(async () => { a.resolve({ response: { ok: false, status: 500 }, data: {} }); });
+    expect(box('Ann').checked).toBe(true);
+    expect(box('Bob').checked).toBe(true);
+    expect(showNotification).not.toHaveBeenCalled();
+  });
 });

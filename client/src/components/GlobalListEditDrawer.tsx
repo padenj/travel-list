@@ -38,6 +38,7 @@ export default function GlobalListEditDrawer() {
   const isDestination = !!tripId;
   const saveTimer = useRef<number | null>(null);
   const debounceTimer = useRef<number | null>(null);
+  const memberReqCounter = useRef(0);
   const isEditingNameRef = useRef(false);
 
   const [showAddPane, setShowAddPane] = useState(false);
@@ -170,22 +171,29 @@ export default function GlobalListEditDrawer() {
 
   const putMembers = async (next: string[]): Promise<boolean> => {
     if (!listId) return false;
+    const reqId = ++memberReqCounter.current;
+    const isLatest = () => memberReqCounter.current === reqId;
     try {
       const res = await updatePackingList(listId, { memberIds: next });
       if (res.response && res.response.ok) {
         savedMemberIds.current = next;
-        setSelectedMemberIds(next);
-        setConflict(null);
+        if (isLatest()) setConflict(null);
         setMembersSaved(true);
         if (saveTimer.current) window.clearTimeout(saveTimer.current);
         saveTimer.current = window.setTimeout(() => setMembersSaved(false), 2500);
         return true;
       }
+      if (!isDestination) {
+        showNotification({ title: 'Failed', message: 'Could not save members', color: 'red' });
+        return false;
+      }
+      if (!isLatest()) return false;
       setSelectedMemberIds(savedMemberIds.current);
       const status = res.response?.status;
       if (status === 409 && res.data?.error === 'member_in_other_destination' && tripId) {
         const { memberId, destinationId } = res.data;
         const info = await describeMemberConflict(tripId, memberId, destinationId);
+        if (!isLatest()) return false;
         setConflict({ memberId, destinationId, ...info, pending: next });
       } else if (status === 400 && isDestination && next.length === 0) {
         showNotification({ title: 'Failed', message: 'A destination needs at least one person.', color: 'red' });
@@ -194,7 +202,10 @@ export default function GlobalListEditDrawer() {
       }
     } catch (err) {
       console.error('Failed to save members', err);
-      setSelectedMemberIds(savedMemberIds.current);
+      if (isDestination) {
+        if (!isLatest()) return false;
+        setSelectedMemberIds(savedMemberIds.current);
+      }
       showNotification({ title: 'Failed', message: 'Could not save members', color: 'red' });
     }
     return false;
@@ -203,6 +214,7 @@ export default function GlobalListEditDrawer() {
   const saveMemberSelection = (next: string[]) => {
     if (!listId) return;
     if (debounceTimer.current) window.clearTimeout(debounceTimer.current);
+    memberReqCounter.current++;
     setMembersSaved(false);
     setConflict(null);
     setSavingMembers(true);
