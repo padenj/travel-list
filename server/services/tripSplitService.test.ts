@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { v4 as uuidv4 } from 'uuid';
 import { closeDb, getDb } from '../db';
-import { splitListIntoTrip, moveSharedItem, moveAllSharedItems, MoveValidationError } from './tripSplitService';
+import { splitListIntoTrip, moveSharedItem, moveAllSharedItems, MoveValidationError, moveMembersTx, pullMembersIntoDestinationTx } from './tripSplitService';
 import { DestinationValidationError, TripDestinationRepository } from '../repositories/tripDestinationRepository';
 import {
   seedFamilyTrip, createList, createMasterItem, addToList, setCheck, listRows, checksFor,
@@ -429,5 +429,124 @@ describe('moveSharedItem', () => {
     expect(moves).toBe(2);
     expect(await listRows(parisList)).toEqual(before);
     expect(await listRows(grandmaList)).toEqual([]);
+  });
+});
+
+describe('moveMembersTx', () => {
+  let seed: Awaited<ReturnType<typeof seedFamilyTrip>>;
+  let from: string;
+  let to: string;
+
+  beforeEach(async () => {
+    seed = await seedFamilyTrip();
+    from = await createList(seed.familyId, 'From', [seed.dad, seed.mom, seed.ava]);
+    to = await createList(seed.familyId, 'To', [seed.leo]);
+  });
+
+  afterEach(async () => {
+    await closeDb();
+  });
+
+  const membersOf = async (listId: string) =>
+    (await seed.db.all(`SELECT member_id FROM packing_list_members WHERE packing_list_id = ? ORDER BY member_id`, [listId])).map((r: any) => r.member_id);
+
+  it('moves a row whose owners all move, with its checks and history', async () => {
+    const teddy = await createMasterItem(seed.familyId, 'Teddy', { memberIds: [seed.ava] });
+    const row = await addToList(from, teddy);
+    await setCheck(row, seed.ava, true);
+    await seed.db.run(
+      `INSERT INTO packing_list_audit_log (packing_list_id, packing_list_item_id, action, applies_to_scope) VALUES (?, ?, 'check', 'member')`,
+      [from, row]
+    );
+
+    const db = await getDb();
+    await moveMembersTx(db, { fromListId: from, toListId: to, memberIds: [seed.ava] });
+
+    expect((await listRows(to)).map(r => r.id)).toEqual([row]);
+    expect(await listRows(from)).toEqual([]);
+    expect(await checksFor(row)).toEqual([{ member_id: seed.ava, checked: 1 }]);
+    const audit = await seed.db.get(`SELECT packing_list_id FROM packing_list_audit_log WHERE packing_list_item_id = ?`, [row]);
+    expect(audit.packing_list_id).toBe(to);
+    expect(await membersOf(from)).toEqual([seed.dad, seed.mom].sort());
+    expect(await membersOf(to)).toEqual([seed.ava, seed.leo].sort());
+  });
+
+  it('copies a row for the movers when some owners stay, taking only their checks', async () => {
+    const toothbrush = await createMasterItem(seed.familyId, 'Toothbrush', { memberIds: [seed.dad, seed.ava] });
+    const row = await addToList(from, toothbrush);
+    await setCheck(row, seed.dad, true);
+    await setCheck(row, seed.ava, true);
+
+    const db = await getDb();
+    await moveMembersTx(db, { fromListId: from, toListId: to, memberIds: [seed.ava] });
+
+    expect((await listRows(from)).map(r => r.id)).toEqual([row]);
+    const [copy] = await listRows(to);
+    expect(copy.item_id).toBe(toothbrush);
+    expect(await checksFor(row)).toEqual([{ member_id: seed.dad, checked: 1 }]);
+    expect(await checksFor(copy.id)).toEqual([{ member_id: seed.ava, checked: 1 }]);
+  });
+
+  it('leaves whole-family rows and rows of people who stay', async () => {
+    const sunscreen = await createMasterItem(seed.familyId, 'Sunscreen', { wholeFamily: true });
+    const passport = await createMasterItem(seed.familyId, 'Passport', { memberIds: [seed.dad] });
+    const shared = await addToList(from, sunscreen);
+    const own = await addToList(from, passport);
+
+    const db = await getDb();
+    await moveMembersTx(db, { fromListId: from, toListId: to, memberIds: [seed.ava] });
+
+    expect((await listRows(from)).map(r => r.id).sort()).toEqual([shared, own].sort());
+    expect(await listRows(to)).toEqual([]);
+  });
+
+  it('merges into a row the target already has for the same item', async () => {
+    const toothbrush = await createMasterItem(seed.familyId, 'Toothbrush', { memberIds: [seed.ava, seed.leo] });
+    const source = await addToList(from, toothbrush);
+    const target = await addToList(to, toothbrush);
+    await setCheck(source, seed.ava, true);
+
+    const db = await getDb();
+    await moveMembersTx(db, { fromListId: from, toListId: to, memberIds: [seed.ava] });
+
+    expect(await listRows(from)).toEqual([]);
+    expect((await listRows(to)).map(r => r.id)).toEqual([target]);
+    expect(await checksFor(target)).toEqual([{ member_id: seed.ava, checked: 1 }]);
+  });
+});
+
+describe('pullMembersIntoDestinationTx', () => {
+  let seed: Awaited<ReturnType<typeof seedFamilyTrip>>;
+  const repo = new TripDestinationRepository();
+
+  beforeEach(async () => {
+    seed = await seedFamilyTrip();
+  });
+
+  afterEach(async () => {
+    await closeDb();
+  });
+
+  it('pulls people and their items from other destinations', async () => {
+    const paris = await repo.create({ tripId: seed.tripId, familyId: seed.familyId, name: 'Paris', memberIds: [seed.dad, seed.ava] });
+    const rome = await repo.create({ tripId: seed.tripId, familyId: seed.familyId, name: 'Rome', memberIds: [seed.mom] });
+    const teddy = await createMasterItem(seed.familyId, 'Teddy', { memberIds: [seed.ava] });
+    const row = await addToList(paris.packingListId, teddy);
+
+    const db = await getDb();
+    const touched = await pullMembersIntoDestinationTx(db, { tripId: seed.tripId, destinationId: rome.id, memberIds: [seed.mom, seed.ava] });
+
+    expect(touched).toEqual([paris.packingListId]);
+    expect((await listRows(rome.packingListId)).map(r => r.id)).toEqual([row]);
+    expect((await repo.getById(paris.id))!.memberIds).toEqual([seed.dad]);
+  });
+
+  it('refuses to leave another destination empty', async () => {
+    const paris = await repo.create({ tripId: seed.tripId, familyId: seed.familyId, name: 'Paris', memberIds: [seed.dad] });
+    const rome = await repo.create({ tripId: seed.tripId, familyId: seed.familyId, name: 'Rome', memberIds: [seed.mom] });
+    const db = await getDb();
+    await expect(pullMembersIntoDestinationTx(db, { tripId: seed.tripId, destinationId: rome.id, memberIds: [seed.dad] }))
+      .rejects.toThrow('would_empty_destination');
+    expect((await repo.getById(paris.id))!.memberIds).toEqual([seed.dad]);
   });
 });

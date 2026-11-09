@@ -41,7 +41,6 @@ describe('TripDestinationRepository', () => {
       familyId: seed.familyId,
       name: 'Paris',
       memberIds: [seed.dad, seed.mom],
-      listName: 'Spring Break – Paris',
     });
 
   it('creates a destination with a new list, members, trip link and participants', async () => {
@@ -53,7 +52,7 @@ describe('TripDestinationRepository', () => {
     expect(dest.memberIds.sort()).toEqual([seed.dad, seed.mom].sort());
 
     const list = await seed.db.get(`SELECT name FROM packing_lists WHERE id = ?`, [dest.packingListId]);
-    expect(list.name).toBe('Spring Break – Paris');
+    expect(list.name).toBe('Spring Break · Paris');
     const link = await seed.db.get(
       `SELECT 1 AS ok FROM trip_packing_lists WHERE trip_id = ? AND packing_list_id = ?`,
       [seed.tripId, dest.packingListId]
@@ -70,7 +69,6 @@ describe('TripDestinationRepository', () => {
       familyId: seed.familyId,
       name: "Grandma's",
       memberIds: [seed.ava],
-      listName: "Spring Break – Grandma's",
     });
     expect(second.color).toBe('green');
     expect(second.position).toBe(1);
@@ -79,9 +77,9 @@ describe('TripDestinationRepository', () => {
 
   it('does not reuse the color of an active destination after a delete', async () => {
     const a = await createParis();
-    const b = await repo.create({ tripId: seed.tripId, familyId: seed.familyId, name: 'B', memberIds: [seed.ava], listName: 'B' });
+    const b = await repo.create({ tripId: seed.tripId, familyId: seed.familyId, name: 'B', memberIds: [seed.ava] });
     await repo.softDelete(a.id);
-    const c = await repo.create({ tripId: seed.tripId, familyId: seed.familyId, name: 'C', memberIds: [seed.leo], listName: 'C' });
+    const c = await repo.create({ tripId: seed.tripId, familyId: seed.familyId, name: 'C', memberIds: [seed.leo] });
     expect(a.color).toBe('blue');
     expect(b.color).toBe('green');
     expect(c.color).toBe('blue');
@@ -94,7 +92,6 @@ describe('TripDestinationRepository', () => {
       familyId: seed.familyId,
       name: "Grandma's",
       memberIds: [seed.ava, seed.dad],
-      listName: 'x',
     });
     await expect(attempt).rejects.toBeInstanceOf(DestinationConflictError);
     await attempt.catch((err: DestinationConflictError) => {
@@ -105,23 +102,74 @@ describe('TripDestinationRepository', () => {
 
   it('rejects members from another family', async () => {
     await expect(
-      repo.create({ tripId: seed.tripId, familyId: seed.familyId, name: 'X', memberIds: ['not-a-user'], listName: 'x' })
+      repo.create({ tripId: seed.tripId, familyId: seed.familyId, name: 'X', memberIds: ['not-a-user'] })
     ).rejects.toBeInstanceOf(DestinationValidationError);
   });
 
-  it('adopts an existing list and keeps its name', async () => {
+  it('adopts an existing list and renames it to the label', async () => {
     const listId = await createList(seed.familyId, 'Our big list', [seed.dad]);
     const dest = await repo.create({
       tripId: seed.tripId,
       familyId: seed.familyId,
       name: 'Paris',
       memberIds: [seed.dad, seed.mom],
-      listName: 'ignored',
       packingListId: listId,
     });
     expect(dest.packingListId).toBe(listId);
     const list = await seed.db.get(`SELECT name FROM packing_lists WHERE id = ?`, [listId]);
-    expect(list.name).toBe('Our big list');
+    expect(list.name).toBe('Spring Break · Paris');
+  });
+
+  it('names the list after the trip alone when the destination has the trip name', async () => {
+    const dest = await repo.create({ tripId: seed.tripId, familyId: seed.familyId, name: ' spring break ', memberIds: [seed.dad] });
+    const list = await seed.db.get(`SELECT name FROM packing_lists WHERE id = ?`, [dest.packingListId]);
+    expect(list.name).toBe('Spring Break');
+  });
+
+  it('allows a destination with no members only when asked', async () => {
+    await expect(repo.create({ tripId: seed.tripId, familyId: seed.familyId, name: 'X', memberIds: [] }))
+      .rejects.toThrow('members_required');
+    const db = await getDb();
+    const id = await repo.insertDestinationTx(db, { tripId: seed.tripId, familyId: seed.familyId, name: 'X', memberIds: [], allowNoMembers: true });
+    expect((await repo.getById(id))!.memberIds).toEqual([]);
+  });
+
+  it('adopts a list from a one-destination trip and retires that trip', async () => {
+    const trips = new TripRepository();
+    const shell = await trips.createTrip(seed.familyId, { name: 'Beach' });
+    const db = await getDb();
+    const shellDestination = await repo.insertDestinationTx(db, { tripId: shell.id, familyId: seed.familyId, name: 'Beach', memberIds: [seed.dad] });
+    const listId = (await repo.getById(shellDestination))!.packingListId;
+
+    const adopted = await repo.create({ tripId: seed.tripId, familyId: seed.familyId, name: 'Beach', memberIds: [seed.dad], packingListId: listId });
+
+    expect(adopted.packingListId).toBe(listId);
+    expect(await repo.getById(shellDestination)).toBeNull();
+    expect(await trips.getTripById(shell.id)).toBeUndefined();
+    const oldLink = await seed.db.get(`SELECT 1 AS x FROM trip_packing_lists WHERE trip_id = ? AND packing_list_id = ?`, [shell.id, listId]);
+    expect(oldLink).toBeUndefined();
+    expect((await seed.db.get(`SELECT name FROM packing_lists WHERE id = ?`, [listId])).name).toBe('Spring Break · Beach');
+  });
+
+  it('refuses to adopt a list from a trip with several destinations', async () => {
+    const trips = new TripRepository();
+    const other = await trips.createTrip(seed.familyId, { name: 'Summer' });
+    const a = await repo.create({ tripId: other.id, familyId: seed.familyId, name: 'A', memberIds: [seed.dad] });
+    await repo.create({ tripId: other.id, familyId: seed.familyId, name: 'B', memberIds: [seed.mom] });
+    await expect(
+      repo.create({ tripId: seed.tripId, familyId: seed.familyId, name: 'A', memberIds: [seed.dad], packingListId: a.packingListId })
+    ).rejects.toThrow('list_already_destination');
+  });
+
+  it('syncListNamesTx rewrites only the names that changed', async () => {
+    const paris = await createParis();
+    const rome = await repo.create({ tripId: seed.tripId, familyId: seed.familyId, name: 'Rome', memberIds: [seed.ava] });
+    await seed.db.run(`UPDATE trips SET name = 'Easter' WHERE id = ?`, [seed.tripId]);
+    await seed.db.run(`UPDATE packing_lists SET name = 'Easter · Rome' WHERE id = ?`, [rome.packingListId]);
+    const db = await getDb();
+    const changed = await repo.syncListNamesTx(db, seed.tripId);
+    expect(changed).toEqual([paris.packingListId]);
+    expect((await seed.db.get(`SELECT name FROM packing_lists WHERE id = ?`, [paris.packingListId])).name).toBe('Easter · Paris');
   });
 
   it('does not duplicate existing trip participants', async () => {
@@ -159,6 +207,9 @@ describe('TripDestinationRepository', () => {
       destinationName: 'Paris',
       position: 0,
       destinationCount: 1,
+      color: 'blue',
+      tripStartDate: '2027-03-01',
+      tripEndDate: '2027-03-08',
     });
   });
 

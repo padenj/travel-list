@@ -679,7 +679,6 @@ tripRouter.post('/:tripId/destinations', authMiddleware, tripAccessMiddleware, a
       familyId: req.trip!.family_id,
       name: name.trim(),
       memberIds,
-      listName: `${req.trip!.name} – ${name.trim()}`,
       packingListId: typeof packingListId === 'string' && packingListId ? packingListId : undefined,
     });
     if (groupIds.length > 0) {

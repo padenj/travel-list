@@ -8,8 +8,8 @@ export interface Trip {
   name: string;
   description?: string | null;
   tripType?: string | null;
-  startDate: string;
-  endDate: string;
+  startDate: string | null;
+  endDate: string | null;
   status?: string | null;
   createdAt: string;
   updatedAt: string;
@@ -23,8 +23,8 @@ export class TripRepository {
     name: string;
     description?: string;
     tripType?: string;
-    startDate: string;
-    endDate: string;
+    startDate?: string | null;
+    endDate?: string | null;
     status?: string;
   }): Promise<Trip> {
     const id = uuidv4();
@@ -32,7 +32,7 @@ export class TripRepository {
     await db.run(
       `INSERT INTO trips (id, family_id, name, description, trip_type, start_date, end_date, status, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
-      [id, familyId, trip.name, trip.description || null, trip.tripType || null, trip.startDate, trip.endDate, trip.status || null]
+      [id, familyId, trip.name, trip.description || null, trip.tripType || null, trip.startDate || null, trip.endDate || null, trip.status || null]
     );
     return this.getTripById(id) as Promise<Trip>;
   }

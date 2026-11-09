@@ -2,6 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import type { Database } from 'sqlite';
 import { getDb } from '../db';
 import { withTransaction } from '../utils/transaction';
+import { destinationListLabel } from '../utils/destinationLabel';
 
 export const DESTINATION_COLORS = ['blue', 'green', 'orange', 'grape', 'teal', 'red'];
 
@@ -28,6 +29,9 @@ export interface ListTripSummary {
   destinationName: string;
   position: number;
   destinationCount: number;
+  color: string | null;
+  tripStartDate: string | null;
+  tripEndDate: string | null;
 }
 
 export interface InsertDestinationInput {
@@ -35,8 +39,9 @@ export interface InsertDestinationInput {
   familyId: string;
   name: string;
   memberIds: string[];
-  listName: string;
   packingListId?: string;
+  /** Lets a destination start with no travelers (split targets, shell trips, copies). */
+  allowNoMembers?: boolean;
 }
 
 export class DestinationConflictError extends Error {
@@ -92,7 +97,7 @@ export class TripDestinationRepository {
     const db = await getDb();
     const rows = await db.all(
       `SELECT d.packing_list_id AS listId, d.trip_id AS tripId, t.name AS tripName, d.id AS destinationId,
-              d.name AS destinationName, d.position,
+              d.name AS destinationName, d.position, d.color, t.start_date AS tripStartDate, t.end_date AS tripEndDate,
               (SELECT COUNT(*) FROM trip_destinations d2 JOIN packing_lists pl2 ON pl2.id = d2.packing_list_id
                 WHERE d2.trip_id = d.trip_id AND d2.deleted_at IS NULL AND pl2.deleted_at IS NULL) AS destinationCount
        FROM trip_destinations d JOIN trips t ON t.id = d.trip_id
@@ -134,7 +139,9 @@ export class TripDestinationRepository {
 
   // Caller owns the transaction.
   async insertDestinationTx(db: Database, input: InsertDestinationInput): Promise<string> {
-    await this.assertFamilyMembers(db, input.familyId, input.memberIds);
+    if (!(input.allowNoMembers && input.memberIds.length === 0)) {
+      await this.assertFamilyMembers(db, input.familyId, input.memberIds);
+    }
     const now = new Date().toISOString();
     let listId = input.packingListId;
     if (listId) {
@@ -143,16 +150,13 @@ export class TripDestinationRepository {
         [listId, input.familyId]
       );
       if (!list) throw new DestinationValidationError('list_not_found');
-      const taken = await db.get(
-        `SELECT id FROM trip_destinations WHERE packing_list_id = ? AND deleted_at IS NULL`,
-        [listId]
-      );
-      if (taken) throw new DestinationValidationError('list_already_destination');
+      await this.releaseFromLoneTripTx(db, listId, input.tripId, now);
     } else {
       listId = uuidv4();
+      const trip = await db.get(`SELECT name FROM trips WHERE id = ?`, [input.tripId]);
       await db.run(
         `INSERT INTO packing_lists (id, family_id, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
-        [listId, input.familyId, input.listName, now, now]
+        [listId, input.familyId, destinationListLabel(trip?.name, input.name), now, now]
       );
     }
     await this.writeMembersTx(db, listId, input.memberIds);
@@ -176,7 +180,28 @@ export class TripDestinationRepository {
       [id, input.tripId, input.name, color, stats.maxPosition + 1, listId, now, now]
     );
     await this.ensureParticipantsTx(db, input.tripId, input.memberIds);
+    await this.syncListNamesTx(db, input.tripId);
     return id;
+  }
+
+  /** Rewrites each destination list's name to its label. Returns the ids of lists whose name changed. */
+  async syncListNamesTx(db: Database, tripId: string): Promise<string[]> {
+    const trip = await db.get(`SELECT name FROM trips WHERE id = ?`, [tripId]);
+    const rows = await db.all(
+      `SELECT d.name, pl.id AS listId, pl.name AS listName
+       FROM trip_destinations d JOIN packing_lists pl ON pl.id = d.packing_list_id
+       WHERE d.trip_id = ? AND d.deleted_at IS NULL AND pl.deleted_at IS NULL`,
+      [tripId]
+    );
+    const changed: string[] = [];
+    const now = new Date().toISOString();
+    for (const row of rows as { name: string; listId: string; listName: string }[]) {
+      const label = destinationListLabel(trip?.name, row.name);
+      if (label === row.listName) continue;
+      await db.run(`UPDATE packing_lists SET name = ?, updated_at = ? WHERE id = ?`, [label, now, row.listId]);
+      changed.push(row.listId);
+    }
+    return changed;
   }
 
   async update(
@@ -188,34 +213,77 @@ export class TripDestinationRepository {
     const existing = await this.getById(id);
     if (!existing) throw new DestinationValidationError('not_found');
     await withTransaction(db, async () => {
-      if (updates.memberIds) {
-        const conflict = await this.findConflict(db, existing.tripId, updates.memberIds, id);
-        if (conflict) throw conflict;
-        await this.assertFamilyMembers(db, familyId, updates.memberIds);
+      if (typeof updates.name === 'string') {
+        await db.run(`UPDATE trip_destinations SET name = ?, updated_at = ? WHERE id = ?`, [updates.name, new Date().toISOString(), id]);
+        await this.syncListNamesTx(db, existing.tripId);
       }
-      const fields: string[] = [];
-      const values: unknown[] = [];
-      if (typeof updates.name === 'string') { fields.push('name = ?'); values.push(updates.name); }
-      if (typeof updates.color === 'string') { fields.push('color = ?'); values.push(updates.color); }
-      if (typeof updates.position === 'number') { fields.push('position = ?'); values.push(updates.position); }
-      if (fields.length > 0) {
-        await db.run(
-          `UPDATE trip_destinations SET ${fields.join(', ')}, updated_at = ? WHERE id = ?`,
-          [...values, new Date().toISOString(), id]
-        );
-      }
-      if (updates.memberIds) {
-        await this.writeMembersTx(db, existing.packingListId, updates.memberIds);
-        await this.ensureParticipantsTx(db, existing.tripId, updates.memberIds);
-      }
+      await this.updateTx(db, existing, familyId, updates);
     });
     return (await this.getById(id))!;
+  }
+
+  // Caller owns the transaction. Name changes go through tripListService.renameDestinationTx.
+  async updateTx(
+    db: Database,
+    existing: TripDestination,
+    familyId: string,
+    updates: { color?: string; position?: number; memberIds?: string[] }
+  ): Promise<void> {
+    if (updates.memberIds) {
+      const conflict = await this.findConflict(db, existing.tripId, updates.memberIds, existing.id);
+      if (conflict) throw conflict;
+      await this.assertFamilyMembers(db, familyId, updates.memberIds);
+    }
+    const fields: string[] = [];
+    const values: unknown[] = [];
+    if (typeof updates.color === 'string') { fields.push('color = ?'); values.push(updates.color); }
+    if (typeof updates.position === 'number') { fields.push('position = ?'); values.push(updates.position); }
+    if (fields.length > 0) {
+      await db.run(
+        `UPDATE trip_destinations SET ${fields.join(', ')}, updated_at = ? WHERE id = ?`,
+        [...values, new Date().toISOString(), existing.id]
+      );
+    }
+    if (updates.memberIds) {
+      await this.writeMembersTx(db, existing.packingListId, updates.memberIds);
+      await this.ensureParticipantsTx(db, existing.tripId, updates.memberIds);
+    }
   }
 
   async softDelete(id: string): Promise<void> {
     const db = await getDb();
     const now = new Date().toISOString();
     await db.run(`UPDATE trip_destinations SET deleted_at = ?, updated_at = ? WHERE id = ?`, [now, now, id]);
+  }
+
+  async ensureParticipantsTx(db: Database, tripId: string, memberIds: string[]): Promise<void> {
+    for (const userId of memberIds) {
+      const existing = await db.get(`SELECT id FROM trip_participants WHERE trip_id = ? AND user_id = ?`, [tripId, userId]);
+      if (existing) continue;
+      const user = await db.get(`SELECT name, username FROM users WHERE id = ?`, [userId]);
+      await db.run(
+        `INSERT INTO trip_participants (id, trip_id, user_id, display_name, created_at) VALUES (?, ?, ?, ?, datetime('now'))`,
+        [uuidv4(), tripId, userId, user?.name || user?.username || 'Traveler']
+      );
+    }
+  }
+
+  // A list may join another trip only if it is the sole destination of its current trip; that trip is retired.
+  private async releaseFromLoneTripTx(db: Database, listId: string, tripId: string, now: string): Promise<void> {
+    const taken = await db.get(
+      `SELECT d.id, d.trip_id AS tripId FROM trip_destinations d JOIN trips t ON t.id = d.trip_id
+       WHERE d.packing_list_id = ? AND d.deleted_at IS NULL AND t.deleted_at IS NULL`,
+      [listId]
+    );
+    if (!taken) return;
+    const { n } = await db.get(
+      `SELECT COUNT(*) AS n FROM trip_destinations WHERE trip_id = ? AND deleted_at IS NULL`,
+      [taken.tripId]
+    );
+    if (taken.tripId === tripId || n !== 1) throw new DestinationValidationError('list_already_destination');
+    await db.run(`UPDATE trip_destinations SET deleted_at = ?, updated_at = ? WHERE id = ?`, [now, now, taken.id]);
+    await db.run(`UPDATE trips SET deleted_at = ?, updated_at = ? WHERE id = ?`, [now, now, taken.tripId]);
+    await db.run(`DELETE FROM trip_packing_lists WHERE trip_id = ? AND packing_list_id = ?`, [taken.tripId, listId]);
   }
 
   private async withMembers(db: Database, row: any): Promise<TripDestination> {
@@ -238,18 +306,6 @@ export class TripDestinationRepository {
     await db.run(`DELETE FROM packing_list_members WHERE packing_list_id = ?`, [listId]);
     for (const memberId of memberIds) {
       await db.run(`INSERT OR IGNORE INTO packing_list_members (packing_list_id, member_id) VALUES (?, ?)`, [listId, memberId]);
-    }
-  }
-
-  private async ensureParticipantsTx(db: Database, tripId: string, memberIds: string[]): Promise<void> {
-    for (const userId of memberIds) {
-      const existing = await db.get(`SELECT id FROM trip_participants WHERE trip_id = ? AND user_id = ?`, [tripId, userId]);
-      if (existing) continue;
-      const user = await db.get(`SELECT name, username FROM users WHERE id = ?`, [userId]);
-      await db.run(
-        `INSERT INTO trip_participants (id, trip_id, user_id, display_name, created_at) VALUES (?, ?, ?, ?, datetime('now'))`,
-        [uuidv4(), tripId, userId, user?.name || user?.username || 'Traveler']
-      );
     }
   }
 }
