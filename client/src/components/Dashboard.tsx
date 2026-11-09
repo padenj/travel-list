@@ -10,7 +10,7 @@ import PersonView from './PersonView';
 import DestinationColumns from './DestinationColumns';
 import DashboardViewToggle, { useDashboardViewMode } from './DashboardViewToggle';
 import NotesDestinationPicker from './NotesDestinationPicker';
-import SplitListDialog from './SplitListDialog';
+import ManageDestinationsDrawer from './ManageDestinationsDrawer';
 import { useActivePackingList } from '../contexts/ActivePackingListContext';
 import { useListEditDrawer } from '../contexts/ListEditDrawerContext';
 import { useImpersonation } from '../contexts/ImpersonationContext';
@@ -38,7 +38,7 @@ export default function Dashboard(): React.ReactElement {
   const [categories, setCategories] = useState<CategoryInfo[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [addTarget, setAddTarget] = useState<AddTarget | null>(null);
-  const [splitOpen, setSplitOpen] = useState(false);
+  const [destinationsOpen, setDestinationsOpen] = useState(false);
   const [auditRefreshKey, setAuditRefreshKey] = useState(0);
   const [itemAudit, setItemAudit] = useState<{ listId: string; pliId: string; name: string } | null>(null);
   const [itemAuditOpened, setItemAuditOpened] = useState(false);
@@ -237,6 +237,7 @@ export default function Dashboard(): React.ReactElement {
           familyMembers,
           currentUserId: profileUserId,
           destination,
+          tripName: trip?.tripName ?? null,
         });
         const nextGroups = trip
           ? destinations.filter(d => listDataById.has(d.packingListId)).map(d => build(d.packingListId, d))
@@ -385,7 +386,8 @@ export default function Dashboard(): React.ReactElement {
     if (!keepOpen) setAddTarget(null);
   }, [addTarget, activeListId]);
 
-  const isTrip = !!tripInfo;
+  // A one-destination trip looks like a single list.
+  const isTrip = groups.length > 1;
   const refresh = () => setListSelectionCount(prev => prev + 1);
   const addTargetGroup = groups.find(g => g.listId === addTarget?.listId);
   const listNameFor = (id: string | null) => (availableLists || []).find((list: any) => list.id === id)?.name;
@@ -405,15 +407,15 @@ export default function Dashboard(): React.ReactElement {
                 if (requestOpenEdit) requestOpenEdit(notesListId);
                 openForList(notesListId, listNameFor(notesListId));
               }}>Edit list</Button>
-              {activeListId && !isTrip && groups.length > 0 && (
-                <Button size="xs" variant="light" disabled={!online} onClick={() => setSplitOpen(true)}>
-                  {online ? 'Split by destination' : 'Needs a connection'}
+              {activeListId && tripInfo && (
+                <Button size="xs" variant="light" disabled={!online} onClick={() => setDestinationsOpen(true)}>
+                  {online ? 'Destinations' : 'Needs a connection'}
                 </Button>
               )}
             </Group>
             {activeListId && <DashboardViewToggle value={viewMode} onChange={setViewMode} />}
           </Group>
-          {tripInfo && (
+          {tripInfo && isTrip && (
             <Text size="sm" c="dimmed">{`${tripInfo.name} · ${groups.length} ${groups.length === 1 ? 'destination' : 'destinations'}`}</Text>
           )}
           {!activeListId ? (
@@ -514,13 +516,11 @@ export default function Dashboard(): React.ReactElement {
             initialWhole={addTarget?.whole}
             promoteContext={addTarget ? { listId: addTarget.listId, packingListItemId: '' } : null}
           />
-          <SplitListDialog
-            opened={splitOpen}
-            onClose={() => setSplitOpen(false)}
-            familyId={familyId}
-            listId={activeListId}
-            listName={listNameFor(activeListId) || ''}
-            onSplit={() => {
+          <ManageDestinationsDrawer
+            opened={destinationsOpen}
+            tripId={tripInfo?.id ?? null}
+            onClose={() => {
+              setDestinationsOpen(false);
               void refreshLists?.();
               refresh();
             }}

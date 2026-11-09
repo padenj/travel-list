@@ -1,4 +1,5 @@
 import type { TripDestination } from '../types/trip';
+import { destinationListLabel } from './destinationLabel';
 
 export interface DashboardItem {
   id: string;
@@ -45,6 +46,8 @@ export interface BuildGroupInput {
   familyMembers: any[];
   currentUserId: string | null;
   destination: TripDestination | null;
+  /** When set, a destination group is named with the label ("Trip · Destination"). */
+  tripName?: string | null;
 }
 
 function toItem(pli: any, name: string, checked: boolean): DashboardItem {
@@ -62,7 +65,7 @@ function toItem(pli: any, name: string, checked: boolean): DashboardItem {
   };
 }
 
-export function buildDestinationGroup({ listId, listData, masterItems, familyMembers, currentUserId, destination }: BuildGroupInput): DestinationGroup {
+export function buildDestinationGroup({ listId, listData, masterItems, familyMembers, currentUserId, destination, tripName }: BuildGroupInput): DestinationGroup {
   const listItems: any[] = listData?.items || [];
   const checks: any[] = listData?.checks || [];
   const rawNotes = listData?.list?.notes ?? listData?.notes;
@@ -113,7 +116,7 @@ export function buildDestinationGroup({ listId, listData, masterItems, familyMem
 
   return {
     destinationId: destination?.id ?? null,
-    name: destination?.name ?? (listData?.list?.name || ''),
+    name: destination ? destinationListLabel(tripName, destination.name) : (listData?.list?.name || ''),
     color: destination?.color ?? null,
     listId,
     members: members.map(m => ({ id: m.id, name: m.name || m.username })),

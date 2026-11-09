@@ -28,8 +28,9 @@ if (!hasTestingLibs) {
 
   vi.mock('../api');
 
-  const { requestOpenEdit, openForList, showNotification, activeListState, columnsProps, personViewState, auditProps, addDrawerProps } = vi.hoisted(() => ({
+  const { requestOpenEdit, openForList, showNotification, activeListState, columnsProps, personViewState, auditProps, addDrawerProps, drawerProps } = vi.hoisted(() => ({
     addDrawerProps: { last: null as any },
+    drawerProps: { last: null as any },
     requestOpenEdit: vi.fn(),
     openForList: vi.fn(),
     showNotification: vi.fn(),
@@ -109,7 +110,13 @@ if (!hasTestingLibs) {
     useDashboardViewMode: () => [personViewState.mode, () => {}],
   }));
   vi.mock('../components/NotesDestinationPicker', () => ({ default: () => null }));
-  vi.mock('../components/SplitListDialog', () => ({ default: () => null }));
+  vi.mock('../components/ManageDestinationsDrawer', () => ({
+    default: (props: any) => {
+      const React = require('react');
+      drawerProps.last = props;
+      return props.opened ? React.createElement('div', null, `destinations drawer for ${props.tripId}`) : null;
+    },
+  }));
 
   vi.mock('@mantine/core', () => {
     const React = require('react');
@@ -150,6 +157,7 @@ if (!hasTestingLibs) {
       personViewState.report = null;
       personViewState.props = null;
       addDrawerProps.last = null;
+      drawerProps.last = null;
       (apiModule.getCategories as any).mockResolvedValue({ response: { ok: true }, data: { categories: [] } });
       (apiModule.getCurrentUserProfile as any).mockResolvedValue({
         response: { ok: true },
@@ -388,7 +396,7 @@ if (!hasTestingLibs) {
         </MemoryRouter>
       );
 
-      await waitFor(() => expect(columnsProps.last?.groups.map((g: any) => g.name)).toEqual(['Paris', "Grandma's"]));
+      await waitFor(() => expect(columnsProps.last?.groups.map((g: any) => g.name)).toEqual(['Spring Break · Paris', "Spring Break · Grandma's"]));
       expect(apiModule.getPackingList).toHaveBeenCalledWith('list-2');
       expect(columnsProps.last.isTrip).toBe(true);
       expect(screen.getByText('Spring Break · 2 destinations')).toBeTruthy();
@@ -412,13 +420,51 @@ if (!hasTestingLibs) {
       await waitFor(() => expect((apiModule.getPackingList as any).mock.calls.length).toBeGreaterThan(before));
     });
 
-    it('offers splitting an ordinary list', async () => {
+    it('opens the destinations drawer for the active trip and refreshes when it closes', async () => {
+      (apiModule.getPackingList as any).mockImplementation(() => Promise.resolve({
+        response: { ok: true },
+        data: { items: [], checks: [], list: { notes: '' }, trip_destination: tripContext },
+      }));
       render(
         <MemoryRouter>
           <Dashboard />
         </MemoryRouter>
       );
-      expect(await screen.findByRole('button', { name: 'Split by destination' })).toBeTruthy();
+      fireEvent.click(await screen.findByRole('button', { name: 'Destinations' }));
+      expect(screen.getByText('destinations drawer for t1')).toBeTruthy();
+      expect(screen.queryByRole('button', { name: 'Split by destination' })).toBeNull();
+
+      const before = (apiModule.getPackingList as any).mock.calls.length;
+      rtl.act(() => drawerProps.last.onClose());
+      await waitFor(() => expect((apiModule.getPackingList as any).mock.calls.length).toBeGreaterThan(before));
+      expect(screen.queryByText('destinations drawer for t1')).toBeNull();
+    });
+
+    it('shows a one-destination trip like a single list', async () => {
+      const single = { tripId: 't2', tripName: 'Beach', destinations: [tripContext.destinations[0]] };
+      (apiModule.getPackingList as any).mockImplementation(() => Promise.resolve({
+        response: { ok: true },
+        data: { items: [], checks: [], list: { notes: '' }, trip_destination: single },
+      }));
+      render(
+        <MemoryRouter>
+          <Dashboard />
+        </MemoryRouter>
+      );
+      await waitFor(() => expect(columnsProps.last?.groups).toHaveLength(1));
+      expect(columnsProps.last.isTrip).toBe(false);
+      expect(screen.queryByText('Beach · 1 destination')).toBeNull();
+      expect(await screen.findByRole('button', { name: 'Destinations' })).toBeTruthy();
+    });
+
+    it('has no Destinations button for a list without a trip', async () => {
+      render(
+        <MemoryRouter>
+          <Dashboard />
+        </MemoryRouter>
+      );
+      await waitFor(() => expect(columnsProps.last?.groups).toHaveLength(1));
+      expect(screen.queryByRole('button', { name: 'Destinations' })).toBeNull();
     });
 
     it('loads the whole trip in destination order when a later destination list is active', async () => {
@@ -434,7 +480,6 @@ if (!hasTestingLibs) {
       );
       await waitFor(() => expect(columnsProps.last?.groups.map((g: any) => g.listId)).toEqual(['list-1', 'list-2']));
       expect(apiModule.getPackingList).toHaveBeenCalledWith('list-1');
-      expect(screen.queryByRole('button', { name: 'Split by destination' })).toBeNull();
     });
 
     it('sends checks to the list of the destination they belong to', async () => {
@@ -465,7 +510,11 @@ if (!hasTestingLibs) {
       });
     });
 
-    it('disables splitting while offline', async () => {
+    it('disables Destinations while offline', async () => {
+      (apiModule.getPackingList as any).mockImplementation(() => Promise.resolve({
+        response: { ok: true },
+        data: { items: [], checks: [], list: { notes: '' }, trip_destination: tripContext },
+      }));
       Object.defineProperty(navigator, 'onLine', { configurable: true, get: () => false });
       try {
         render(
@@ -475,7 +524,7 @@ if (!hasTestingLibs) {
         );
         const button = await screen.findByRole('button', { name: 'Needs a connection' });
         expect((button as HTMLButtonElement).disabled).toBe(true);
-        expect(screen.queryByRole('button', { name: 'Split by destination' })).toBeNull();
+        expect(screen.queryByRole('button', { name: 'Destinations' })).toBeNull();
       } finally {
         delete (navigator as any).onLine;
       }
