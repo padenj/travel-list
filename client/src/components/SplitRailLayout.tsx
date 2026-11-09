@@ -28,6 +28,7 @@ import {
   IconShield,
   IconHelp,
   IconLogout,
+  IconPlane,
 } from '@tabler/icons-react';
 import { useImpersonation } from '../contexts/ImpersonationContext';
 import VersionText from './VersionText';
@@ -50,6 +51,7 @@ interface SplitRailLayoutProps {
 const railItems = [
   { id: 'dashboard', icon: IconHome, label: 'Dashboard', path: '/' },
   { id: 'lists', icon: IconList, label: 'Packing Lists', path: '/packing-lists' },
+  { id: 'trips', icon: IconPlane, label: 'Trips', path: '/trips' },
   { id: 'categories', icon: IconCategory, label: 'Categories', path: '/categories' },
   { id: 'templates', icon: IconTemplate, label: 'Item Groups', path: '/templates' },
   { id: 'settings', icon: IconSettings, label: 'Settings', path: '/settings' },
@@ -103,6 +105,7 @@ export default function SplitRailLayout({ children, user, onLogout }: SplitRailL
     if (path.startsWith('/packing-lists')) return 'lists';
     if (path.startsWith('/categories')) return 'categories';
     if (path.startsWith('/templates')) return 'templates';
+    if (path.startsWith('/trips')) return 'trips';
     return 'dashboard';
   }
 

@@ -2,6 +2,7 @@ import { JWT_SECRET } from './auth';
 import jwt from 'jsonwebtoken';
 import { Request, Response, NextFunction } from 'express';
 import { User } from './server-types';
+import { tripAccessMiddleware } from './middleware/tripAccessMiddleware';
 
 interface AuthenticatedRequest extends Request {
   user?: User;
@@ -33,3 +34,7 @@ export function familyAccessMiddleware(paramFamilyIdName: string) {
     return next();
   };
 }
+
+// Export trip access middleware for family-scoped trip operations
+export { tripAccessMiddleware };
+

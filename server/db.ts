@@ -4,6 +4,8 @@ import { open, Database } from 'sqlite';
 let dbInstance: Database | null = null;
 let isInitializing = false;
 let initializationPromise: Promise<void> | null = null;
+// Shared by concurrent first callers so only one connection is opened and initialised.
+let openPromise: Promise<Database> | null = null;
 
 // Database schemas separated for maintainability
 const SCHEMAS = {
@@ -221,6 +223,234 @@ const SCHEMAS = {
 
     CREATE INDEX IF NOT EXISTS idx_packing_list_audit_log_packing_list_id_id ON packing_list_audit_log(packing_list_id, id DESC);
     CREATE INDEX IF NOT EXISTS idx_packing_list_audit_log_packing_list_item_id_id ON packing_list_audit_log(packing_list_id, packing_list_item_id, id DESC);
+    
+    CREATE INDEX IF NOT EXISTS idx_trips_family ON trips(family_id);
+    CREATE INDEX IF NOT EXISTS idx_trips_deleted ON trips(deleted_at);
+  `,
+  trips: `
+    CREATE TABLE IF NOT EXISTS trips (
+      id TEXT PRIMARY KEY,
+      family_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      description TEXT,
+      trip_type TEXT,
+      start_date TEXT,
+      end_date TEXT,
+      status TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      deleted_at TEXT,
+      FOREIGN KEY (family_id) REFERENCES families(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS trip_locations (
+      id TEXT PRIMARY KEY,
+      trip_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      order_position INTEGER,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (trip_id) REFERENCES trips(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS trip_participants (
+      id TEXT PRIMARY KEY,
+      trip_id TEXT NOT NULL,
+      user_id TEXT,
+      display_name TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (trip_id) REFERENCES trips(id) ON DELETE CASCADE,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS trip_packing_lists (
+      trip_id TEXT NOT NULL,
+      packing_list_id TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (trip_id, packing_list_id),
+      FOREIGN KEY (trip_id) REFERENCES trips(id) ON DELETE CASCADE,
+      FOREIGN KEY (packing_list_id) REFERENCES packing_lists(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS trip_elements (
+      id TEXT PRIMARY KEY,
+      trip_id TEXT NOT NULL,
+      element_type TEXT NOT NULL,
+      name TEXT NOT NULL,
+      booking_reference TEXT,
+      booking_url TEXT,
+      price_cash DECIMAL,
+      price_points INTEGER,
+      loyalty_program TEXT,
+      total_cash DECIMAL,
+      total_points INTEGER,
+      notes TEXT,
+      sort_position INTEGER,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      deleted_at TEXT,
+      FOREIGN KEY (trip_id) REFERENCES trips(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS trip_element_confirmations (
+      id TEXT PRIMARY KEY,
+      element_id TEXT NOT NULL,
+      leg_id TEXT,
+      participant_id TEXT,
+      confirmation_number TEXT NOT NULL,
+      label TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (element_id) REFERENCES trip_elements(id) ON DELETE CASCADE,
+      FOREIGN KEY (leg_id) REFERENCES flight_legs(id) ON DELETE CASCADE,
+      FOREIGN KEY (participant_id) REFERENCES trip_participants(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS trip_element_attachments (
+      id TEXT PRIMARY KEY,
+      element_id TEXT NOT NULL,
+      filename TEXT NOT NULL,
+      original_name TEXT,
+      mime_type TEXT,
+      file_path TEXT,
+      file_size INTEGER,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (element_id) REFERENCES trip_elements(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS flight_legs (
+      id TEXT PRIMARY KEY,
+      element_id TEXT NOT NULL,
+      leg_order INTEGER,
+      departure_airport TEXT NOT NULL,
+      departure_datetime TEXT NOT NULL,
+      arrival_airport TEXT NOT NULL,
+      arrival_datetime TEXT NOT NULL,
+      airline TEXT,
+      flight_number TEXT,
+      seat_numbers TEXT,
+      price_cash DECIMAL,
+      price_points INTEGER,
+      loyalty_program TEXT,
+      confirmation_number TEXT,
+      check_price_url TEXT,
+      layover_minutes_after INTEGER,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (element_id) REFERENCES trip_elements(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS bookings (
+      id TEXT PRIMARY KEY,
+      trip_id TEXT NOT NULL,
+      confirmation_number TEXT,
+      advertised_price_cash DECIMAL,
+      advertised_price_points INTEGER,
+      loyalty_program TEXT,
+      notes TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (trip_id) REFERENCES trips(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS booking_links (
+      booking_id TEXT NOT NULL,
+      element_id TEXT NOT NULL,
+      PRIMARY KEY (booking_id, element_id),
+      FOREIGN KEY (booking_id) REFERENCES bookings(id) ON DELETE CASCADE,
+      FOREIGN KEY (element_id) REFERENCES trip_elements(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS booking_travelers (
+      booking_id TEXT NOT NULL,
+      participant_id TEXT NOT NULL,
+      PRIMARY KEY (booking_id, participant_id),
+      FOREIGN KEY (booking_id) REFERENCES bookings(id) ON DELETE CASCADE,
+      FOREIGN KEY (participant_id) REFERENCES trip_participants(id) ON DELETE RESTRICT
+    );
+
+    CREATE TABLE IF NOT EXISTS booking_transactions (
+      id TEXT PRIMARY KEY,
+      booking_id TEXT NOT NULL,
+      amount_cash DECIMAL NOT NULL DEFAULT 0,
+      amount_points INTEGER NOT NULL DEFAULT 0,
+      transaction_date TEXT NOT NULL,
+      confirmation_number TEXT,
+      notes TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (booking_id) REFERENCES bookings(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS flight_traveler_seats (
+      id TEXT PRIMARY KEY,
+      leg_id TEXT NOT NULL,
+      participant_id TEXT NOT NULL,
+      seat_number TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE (leg_id, participant_id),
+      FOREIGN KEY (leg_id) REFERENCES flight_legs(id) ON DELETE CASCADE,
+      FOREIGN KEY (participant_id) REFERENCES trip_participants(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS hotel_element_details (
+      element_id TEXT PRIMARY KEY,
+      address TEXT,
+      check_in_date TEXT,
+      check_out_date TEXT,
+      room_type TEXT,
+      booking_source TEXT,
+      advertised_price_cash DECIMAL,
+      advertised_price_points INTEGER,
+      advertised_loyalty_program TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (element_id) REFERENCES trip_elements(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS car_rental_element_details (
+      element_id TEXT PRIMARY KEY,
+      rental_company TEXT,
+      car_size TEXT,
+      pickup_location TEXT,
+      pickup_datetime TEXT,
+      dropoff_location TEXT,
+      dropoff_datetime TEXT,
+      prepaid_price DECIMAL,
+      at_counter_price DECIMAL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (element_id) REFERENCES trip_elements(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS activity_element_details (
+      element_id TEXT PRIMARY KEY,
+      venue_name TEXT,
+      activity_date TEXT,
+      activity_time TEXT,
+      num_tickets INTEGER,
+      ticket_type TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (element_id) REFERENCES trip_elements(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_trip_locations_trip ON trip_locations(trip_id);
+    CREATE INDEX IF NOT EXISTS idx_trip_participants_trip ON trip_participants(trip_id);
+    CREATE INDEX IF NOT EXISTS idx_trip_participants_user ON trip_participants(user_id);
+    CREATE INDEX IF NOT EXISTS idx_trip_packing_lists_trip ON trip_packing_lists(trip_id);
+    CREATE INDEX IF NOT EXISTS idx_trip_packing_lists_packing_list ON trip_packing_lists(packing_list_id);
+    CREATE INDEX IF NOT EXISTS idx_trip_elements_trip ON trip_elements(trip_id);
+    CREATE INDEX IF NOT EXISTS idx_trip_elements_type ON trip_elements(element_type);
+    CREATE INDEX IF NOT EXISTS idx_trip_elements_deleted ON trip_elements(deleted_at);
+    CREATE INDEX IF NOT EXISTS idx_trip_element_confirmations_element ON trip_element_confirmations(element_id);
+    CREATE INDEX IF NOT EXISTS idx_trip_element_confirmations_leg ON trip_element_confirmations(leg_id);
+    CREATE INDEX IF NOT EXISTS idx_trip_element_confirmations_participant ON trip_element_confirmations(participant_id);
+    CREATE INDEX IF NOT EXISTS idx_trip_element_attachments_element ON trip_element_attachments(element_id);
+    CREATE INDEX IF NOT EXISTS idx_flight_legs_element ON flight_legs(element_id);
+    CREATE INDEX IF NOT EXISTS idx_bookings_trip ON bookings(trip_id);
+    CREATE INDEX IF NOT EXISTS idx_booking_links_element ON booking_links(element_id);
+    CREATE INDEX IF NOT EXISTS idx_booking_travelers_participant ON booking_travelers(participant_id);
+    CREATE INDEX IF NOT EXISTS idx_booking_transactions_booking ON booking_transactions(booking_id);
+    CREATE INDEX IF NOT EXISTS idx_flight_traveler_seats_leg ON flight_traveler_seats(leg_id);
   `
 };
 
@@ -243,6 +473,7 @@ async function initializeDatabase(db: Database): Promise<void> {
       await db.exec(SCHEMAS.users);
       await db.exec(SCHEMAS.audit_log);
       await db.exec(SCHEMAS.packing_list_audit_log);
+      await db.exec(SCHEMAS.trips);
       await db.exec(SCHEMAS.indexes);
 
       // Migration: ensure expected columns exist on legacy databases
@@ -411,34 +642,42 @@ export async function getDb(): Promise<Database> {
     }
   }
 
-  if (!dbInstance) {
-    try {
+  if (dbInstance) return dbInstance;
+
+  if (!openPromise) {
+    openPromise = (async () => {
+      try {
   // Vitest sets a global VITEST flag; additionally respect NODE_ENV=test
   // Use an in-memory DB for tests to avoid file-based locking and ensure clean state.
   // eslint-disable-next-line @typescript-eslint/ban-ts-comment
   // @ts-ignore
   const isTest = process.env.NODE_ENV === 'test' || (typeof global !== 'undefined' && (global as any).VITEST) || process.env.VITEST;
   const filename = isTest ? ':memory:' : (process.env.DB_FILE || './data/travel-list.sqlite');
-      
-      dbInstance = await open({
-        filename,
-        driver: sqlite3.Database,
-      });
-      
-      await initializeDatabase(dbInstance);
-      
-      // Handle connection errors
-      dbInstance.on('error', (err: Error) => {
-        console.error('💥 Database error:', err);
-      });
-      
-    } catch (error) {
-      console.error('💥 Failed to open database:', error);
-      dbInstance = null;
-      throw error;
-    }
+
+        const db = await open({
+          filename,
+          driver: sqlite3.Database,
+        });
+
+        await initializeDatabase(db);
+
+        // Handle connection errors
+        db.on('error', (err: Error) => {
+          console.error('💥 Database error:', err);
+        });
+
+        dbInstance = db;
+        return db;
+      } catch (error) {
+        console.error('💥 Failed to open database:', error);
+        dbInstance = null;
+        throw error;
+      } finally {
+        openPromise = null;
+      }
+    })();
   }
-  return dbInstance;
+  return openPromise;
 }
 
 // Migration helpers removed: automatic packing_list_items rebuilds are no longer performed here.

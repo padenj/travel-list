@@ -1,0 +1,66 @@
+:root {
+  --ctp-mocha-base: var(--mantine-color-body);
+  --ctp-mocha-surface0: light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-6));
+  --ctp-mocha-surface1: var(--mantine-color-default-border);
+  --ctp-mocha-lavender: light-dark(var(--mantine-color-blue-7), var(--mantine-color-blue-3));
+  --ctp-mocha-green: light-dark(var(--mantine-color-green-1), var(--mantine-color-green-9));
+  --ctp-mocha-text: var(--mantine-color-text);
+  --ctp-mocha-subtext: var(--mantine-color-dimmed);
+  --ctp-mocha-yellow: light-dark(var(--mantine-color-yellow-8), var(--mantine-color-yellow-3));
+}
+
+.sr-only {
+  border: 0;
+  clip: rect(0 0 0 0);
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  padding: 0;
+  position: absolute;
+  width: 1px;
+}
+
+.view-toggle-btn {
+  background-color: var(--ctp-mocha-surface0);
+  color: var(--ctp-mocha-lavender);
+  border: 1px solid var(--ctp-mocha-lavender);
+  padding: 0.75rem 1.25rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 600;
+  transition: all 0.2s;
+}
+
+.view-toggle-btn:hover {
+  background-color: var(--ctp-mocha-surface1);
+  box-shadow: 0 0 12px light-dark(rgba(34, 139, 230, 0.2), rgba(116, 192, 252, 0.2));
+}
+
+.create-element-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.create-element-field label {
+  color: var(--ctp-mocha-subtext);
+  font-size: 0.85rem;
+}
+
+.create-element-field input,
+.create-element-field select {
+  background-color: var(--ctp-mocha-base);
+  border: 1px solid var(--ctp-mocha-surface1);
+  border-radius: 6px;
+  color: var(--ctp-mocha-text);
+  padding: 0.65rem 0.75rem;
+}
+
+.error {
+  color: var(--mantine-color-red-6);
+  background-color: light-dark(var(--mantine-color-red-0), rgba(250, 82, 82, 0.1));
+  padding: 1rem;
+  border-radius: 6px;
+  border-left: 4px solid var(--mantine-color-red-6);
+}
+

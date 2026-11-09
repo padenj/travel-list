@@ -54,3 +54,4 @@ core.*
 *.crt
 *.p12
 .worktrees/
+.superpowers/

@@ -14,6 +14,8 @@ import { UserRepository, FamilyRepository, CategoryRepository, ItemRepository, u
 import { ERROR_CODES, USER_ROLES, HTTP_STATUS } from './constants';
 import { User, LoginRequest, ChangePasswordRequest } from './server-types';
 import { v4 as uuidv4 } from 'uuid';
+import { tripRouter } from './routes/tripRoutes';
+import { tripFileRouter } from './routes/tripFileRoutes';
 
 // Extend Request type to include user
 declare global {
@@ -2043,5 +2045,9 @@ router.delete('/families/:id', authMiddleware, async (req: Request, res: Respons
   await familyRepo.softDelete(id);
   return res.json({ message: 'Family deleted successfully' });
 });
+
+// Mount trip router
+router.use('/trips', tripRouter);
+router.use('/trips/files', tripFileRouter);
 
 export default router;

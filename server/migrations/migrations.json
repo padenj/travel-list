@@ -14,5 +14,6 @@
   "20260613_01_migrate_group_categories_to_items.cjs",
   "20260613_02_add_notes_to_templates.cjs",
   "20260711_01_add_packing_list_notes.cjs",
-  "20260729_01_add_active_packing_list_to_families.cjs"
+  "20260729_01_add_active_packing_list_to_families.cjs",
+  "20260831_fix_trips_schema_spec_compliance.cjs"
 ]
