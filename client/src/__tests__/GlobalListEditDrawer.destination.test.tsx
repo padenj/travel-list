@@ -239,4 +239,56 @@ describe('GlobalListEditDrawer destination members', () => {
     expect(box('Bob').checked).toBe(true);
     expect(box('Ann').checked).toBe(false);
   });
+
+  async function switchToB(utils: any) {
+    (api.getPackingList as any).mockResolvedValue({
+      response: { ok: true },
+      data: { name: 'Rome', items: [], template_ids: [], list: { member_ids: ['m2'] }, trip_destination: { tripId: 'trip-1', tripName: 'T', destinations: [] } },
+    });
+    current.listId = 'list-2';
+    await act(async () => { utils.rerender(<GlobalListEditDrawer />); });
+    await waitFor(() => expect(box('Bob').checked).toBe(true));
+    expect(box('Ann').checked).toBe(false);
+  }
+
+  async function expectUntouchedB() {
+    await act(async () => { await new Promise(r => setTimeout(r, 50)); });
+    expect(showNotification).not.toHaveBeenCalled();
+    expect(screen.queryByText(/already in Rome/)).toBeNull();
+    expect(screen.queryByText('Move')).toBeNull();
+    expect(box('Bob').checked).toBe(true);
+    expect(box('Ann').checked).toBe(false);
+    expect(box('Bob').disabled).toBe(false);
+    expect(box('Ann').disabled).toBe(false);
+  }
+
+  it('a Move still loading destinations when the list switches does not touch list B', async () => {
+    const d = deferred();
+    (api.updatePackingList as any).mockResolvedValueOnce(conflict409).mockResolvedValue(ok);
+    (tripApi.listDestinations as any)
+      .mockResolvedValueOnce([{ id: 'dest-2', name: 'Rome', memberIds: ['m2', 'm3'] }])
+      .mockReturnValueOnce(d.promise);
+    (tripApi.updateDestination as any).mockResolvedValue({});
+    const utils = await setup(['m1']);
+    await tick('Bob');
+    await act(async () => { fireEvent.click(await screen.findByText('Move')); });
+    await switchToB(utils);
+    await act(async () => { d.resolve([{ id: 'dest-2', name: 'Rome', memberIds: ['m2', 'm3'] }]); });
+    await waitFor(() => expect(api.updatePackingList).toHaveBeenCalledWith('list-1', { memberIds: ['m1', 'm2'] }));
+    await expectUntouchedB();
+  });
+
+  it('a Move whose PUT is in flight when the list switches does not touch list B', async () => {
+    const put = deferred();
+    (api.updatePackingList as any).mockResolvedValueOnce(conflict409).mockReturnValueOnce(put.promise).mockResolvedValue(ok);
+    (tripApi.listDestinations as any).mockResolvedValue([{ id: 'dest-2', name: 'Rome', memberIds: ['m2', 'm3'] }]);
+    (tripApi.updateDestination as any).mockResolvedValue({});
+    const utils = await setup(['m1']);
+    await tick('Bob');
+    await act(async () => { fireEvent.click(await screen.findByText('Move')); });
+    await waitFor(() => expect(api.updatePackingList).toHaveBeenLastCalledWith('list-1', { memberIds: ['m1', 'm2'] }));
+    await switchToB(utils);
+    await act(async () => { put.resolve(ok); });
+    await expectUntouchedB();
+  });
 });

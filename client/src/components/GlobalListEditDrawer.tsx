@@ -35,6 +35,8 @@ export default function GlobalListEditDrawer() {
   const [moving, setMoving] = useState(false);
   const savedMemberIds = useRef<string[]>([]);
   const newestSavedReq = useRef(0);
+  const currentListIdRef = useRef<string | null>(listId ?? null);
+  currentListIdRef.current = listId ?? null;
   const online = useOnline();
   const isDestination = !!tripId;
   const saveTimer = useRef<number | null>(null);
@@ -179,10 +181,13 @@ export default function GlobalListEditDrawer() {
 
   const putMembers = async (next: string[]): Promise<boolean> => {
     if (!listId) return false;
+    const forListId = listId;
+    const isCurrentList = () => currentListIdRef.current === forListId;
     const reqId = ++memberReqCounter.current;
     const isLatest = () => memberReqCounter.current === reqId;
     try {
       const res = await updatePackingList(listId, { memberIds: next });
+      if (!isCurrentList()) return false;
       if (res.response && res.response.ok) {
         if (reqId >= newestSavedReq.current) {
           newestSavedReq.current = reqId;
@@ -204,7 +209,7 @@ export default function GlobalListEditDrawer() {
       if (status === 409 && res.data?.error === 'member_in_other_destination' && tripId) {
         const { memberId, destinationId } = res.data;
         const info = await describeMemberConflict(tripId, memberId, destinationId);
-        if (!isLatest()) return false;
+        if (!isCurrentList() || !isLatest()) return false;
         setConflict({ listId, memberId, destinationId, ...info, pending: next });
       } else if (status === 400 && isDestination && next.length === 0) {
         showNotification({ title: 'Failed', message: 'A destination needs at least one person.', color: 'red' });
@@ -213,6 +218,7 @@ export default function GlobalListEditDrawer() {
       }
     } catch (err) {
       console.error('Failed to save members', err);
+      if (!isCurrentList()) return false;
       if (isDestination) {
         if (!isLatest()) return false;
         setSelectedMemberIds(savedMemberIds.current);
@@ -230,10 +236,11 @@ export default function GlobalListEditDrawer() {
     setConflict(null);
     setSavingMembers(true);
     debounceTimer.current = window.setTimeout(async () => {
+      const forListId = listId;
       try {
         await putMembers(next);
       } finally {
-        setSavingMembers(false);
+        if (currentListIdRef.current === forListId) setSavingMembers(false);
       }
     }, 500);
   };
@@ -244,20 +251,25 @@ export default function GlobalListEditDrawer() {
       setConflict(null);
       return;
     }
+    const forListId = listId;
+    const switched = () => currentListIdRef.current !== forListId;
     setMoving(true);
+    // If the list switches mid-Move we still finish the server steps for the original list
+    // (so the member is never left in no destination) but touch no UI state.
     try {
       const other = (await tripApi.listDestinations(tripId)).find(d => d.id === conflict.destinationId);
       if (other) {
         await tripApi.updateDestination(tripId, other.id, { memberIds: other.memberIds.filter(id => id !== conflict.memberId) });
       }
-      if (await putMembers(conflict.pending)) {
-        setSelectedMemberIds(conflict.pending);
-      }
+      const saved = await putMembers(conflict.pending);
+      if (switched()) return;
+      if (saved) setSelectedMemberIds(conflict.pending);
     } catch (err) {
       console.error('Failed to move member', err);
+      if (switched()) return;
       showNotification({ title: 'Failed', message: 'Could not move that person', color: 'red' });
     } finally {
-      setMoving(false);
+      if (!switched()) setMoving(false);
     }
   };
 
