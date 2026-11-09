@@ -32,6 +32,9 @@ This document maps functions exported from `client/src/api.ts` to the client-sid
 - `getFamilies`, `getFamily`, `createFamily`, `deleteFamily`:
   - client/src/pages/SystemAdminPage.tsx
   - client/src/components/BulkEditDrawer.tsx (uses `getFamily`)
+  - client/src/components/SplitListDialog.tsx (uses `getFamily`)
+  - client/src/components/TripPackingSection.tsx (uses `getFamily`)
+  - client/src/components/Dashboard.tsx (uses `getFamily`)
 
 ### Family members
 - `createFamilyMember`, `editFamilyMember`, `resetFamilyMemberPassword`, `updateFamilyMemberOrder`:
@@ -60,6 +63,12 @@ This document maps functions exported from `client/src/api.ts` to the client-sid
   - client/src/components/PackingListAuditPanel.tsx
   - client/src/components/PackingListItemAuditModal.tsx
   - client/src/pages/PackingListPage.tsx
+  - client/src/components/SplitListDialog.tsx (`getPackingList`, `getFamily`)
+  - client/src/components/TripPackingSection.tsx (`getPackingList`, `getFamily`)
+  - client/src/components/AddDestinationDialog.tsx (`getFamilyPackingLists`, `getItemGroups`)
+
+- `movePackingListItem`:
+  - client/src/components/Dashboard.tsx (Person view "Move to <destination>" for shared items)
 
 ### Templates
 - `createTemplate`, `getTemplates`, `getTemplate`, `updateTemplate`, `deleteTemplate`, `assignItemToTemplate`, `removeItemFromTemplate`, `getItemsForTemplate`, `getExpandedItemsForTemplate`, `syncTemplateItems`:
@@ -69,6 +78,7 @@ This document maps functions exported from `client/src/api.ts` to the client-sid
 - `getItemGroups`, `getItemGroup`, `updateItemGroup`, `deleteItemGroup`, `addCategoryItemsToItemGroup`, `assignItemToItemGroup`, `removeItemFromItemGroup`, `getItemsForItemGroup`, `getExpandedItemsForItemGroup`, `syncItemGroupItems`:
   - client/src/components/ItemEditDrawer.tsx
   - client/src/components/TemplateManager.tsx
+  - client/src/components/AddDestinationDialog.tsx (uses `getItemGroups`)
 
 ### Migration cleanup checklist
 - **Server code to remove/rename after verification:**
@@ -127,6 +137,14 @@ Keep this checklist updated as you complete migration verification and removal s
   - not used by the UI (kept for API completeness)
 - `listSeatsForLeg`, `assignSeat`, `removeSeat`:
   - client/src/components/FlightSeatGrid.tsx (rendered in `components/FlightSeatsTab.tsx`, once per flight leg)
+- `listDestinations`, `deleteDestination` (409 `destination_has_items` → `ApiConflictError`):
+  - client/src/components/TripPackingSection.tsx (`listDestinations` is also used by `AddDestinationDialog.tsx` and `SplitListDialog.tsx`)
+- `createDestination`, `updateDestination`:
+  - client/src/components/AddDestinationDialog.tsx (`updateDestination` is also used by `SplitListDialog.tsx`)
+- `splitList` (409 `member_in_other_destination` → `ApiConflictError`):
+  - client/src/components/SplitListDialog.tsx
+- `listTrips`, `createTrip`:
+  - client/src/components/SplitListDialog.tsx (pick or create the trip being split into)
 
 ---
 

@@ -157,7 +157,7 @@ This document maps server routes implemented in `server/routes.ts` to their purp
 ## Packing Lists
 
 - GET /families/:familyId/packing-lists
-  - Purpose: List packing lists for family (with member ids attached).
+  - Purpose: List packing lists for family (with member ids and `trip_destination` summary attached).
   - Client helper: `getFamilyPackingLists`
 
 - POST /families/:familyId/packing-lists
@@ -165,7 +165,7 @@ This document maps server routes implemented in `server/routes.ts` to their purp
   - Client helper: `createPackingList`
 
 - GET /packing-lists/:id
-  - Purpose: Fetch detailed packing list with items, checks, not_needed rows and template ids.
+  - Purpose: Fetch detailed packing list with items, checks, not_needed rows, template ids and `trip_destination` (trip context with all destinations, or null).
   - Client helper: `getPackingList`
 
 - POST /packing-lists/:id/populate-from-template
@@ -173,11 +173,11 @@ This document maps server routes implemented in `server/routes.ts` to their purp
   - Client helper: `populatePackingListFromTemplate`
 
 - PUT /packing-lists/:id
-  - Purpose: Update packing list metadata (name, template assignments, memberIds, etc.).
+  - Purpose: Update packing list metadata (name, template assignments, memberIds, etc.). With `memberIds` on a destination list, enforces the one-destination-per-person rule (409 `member_in_other_destination`).
   - Client helper: `updatePackingList`
 
 - DELETE /packing-lists/:id
-  - Purpose: Soft-delete a packing list.
+  - Purpose: Soft-delete a packing list. For a trip destination list, the destination is soft-deleted too.
   - Client helper: `deletePackingList`
 
 - POST /packing-lists/:id/items
@@ -199,6 +199,34 @@ This document maps server routes implemented in `server/routes.ts` to their purp
 - POST /packing-lists/:listId/items/:packingListItemId/promote
   - Purpose: Promote a one-off to a master item and (optionally) create a template.
   - Client helper: `promotePackingListOneOff`
+
+- POST /packing-lists/:listId/items/:pliId/move
+  - Purpose: Move a shared (whole-family) item to another destination list of the same trip; merges with an existing row for the same master item. 400 for personal items or lists from different trips.
+  - Client helper: `movePackingListItem`
+
+---
+
+## Trip Destinations
+
+- GET /trips/:tripId/destinations
+  - Purpose: Destinations of a trip ordered by position, each `{ id, tripId, name, color, position, packingListId, memberIds }`.
+  - Client helper: `tripApi.listDestinations`
+
+- POST /trips/:tripId/destinations
+  - Purpose: Create a destination with a new list (or adopt `packingListId`), set members, add item groups. 409 `member_in_other_destination` when a person is already in another destination.
+  - Client helper: `tripApi.createDestination`
+
+- PUT /trips/:tripId/destinations/:destinationId
+  - Purpose: Rename, recolor, reorder or change members (same 409 rule).
+  - Client helper: `tripApi.updateDestination`
+
+- DELETE /trips/:tripId/destinations/:destinationId
+  - Purpose: Remove a destination atomically. Body `{ moveSharedItemsTo?, deleteList? }`; 409 `destination_has_items` when the list has items and neither is given.
+  - Client helper: `tripApi.deleteDestination`
+
+- POST /trips/:tripId/split
+  - Purpose: Split a list into destinations in one transaction (personal items follow their people with their checks; shared items go to the chosen destination). Returns `{ destinations, skippedCount }`.
+  - Client helper: `tripApi.splitList`
 
 ---
 

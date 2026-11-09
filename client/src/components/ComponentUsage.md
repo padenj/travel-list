@@ -225,5 +225,55 @@ Compact leg rows (`WN1234 · DEN 8:00a → DAL 10:00a`) with ✏️/🗑 per leg
   - `FlightSeatsTab` (once per flight leg)
 
 Inline-editable seat number per trip traveler.
+### PersonView
+**Used in:**
+  - `Dashboard` (Person view)
+
+Person-first packing: a sticky chip row (one per traveler, colored by destination, showing items left), the selected person's items and their destination's shared items, a collapsed "N packed · M not needed" row, swipe to the next or previous person, and a ⋯ menu (Not needed / Move to <destination> / History). Move and not-needed actions are disabled offline (`useOnline`).
+
+### DestinationColumns
+**Used in:**
+  - `Dashboard` (Columns view)
+
+One `PackingListsSideBySide` per destination (passing `wholeTitle` and `fillViewport`), under a colored "<destination> · <members>" band. The shared column is titled "Shared" for trips.
+
+### DashboardViewToggle
+**Used in:**
+  - `Dashboard`
+
+Person / Columns `SegmentedControl`. `useDashboardViewMode` stores the choice in `localStorage.dashboardView` (defaults: Person on phones, Columns otherwise).
+
+### NotesDestinationPicker
+**Used in:**
+  - `Dashboard` (Columns view, trips only)
+
+Chooses which destination's notes and history are shown.
+
+### SplitListDialog
+**Used in:**
+  - `Dashboard` ("Split by destination")
+  - `ManagePackingLists` ("Split")
+
+Three steps: trip (new or existing), who goes where, and where shared items go. Uses `MemberConflictAlert` for members already in another destination, `destinationErrors` for server error messages, and is disabled offline (`useOnline`).
+
+### TripPackingSection
+**Used in:**
+  - `TripDetailPage`
+
+Destination cards with travelers and progress. Tapping a card opens the dashboard; the menu renames, changes travelers or deletes. Calls `onChanged` after a destination is saved or deleted so the page reloads; write actions are disabled offline.
+
+### AddDestinationDialog
+**Used in:**
+  - `TripPackingSection`
+
+Create or edit a destination: name, travelers (moving someone from another destination asks first via `MemberConflictAlert`), optional item groups, or an existing list. Calls `onChanged` after saving.
+
+### MemberConflictAlert
+**Used in:**
+  - `SplitListDialog`
+  - `AddDestinationDialog`
+
+Inline alert shown when a person is already in another destination, with a "Move" action (and a warning when they are that destination's only member). Move is disabled offline.
+
 ---
 **Note:** This file lists current supporting components only; deleted components were removed from the project and are not included here.
