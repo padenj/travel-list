@@ -41,6 +41,10 @@ export default function GlobalListEditDrawer() {
   const newestSavedReq = useRef(0);
   const sessionRef = useRef(0);
   const flushedSaves = useRef(new Map<string, Promise<unknown>>());
+  // Set right before bumping reloadKey from the Destinations drawer's onClose so the next
+  // load-effect run knows a failed reload means "the owning destination (and its list) was
+  // deleted", not an unrelated load failure.
+  const reloadAfterDestinationsCloseRef = useRef(false);
   const trackSave = <T,>(id: string, p: Promise<T>): Promise<T> => {
     const prev = flushedSaves.current.get(id);
     const settled = p.then(() => undefined, () => undefined);
@@ -69,6 +73,8 @@ export default function GlobalListEditDrawer() {
   useEffect(() => {
     const session = ++sessionRef.current;
     const stale = () => sessionRef.current !== session;
+    const reloadedAfterDestinationsClose = reloadAfterDestinationsCloseRef.current;
+    reloadAfterDestinationsCloseRef.current = false;
     setConflict(null);
     setSelectedMemberIds([]);
     savedMemberIds.current = [];
@@ -111,6 +117,15 @@ export default function GlobalListEditDrawer() {
         const res = await getPackingList(listId);
         if (stale()) return;
         if (!res.response.ok) {
+          if (reloadedAfterDestinationsClose) {
+            // The destination (and the list it owns) was deleted from the Destinations drawer.
+            // Close the edit drawer the same way its own onClose does, so pending saves still
+            // flush; the session guard above already confirms this reload still matches the
+            // list currently shown.
+            showNotification({ title: 'Deleted', message: 'This list was deleted', color: 'yellow' });
+            close();
+            return;
+          }
           setCurrentName(listName || null);
           if (!isEditingNameRef.current) {
             setNameDraft(listName || '');
@@ -603,6 +618,7 @@ export default function GlobalListEditDrawer() {
         tripId={tripId}
         onClose={() => {
           setDestinationsOpen(false);
+          reloadAfterDestinationsCloseRef.current = true;
           void refreshLists?.();
           setReloadKey(k => k + 1);
         }}

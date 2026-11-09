@@ -23,9 +23,10 @@ if (!hasTestingLibs) {
 
   vi.mock('../api');
 
-  const { refreshLists, showNotification } = vi.hoisted(() => ({
+  const { refreshLists, showNotification, closeMock } = vi.hoisted(() => ({
     refreshLists: vi.fn(),
     showNotification: vi.fn(),
+    closeMock: vi.fn(),
   }));
   vi.mock('@mantine/notifications', () => ({ showNotification }));
 
@@ -34,7 +35,7 @@ if (!hasTestingLibs) {
       isOpen: true,
       listId: 'list-1',
       listName: 'Original list',
-      close: vi.fn(),
+      close: closeMock,
       renderFn: null,
       openForList: vi.fn(),
     }),
@@ -61,7 +62,11 @@ if (!hasTestingLibs) {
   }));
 
   vi.mock('../components/ManageDestinationsDrawer', () => ({
-    default: ({ opened, tripId }: any) => (opened ? require('react').createElement('div', null, `destinations drawer for ${tripId}`) : null),
+    default: ({ opened, tripId, onClose }: any) => (opened
+      ? require('react').createElement('div', null,
+          `destinations drawer for ${tripId}`,
+          require('react').createElement('button', { onClick: onClose }, 'Close destinations'))
+      : null),
   }));
 
   vi.mock('@mantine/core', () => {
@@ -276,6 +281,27 @@ if (!hasTestingLibs) {
         fireEvent.click(screen.getByRole('button', { name: 'Destinations' }));
       });
       expect(screen.getByText('destinations drawer for trip-1')).toBeTruthy();
+    });
+
+    it('closes the edit drawer when the owning destination was deleted from the destinations drawer', async () => {
+      await act(async () => {
+        render(React.createElement(GlobalListEditDrawer));
+      });
+      await screen.findByText('No family members');
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Destinations' }));
+      });
+      expect(screen.getByText('destinations drawer for trip-1')).toBeTruthy();
+
+      (api.getPackingList as any).mockResolvedValueOnce({ response: { ok: false, status: 404 }, data: {} });
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Close destinations' }));
+      });
+
+      await waitFor(() => expect(closeMock).toHaveBeenCalled());
+      expect(showNotification).toHaveBeenCalledWith(expect.objectContaining({
+        message: 'This list was deleted',
+      }));
     });
   });
 }
