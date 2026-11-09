@@ -33,14 +33,19 @@ export function TripsPage() {
   }, []);
 
   const createTrip = async () => {
-    if (!name || !startDate || !endDate) {
-      setError('Name, start date, and end date are required');
+    const trimmed = name.trim();
+    if (!trimmed) {
+      setError('Trip name is required');
+      return;
+    }
+    if (!!startDate !== !!endDate) {
+      setError('Add both dates or leave both empty.');
       return;
     }
     try {
       setCreating(true);
       setError(null);
-      await tripApi.createTrip({ name, startDate, endDate });
+      await tripApi.createTrip(startDate && endDate ? { name: trimmed, startDate, endDate } : { name: trimmed });
       setName('');
       setStartDate('');
       setEndDate('');
@@ -59,10 +64,22 @@ export function TripsPage() {
         <Text fw={600}>{trip.name}</Text>
         {trip.tripType && <Badge variant="light">{trip.tripType}</Badge>}
       </Group>
-      <Text size="sm" c="dimmed">{formatTripDateRange(trip.startDate, trip.endDate)}</Text>
+      {formatTripDateRange(trip.startDate, trip.endDate) && (
+        <Text size="sm" c="dimmed">{formatTripDateRange(trip.startDate, trip.endDate)}</Text>
+      )}
       {trip.description && <Text size="sm">{trip.description}</Text>}
     </Card>
   );
+
+  const datedTrips = trips.filter(trip => !!trip.startDate);
+  const datelessTrips = trips.filter(trip => !trip.startDate);
+
+  const renderTrips = (group: Trip[]) =>
+    viewMode === 'card' ? (
+      <SimpleGrid cols={{ base: 1, sm: 2, md: 3 }}>{group.map(tripCard)}</SimpleGrid>
+    ) : (
+      <Stack gap="xs">{group.map(tripCard)}</Stack>
+    );
 
   return (
     <Container size="lg" py="md">
@@ -86,8 +103,8 @@ export function TripsPage() {
       <Modal opened={showCreate} onClose={() => setShowCreate(false)} title="Create trip">
         <Stack>
           <TextInput placeholder="Trip name" aria-label="Trip name" value={name} onChange={e => setName(e.currentTarget.value)} />
-          <TextInput type="date" label="Start date" value={startDate} onChange={e => setStartDate(e.currentTarget.value)} />
-          <TextInput type="date" label="End date" value={endDate} onChange={e => setEndDate(e.currentTarget.value)} />
+          <TextInput type="date" label="Start date (optional)" value={startDate} onChange={e => setStartDate(e.currentTarget.value)} />
+          <TextInput type="date" label="End date (optional)" value={endDate} onChange={e => setEndDate(e.currentTarget.value)} />
           <Button onClick={createTrip} loading={creating}>Save Trip</Button>
         </Stack>
       </Modal>
@@ -96,10 +113,16 @@ export function TripsPage() {
         <Loader size="sm" aria-label="Loading trips" />
       ) : trips.length === 0 ? (
         <Text c="dimmed">No trips yet. Create your first trip!</Text>
-      ) : viewMode === 'card' ? (
-        <SimpleGrid cols={{ base: 1, sm: 2, md: 3 }}>{trips.map(tripCard)}</SimpleGrid>
       ) : (
-        <Stack gap="xs">{trips.map(tripCard)}</Stack>
+        <Stack gap="lg">
+          {datedTrips.length > 0 && renderTrips(datedTrips)}
+          {datelessTrips.length > 0 && (
+            <div>
+              <Title order={4} mb="xs">No dates</Title>
+              {renderTrips(datelessTrips)}
+            </div>
+          )}
+        </Stack>
       )}
     </Container>
   );
