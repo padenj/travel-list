@@ -9,6 +9,7 @@ export default defineConfig({
     globals: true,
     setupFiles: ['./tests/setup.ts'],
     include: [
+      'client/src/__tests__/SplitListDialog.test.tsx', // Split-by-destination dialog
       'client/src/__tests__/GlobalListEditDrawer.test.tsx', // Targeted client regression coverage
       'client/src/__tests__/Dashboard.test.tsx', // Dashboard edit-list regression coverage
       'client/src/__tests__/ActivePackingListContext.test.tsx', // Active packing list context coverage
