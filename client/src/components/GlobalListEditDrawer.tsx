@@ -40,6 +40,7 @@ export default function GlobalListEditDrawer() {
   const isDestination = !!tripId;
   const saveTimer = useRef<number | null>(null);
   const debounceTimer = useRef<number | null>(null);
+  const pendingSave = useRef<{ listId: string; next: string[] } | null>(null);
   const memberReqCounter = useRef(0);
   const isEditingNameRef = useRef(false);
 
@@ -53,11 +54,18 @@ export default function GlobalListEditDrawer() {
 
   useEffect(() => {
     sessionRef.current++;
-    if (!isOpen || !listId) return;
     if (debounceTimer.current) {
       window.clearTimeout(debounceTimer.current);
       debounceTimer.current = null;
     }
+    // Flush a pending debounced save for the previous session so the user's click isn't lost;
+    // its result is intentionally ignored.
+    const pending = pendingSave.current;
+    pendingSave.current = null;
+    if (pending) {
+      updatePackingList(pending.listId, { memberIds: pending.next }).catch(err => console.error('Failed to flush members', err));
+    }
+    if (!isOpen || !listId) return;
     newestSavedReq.current = ++memberReqCounter.current;
     setMoving(false);
     setSavingMembers(false);
@@ -179,9 +187,8 @@ export default function GlobalListEditDrawer() {
     }
   }
 
-  const putMembers = async (next: string[]): Promise<boolean> => {
+  const putMembers = async (next: string[], session: number): Promise<boolean> => {
     if (!listId) return false;
-    const session = sessionRef.current;
     const isCurrentList = () => sessionRef.current === session;
     const reqId = ++memberReqCounter.current;
     const isLatest = () => memberReqCounter.current === reqId;
@@ -235,10 +242,13 @@ export default function GlobalListEditDrawer() {
     setMembersSaved(false);
     setConflict(null);
     setSavingMembers(true);
+    const session = sessionRef.current;
+    pendingSave.current = { listId, next };
     debounceTimer.current = window.setTimeout(async () => {
-      const session = sessionRef.current;
+      debounceTimer.current = null;
+      pendingSave.current = null;
       try {
-        await putMembers(next);
+        await putMembers(next, session);
       } finally {
         if (sessionRef.current === session) setSavingMembers(false);
       }
@@ -261,7 +271,7 @@ export default function GlobalListEditDrawer() {
       if (other) {
         await tripApi.updateDestination(tripId, other.id, { memberIds: other.memberIds.filter(id => id !== conflict.memberId) });
       }
-      const saved = await putMembers(conflict.pending);
+      const saved = await putMembers(conflict.pending, session);
       if (switched()) return;
       if (saved) setSelectedMemberIds(conflict.pending);
     } catch (err) {

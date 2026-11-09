@@ -318,4 +318,51 @@ describe('GlobalListEditDrawer destination members', () => {
     expect(showNotification).not.toHaveBeenCalled();
     expect(screen.queryByText('Move')).toBeNull();
   });
+
+  async function startMoveThenSwitch(utils: any, destGate: any) {
+    (tripApi.updateDestination as any).mockReturnValueOnce(destGate.promise);
+    await tick('Bob');
+    await act(async () => { fireEvent.click(await screen.findByText('Move')); });
+    await waitFor(() => expect(tripApi.updateDestination).toHaveBeenCalled());
+    await switchToB(utils);
+  }
+
+  it('a Move whose updateDestination resolves after a switch, then PUT 409s, leaves B untouched', async () => {
+    const gate = deferred();
+    (api.updatePackingList as any).mockResolvedValueOnce(conflict409).mockResolvedValueOnce(conflict409).mockResolvedValue(ok);
+    (tripApi.listDestinations as any).mockResolvedValue([{ id: 'dest-2', name: 'Rome', memberIds: ['m2', 'm3'] }]);
+    const utils = await setup(['m1']);
+    await startMoveThenSwitch(utils, gate);
+    await act(async () => { gate.resolve({}); });
+    await waitFor(() => expect(api.updatePackingList).toHaveBeenCalledTimes(2));
+    await expectUntouchedB();
+  });
+
+  it('a Move PUT that succeeds after a switch does not change B, and B rolls back to its own members', async () => {
+    const gate = deferred();
+    (api.updatePackingList as any).mockResolvedValueOnce(conflict409).mockResolvedValueOnce(ok);
+    (tripApi.listDestinations as any).mockResolvedValue([{ id: 'dest-2', name: 'Rome', memberIds: ['m2', 'm3'] }]);
+    const utils = await setup(['m1']);
+    await startMoveThenSwitch(utils, gate);
+    await act(async () => { gate.resolve({}); });
+    await waitFor(() => expect(api.updatePackingList).toHaveBeenCalledTimes(2));
+    await expectUntouchedB();
+    (api.updatePackingList as any).mockResolvedValue({ response: { ok: false, status: 500 }, data: {} });
+    await tick('Ann');
+    await waitFor(() => expect(showNotification).toHaveBeenCalled());
+    expect(box('Bob').checked).toBe(true);
+    expect(box('Ann').checked).toBe(false);
+  });
+
+  it('closing within the debounce window still sends the PUT for the old list', async () => {
+    const utils = await setup(['m1']);
+    await act(async () => { fireEvent.click(box('Bob')); });
+    expect(api.updatePackingList).not.toHaveBeenCalled();
+    current.listId = null as any;
+    await act(async () => { utils.rerender(<GlobalListEditDrawer />); });
+    expect(api.updatePackingList).toHaveBeenCalledTimes(1);
+    expect(api.updatePackingList).toHaveBeenCalledWith('list-1', { memberIds: ['m1', 'm2'] });
+    await act(async () => { await new Promise(r => setTimeout(r, 600)); });
+    expect(api.updatePackingList).toHaveBeenCalledTimes(1);
+  });
 });
