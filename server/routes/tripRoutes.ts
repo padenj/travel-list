@@ -16,7 +16,7 @@ import {
   DestinationConflictError,
   DestinationValidationError,
 } from '../repositories/tripDestinationRepository';
-import { splitListIntoTrip, moveAllSharedItemsTx, validateSameTripDifferentDestinations, notify } from '../services/tripSplitService';
+import { splitListIntoTrip, moveAllSharedItemsTx, notify } from '../services/tripSplitService';
 import { withTransaction } from '../utils/transaction';
 
 export const tripRouter = Router();
