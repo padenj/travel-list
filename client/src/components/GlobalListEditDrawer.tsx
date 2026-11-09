@@ -10,8 +10,9 @@ import AddItemsDrawer from './AddItemsDrawer';
 import { useImpersonation } from '../contexts/ImpersonationContext';
 import { tripApi } from '../api/tripApi';
 import { useOnline } from '../utils/useOnline';
-import { describeMemberConflict } from '../utils/destinationErrors';
+import { describeMemberConflict, destinationErrorText } from '../utils/destinationErrors';
 import MemberConflictAlert from './MemberConflictAlert';
+import ManageDestinationsDrawer from './ManageDestinationsDrawer';
 
 export default function GlobalListEditDrawer() {
   const { isOpen, listId, listName, close, renderFn, openForList } = useListEditDrawer();
@@ -31,6 +32,9 @@ export default function GlobalListEditDrawer() {
   const [savingMembers, setSavingMembers] = useState(false);
   const [membersSaved, setMembersSaved] = useState(false);
   const [tripId, setTripId] = useState<string | null>(null);
+  const [ownDestination, setOwnDestination] = useState<{ id: string; name: string } | null>(null);
+  const [destinationsOpen, setDestinationsOpen] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
   const [conflict, setConflict] = useState<{ listId: string; memberId: string; destinationId: string; destinationName: string; onlyMember: boolean; pending: string[] } | null>(null);
   const [moving, setMoving] = useState(false);
   const savedMemberIds = useRef<string[]>([]);
@@ -69,6 +73,7 @@ export default function GlobalListEditDrawer() {
     setSelectedMemberIds([]);
     savedMemberIds.current = [];
     setTripId(null);
+    setOwnDestination(null);
     if (debounceTimer.current) {
       window.clearTimeout(debounceTimer.current);
       debounceTimer.current = null;
@@ -81,6 +86,7 @@ export default function GlobalListEditDrawer() {
       trackSave(pending.listId, updatePackingList(pending.listId, { memberIds: pending.next })).catch(err => console.error('Failed to flush members', err));
     }
     if (!isOpen || !listId) {
+      setDestinationsOpen(false);
       setLoading(false);
       return;
     }
@@ -89,6 +95,7 @@ export default function GlobalListEditDrawer() {
     setSavingMembers(false);
     isEditingNameRef.current = false;
     setIsEditingName(false);
+    setSavingName(false);
     setCurrentName(listName || null);
     setNameDraft(listName || '');
     (async () => {
@@ -113,9 +120,10 @@ export default function GlobalListEditDrawer() {
           setEditAssignedTemplates([]);
           return;
         }
-        setCurrentName(res.data.name || listName || null);
+        const storedName = res.data.list?.name || res.data.name || listName || null;
+        setCurrentName(storedName);
         if (!isEditingNameRef.current) {
-          setNameDraft(res.data.name || listName || '');
+          setNameDraft(storedName || '');
           setIsEditingName(false);
         }
         setEditItems((res.data.items || []).map((it: any) => ({ ...it, itemId: it.item_id, oneOff: !!it.master_is_one_off, whole_family: !!it.whole_family })));
@@ -124,6 +132,8 @@ export default function GlobalListEditDrawer() {
         setSelectedMemberIds(memberIds || []);
         savedMemberIds.current = memberIds || [];
         setTripId(res.data.trip_destination?.tripId ?? null);
+        const own = (res.data.trip_destination?.destinations || []).find((d: any) => d.packingListId === listId);
+        setOwnDestination(own ? { id: own.id, name: own.name } : null);
         setConflict(null);
 
         try {
@@ -156,7 +166,7 @@ export default function GlobalListEditDrawer() {
         if (!stale()) setLoading(false);
       }
     })();
-  }, [isOpen, listId, impersonatingFamilyId]);
+  }, [isOpen, listId, impersonatingFamilyId, reloadKey]);
 
   useEffect(() => {
     if (pendingOpenEditId) {
@@ -296,10 +306,16 @@ export default function GlobalListEditDrawer() {
     // If the list switches mid-Move we still finish the server steps for the original list
     // (so the member is never left in no destination) but touch no UI state.
     try {
+      const own = ownDestination;
       const sequence = (async () => {
-        const other = (await tripApi.listDestinations(tripId)).find(d => d.id === conflict.destinationId);
-        if (other) {
-          await tripApi.updateDestination(tripId, other.id, { memberIds: other.memberIds.filter(id => id !== conflict.memberId) });
+        if (own) {
+          // The server takes the person, and their items, out of the other destination.
+          await tripApi.updateDestination(tripId, own.id, { memberIds: conflict.pending, moveFrom: true });
+        } else {
+          const other = (await tripApi.listDestinations(tripId)).find(d => d.id === conflict.destinationId);
+          if (other) {
+            await tripApi.updateDestination(tripId, other.id, { memberIds: other.memberIds.filter(id => id !== conflict.memberId) });
+          }
         }
         return putMembers(conflict.pending, session);
       })();
@@ -317,13 +333,13 @@ export default function GlobalListEditDrawer() {
 
   const startRenaming = () => {
     isEditingNameRef.current = true;
-    setNameDraft(currentName || listName || '');
+    setNameDraft(ownDestination ? ownDestination.name : (currentName || listName || ''));
     setIsEditingName(true);
   };
 
   const cancelRenaming = () => {
     isEditingNameRef.current = false;
-    setNameDraft(currentName || listName || '');
+    setNameDraft(ownDestination ? ownDestination.name : (currentName || listName || ''));
     setIsEditingName(false);
   };
 
@@ -335,9 +351,30 @@ export default function GlobalListEditDrawer() {
       return;
     }
 
+    const session = sessionRef.current;
+    const stale = () => sessionRef.current !== session;
     setSavingName(true);
     try {
+      if (ownDestination && tripId) {
+        const own = ownDestination;
+        await tripApi.updateDestination(tripId, own.id, { name: trimmed });
+        if (stale()) return;
+        // The stored list name is the trip/destination label, so read it back from the server.
+        const reloaded = await getPackingList(listId);
+        if (stale()) return;
+        const label = (reloaded.response.ok && (reloaded.data.list?.name || reloaded.data.name)) || trimmed;
+        isEditingNameRef.current = false;
+        setOwnDestination({ ...own, name: trimmed });
+        setCurrentName(label);
+        setNameDraft(trimmed);
+        setIsEditingName(false);
+        if (refreshLists) await refreshLists();
+        if (stale()) return;
+        showNotification({ title: 'Renamed', message: 'Destination renamed', color: 'green' });
+        return;
+      }
       const res = await updatePackingList(listId, { name: trimmed });
+      if (stale()) return;
       if (res.response.ok) {
         isEditingNameRef.current = false;
         setCurrentName(trimmed);
@@ -350,9 +387,10 @@ export default function GlobalListEditDrawer() {
       }
     } catch (err) {
       console.error('Failed to rename list', err);
-      showNotification({ title: 'Error', message: 'Failed to rename list', color: 'red' });
+      if (stale()) return;
+      showNotification({ title: 'Error', message: destinationErrorText(err, 'Failed to rename list'), color: 'red' });
     } finally {
-      setSavingName(false);
+      if (!stale()) setSavingName(false);
     }
   };
 
@@ -360,7 +398,7 @@ export default function GlobalListEditDrawer() {
 
   return (
     <>
-      <Drawer opened={isOpen} onClose={close} title={`Edit Packing List`} position="right" size={720} padding="md">
+      <Drawer opened={isOpen} onClose={close} title={currentName || 'Edit Packing List'} position="right" size={720} padding="md">
         <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
           <Group style={{ marginBottom: 8, gap: 8 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -384,15 +422,17 @@ export default function GlobalListEditDrawer() {
                   </Button>
                 </>
               ) : (
-                <>
-                  <Text fw={700} style={{ minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{currentName || ''}</Text>
-                  <ActionIcon aria-label="Rename list" onClick={startRenaming} size="md">
-                    <IconEdit size={16} />
-                  </ActionIcon>
-                </>
+                <ActionIcon aria-label="Rename list" onClick={startRenaming} size="md">
+                  <IconEdit size={16} />
+                </ActionIcon>
               )}
             </div>
             <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+              {tripId && (
+                <Button size="xs" variant="light" disabled={!online} onClick={() => setDestinationsOpen(true)}>
+                  {online ? 'Destinations' : 'Needs a connection'}
+                </Button>
+              )}
               <Button size="xs" onClick={() => openAddItemsPane()}>Add Items</Button>
             </div>
           </Group>
@@ -557,6 +597,16 @@ export default function GlobalListEditDrawer() {
 
         </div>
       </Drawer>
+
+      <ManageDestinationsDrawer
+        opened={destinationsOpen}
+        tripId={tripId}
+        onClose={() => {
+          setDestinationsOpen(false);
+          void refreshLists?.();
+          setReloadKey(k => k + 1);
+        }}
+      />
 
       <AddItemsDrawer
         opened={showAddPane}

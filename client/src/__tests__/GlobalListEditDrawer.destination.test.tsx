@@ -20,6 +20,7 @@ vi.mock('../contexts/ActivePackingListContext', () => ({
 }));
 vi.mock('../components/ItemEditDrawer', () => ({ default: () => null }));
 vi.mock('../components/AddItemsDrawer', () => ({ default: () => null }));
+vi.mock('../components/ManageDestinationsDrawer', () => ({ default: () => null }));
 
 vi.mock('@mantine/core', () => {
   const R = require('react');
@@ -40,11 +41,11 @@ vi.mock('@mantine/core', () => {
 const ok = { response: { ok: true, status: 200 }, data: {} };
 const conflict409 = { response: { ok: false, status: 409 }, data: { error: 'member_in_other_destination', memberId: 'm2', destinationId: 'dest-2' } };
 
-async function setup(memberIds: string[] = ['m1']) {
+async function setup(memberIds: string[] = ['m1'], destinations: any[] = []) {
   let utils: any;
   (api.getPackingList as any).mockResolvedValue({
     response: { ok: true },
-    data: { name: 'Paris', items: [], template_ids: [], list: { member_ids: memberIds }, trip_destination: { tripId: 'trip-1', tripName: 'T', destinations: [] } },
+    data: { name: 'Paris', items: [], template_ids: [], list: { member_ids: memberIds }, trip_destination: { tripId: 'trip-1', tripName: 'T', destinations } },
   });
   (api.getCurrentUserProfile as any).mockResolvedValue({
     response: { ok: true },
@@ -99,6 +100,18 @@ describe('GlobalListEditDrawer destination members', () => {
     expect(screen.queryByText(/already in Rome/)).toBeNull();
   });
 
+  it('Move on a known destination moves the person and their items in one call', async () => {
+    (api.updatePackingList as any).mockResolvedValueOnce(conflict409).mockResolvedValue(ok);
+    (tripApi.listDestinations as any).mockResolvedValue([{ id: 'dest-2', name: 'Rome', memberIds: ['m2', 'm3'] }]);
+    (tripApi.updateDestination as any).mockResolvedValue({});
+    await setup(['m1'], [{ id: 'dest-1', tripId: 'trip-1', name: 'Paris', color: 'blue', position: 0, packingListId: 'list-1', memberIds: ['m1'] }]);
+    await tick('Bob');
+    await act(async () => { fireEvent.click(await screen.findByText('Move')); });
+    await waitFor(() => expect(tripApi.updateDestination).toHaveBeenCalledWith('trip-1', 'dest-1', { memberIds: ['m1', 'm2'], moveFrom: true }));
+    expect(tripApi.updateDestination).not.toHaveBeenCalledWith('trip-1', 'dest-2', expect.anything());
+    await waitFor(() => expect(box('Bob').checked).toBe(true));
+  });
+
   it('only-member conflict offers Got it and no Move', async () => {
     (api.updatePackingList as any).mockResolvedValue(conflict409);
     (tripApi.listDestinations as any).mockResolvedValue([{ id: 'dest-2', name: 'Rome', memberIds: ['m2'] }]);
@@ -131,7 +144,7 @@ describe('GlobalListEditDrawer destination members', () => {
     await setup();
     await act(async () => { window.dispatchEvent(new Event('offline')); });
     expect(box('Bob').disabled).toBe(true);
-    expect(screen.getByText('Needs a connection')).toBeTruthy();
+    expect(screen.getAllByText('Needs a connection').length).toBeGreaterThan(0);
   });
 
   const deferred = () => {

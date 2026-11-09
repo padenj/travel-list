@@ -56,6 +56,14 @@ if (!hasTestingLibs) {
     default: () => null,
   }));
 
+  vi.mock('../api/tripApi', () => ({
+    tripApi: { listDestinations: vi.fn(), updateDestination: vi.fn() },
+  }));
+
+  vi.mock('../components/ManageDestinationsDrawer', () => ({
+    default: ({ opened, tripId }: any) => (opened ? require('react').createElement('div', null, `destinations drawer for ${tripId}`) : null),
+  }));
+
   vi.mock('@mantine/core', () => {
     const React = require('react');
 
@@ -92,7 +100,7 @@ if (!hasTestingLibs) {
       Badge: passthrough('div'),
       Button: passthrough('button'),
       Checkbox: (props: any) => React.createElement('input', { type: 'checkbox', ...props }),
-      Drawer: passthrough('div'),
+      Drawer: ({ children, title }: any) => React.createElement('div', null, React.createElement('h2', null, title), children),
       Group: passthrough('div'),
       Modal: passthrough('div'),
       Text: passthrough('div'),
@@ -102,9 +110,11 @@ if (!hasTestingLibs) {
   });
 
   let GlobalListEditDrawer: any;
+  let tripApi: any;
   beforeAll(async () => {
     const mod = await import('../components/GlobalListEditDrawer');
     GlobalListEditDrawer = mod.default;
+    tripApi = (await import('../api/tripApi')).tripApi;
   });
 
   describe('GlobalListEditDrawer', () => {
@@ -198,6 +208,74 @@ if (!hasTestingLibs) {
         expect(input.value).toBe('Draft name');
       });
       expect(screen.queryByRole('button', { name: 'Rename list' })).toBeNull();
+    });
+  });
+
+  describe('GlobalListEditDrawer on a destination list', () => {
+    let serverName = 'Spring Break · Paris';
+    const destination = { id: 'dest-1', tripId: 'trip-1', name: 'Paris', color: 'blue', position: 0, packingListId: 'list-1', memberIds: [] };
+
+    beforeEach(() => {
+      vi.clearAllMocks();
+      serverName = 'Spring Break · Paris';
+      (api.getPackingList as any).mockImplementation(() => Promise.resolve({
+        response: { ok: true },
+        data: {
+          items: [],
+          template_ids: [],
+          list: { name: serverName, member_ids: [] },
+          trip_destination: { tripId: 'trip-1', tripName: 'Spring Break', destinations: [destination] },
+        },
+      }));
+      (api.getCurrentUserProfile as any).mockResolvedValue({ response: { ok: true }, data: { family: { id: 'family-1', members: [] } } });
+      (api.getItemGroups as any).mockResolvedValue({ response: { ok: true }, data: { itemGroups: [] } });
+      tripApi.updateDestination.mockImplementation(async (_t: string, _d: string, payload: any) => {
+        serverName = `Spring Break · ${payload.name}`;
+        return { ...destination, name: payload.name };
+      });
+      refreshLists.mockResolvedValue(undefined);
+    });
+
+    it('titles the drawer with the label', async () => {
+      await act(async () => {
+        render(React.createElement(GlobalListEditDrawer));
+      });
+      expect(await screen.findByRole('heading', { name: 'Spring Break · Paris' })).toBeTruthy();
+    });
+
+    it('renames the destination with the pencil', async () => {
+      await act(async () => {
+        render(React.createElement(GlobalListEditDrawer));
+      });
+      await screen.findByRole('heading', { name: 'Spring Break · Paris' });
+      await screen.findByText('No family members');
+
+      act(() => {
+        fireEvent.click(screen.getByRole('button', { name: 'Rename list' }));
+      });
+      const input = screen.getByDisplayValue('Paris');
+      await act(async () => {
+        fireEvent.change(input, { target: { value: 'Lyon' } });
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Save list name' }));
+      });
+
+      await waitFor(() => expect(tripApi.updateDestination).toHaveBeenCalledWith('trip-1', 'dest-1', { name: 'Lyon' }));
+      expect(await screen.findByRole('heading', { name: 'Spring Break · Lyon' })).toBeTruthy();
+      expect(api.updatePackingList).not.toHaveBeenCalledWith('list-1', expect.objectContaining({ name: expect.anything() }));
+      expect(refreshLists).toHaveBeenCalled();
+    });
+
+    it('opens the destinations drawer', async () => {
+      await act(async () => {
+        render(React.createElement(GlobalListEditDrawer));
+      });
+      await screen.findByText('No family members');
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Destinations' }));
+      });
+      expect(screen.getByText('destinations drawer for trip-1')).toBeTruthy();
     });
   });
 }
