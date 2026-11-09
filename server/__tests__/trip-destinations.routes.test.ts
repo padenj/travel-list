@@ -1,8 +1,9 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import request from 'supertest';
 import express from 'express';
 import routes from '../routes';
 import { closeDb } from '../db';
+import { TripRepository } from '../repositories/tripRepository';
 import { generateToken } from '../auth';
 import { seedFamilyTrip, createList, createMasterItem, addToList, listRows } from '../test-utils/destinationFixtures';
 
@@ -129,6 +130,78 @@ describe('trip destination routes', () => {
     expect(deleted.status).toBe(204);
     const listed = await request(app).get(`/api/trips/${seed.tripId}/destinations`).set('Authorization', auth);
     expect(listed.body.map((d: any) => d.id)).toEqual([paris.id]);
+  });
+
+  it('moves shared rows to the target on delete and keeps personal rows when the list is kept', async () => {
+    const { res } = await splitSource();
+    const [paris, grandma] = res.body.destinations;
+    const shared = await addToList(grandma.packingListId, await createMasterItem(seed.familyId, 'Car seat', { wholeFamily: true }));
+    const personal = await addToList(grandma.packingListId, await createMasterItem(seed.familyId, 'Teddy', { memberIds: [seed.ava] }));
+
+    const deleted = await request(app).delete(`/api/trips/${seed.tripId}/destinations/${grandma.id}`).set('Authorization', auth)
+      .send({ moveSharedItemsTo: paris.id });
+    expect(deleted.status).toBe(204);
+    expect((await listRows(paris.packingListId)).map(r => r.id)).toEqual([shared]);
+    expect((await listRows(grandma.packingListId)).map(r => r.id)).toEqual([personal]);
+    const list = await seed.db.get(`SELECT deleted_at FROM packing_lists WHERE id = ?`, [grandma.packingListId]);
+    expect(list.deleted_at).toBeNull();
+  });
+
+  it('returns 400 when moveSharedItemsTo is a destination of another trip', async () => {
+    const { res } = await splitSource();
+    const grandma = res.body.destinations[1];
+    const otherTrip = await new TripRepository().createTrip(seed.familyId, { name: 'Summer', startDate: '2027-07-01', endDate: '2027-07-08' });
+    const created = await request(app).post(`/api/trips/${otherTrip.id}/destinations`).set('Authorization', auth)
+      .send({ name: 'Rome', memberIds: [seed.dad] });
+    expect(created.status).toBe(201);
+    const deleted = await request(app).delete(`/api/trips/${seed.tripId}/destinations/${grandma.id}`).set('Authorization', auth)
+      .send({ moveSharedItemsTo: created.body.id });
+    expect(deleted.status).toBe(400);
+    expect(deleted.body.error).toBe('invalid_target_destination');
+  });
+
+  it('leaves everything untouched when delete fails inside the transaction', async () => {
+    const { res } = await splitSource();
+    const [paris, grandma] = res.body.destinations;
+    const shared = await addToList(grandma.packingListId, await createMasterItem(seed.familyId, 'Car seat', { wholeFamily: true }));
+    const linksBefore = await seed.db.get(`SELECT COUNT(*) AS n FROM trip_packing_lists WHERE trip_id = ? AND packing_list_id = ?`, [seed.tripId, grandma.packingListId]);
+    const realRun = seed.db.run.bind(seed.db);
+    const spy = vi.spyOn(seed.db, 'run').mockImplementation(((sql: any, ...args: any[]) => {
+      if (typeof sql === 'string' && sql.includes('UPDATE trip_destinations SET deleted_at')) throw new Error('boom');
+      return (realRun as any)(sql, ...args);
+    }) as any);
+    try {
+      const deleted = await request(app).delete(`/api/trips/${seed.tripId}/destinations/${grandma.id}`).set('Authorization', auth)
+        .send({ moveSharedItemsTo: paris.id, deleteList: true });
+      expect(deleted.status).toBe(500);
+    } finally {
+      spy.mockRestore();
+    }
+    const dest = await seed.db.get(`SELECT deleted_at FROM trip_destinations WHERE id = ?`, [grandma.id]);
+    expect(dest.deleted_at).toBeNull();
+    const list = await seed.db.get(`SELECT deleted_at FROM packing_lists WHERE id = ?`, [grandma.packingListId]);
+    expect(list.deleted_at).toBeNull();
+    const links = await seed.db.get(`SELECT COUNT(*) AS n FROM trip_packing_lists WHERE trip_id = ? AND packing_list_id = ?`, [seed.tripId, grandma.packingListId]);
+    expect(links.n).toBe(linksBefore.n);
+    expect((await listRows(grandma.packingListId)).map(r => r.id)).toEqual([shared]);
+    expect(await listRows(paris.packingListId)).toEqual([]);
+  });
+
+  it('forbids another family from moving items or editing members', async () => {
+    const { res } = await splitSource();
+    const [paris, grandma] = res.body.destinations;
+    const row = await addToList(paris.packingListId, await createMasterItem(seed.familyId, 'Car seat', { wholeFamily: true }));
+    const other = await seedFamilyTrip();
+    const otherDad = await other.db.get(`SELECT * FROM users WHERE id = ?`, [other.dad]);
+    const otherAuth = `Bearer ${generateToken(otherDad)}`;
+
+    const moved = await request(app).post(`/api/packing-lists/${paris.packingListId}/items/${row}/move`)
+      .set('Authorization', otherAuth).send({ toListId: grandma.packingListId });
+    expect(moved.status).toBe(403);
+    const put = await request(app).put(`/api/packing-lists/${paris.packingListId}`)
+      .set('Authorization', otherAuth).send({ memberIds: [seed.dad] });
+    expect(put.status).toBe(403);
+    expect((await listRows(paris.packingListId)).map(r => r.id)).toEqual([row]);
   });
 
   it('updates a destination', async () => {

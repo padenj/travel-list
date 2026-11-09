@@ -27,7 +27,7 @@ export class MoveValidationError extends Error {}
 
 const destinationRepo = new TripDestinationRepository();
 
-function notify(listIds: string[], change: 'split' | 'move') {
+export function notify(listIds: string[], change: 'split' | 'move') {
   for (const listId of listIds) {
     try {
       broadcastEvent({ type: 'packing_list_changed', listId, data: { change } });
@@ -165,7 +165,7 @@ export async function splitListIntoTrip(input: SplitInput): Promise<SplitResult>
   return { destinations: await destinationRepo.listForTrip(input.tripId), skippedCount };
 }
 
-async function validateSameTripDifferentDestinations(fromListId: string, toListId: string) {
+export async function validateSameTripDifferentDestinations(fromListId: string, toListId: string) {
   const from = await destinationRepo.findByPackingListId(fromListId);
   const to = await destinationRepo.findByPackingListId(toListId);
   if (!from || !to || from.tripId !== to.tripId || from.id === to.id) {
@@ -238,17 +238,19 @@ export async function moveSharedItem(input: { fromListId: string; pliId: string;
   return { id, listId: input.toListId };
 }
 
+export async function moveAllSharedItemsTx(db: Database, fromListId: string, toListId: string): Promise<number> {
+  const rows = (await db.all(
+    `SELECT pli.id, pli.item_id AS itemId FROM packing_list_items pli JOIN item_whole_family iwf ON iwf.item_id = pli.item_id WHERE pli.packing_list_id = ?`,
+    [fromListId]
+  )) as { id: string; itemId: string | null }[];
+  for (const row of rows) await moveSharedRowTx(db, row, toListId);
+  return rows.length;
+}
+
 export async function moveAllSharedItems(fromListId: string, toListId: string): Promise<number> {
   await validateSameTripDifferentDestinations(fromListId, toListId);
   const db = await getDb();
-  const count = await withTransaction(db, async () => {
-    const rows = (await db.all(
-      `SELECT pli.id, pli.item_id AS itemId FROM packing_list_items pli JOIN item_whole_family iwf ON iwf.item_id = pli.item_id WHERE pli.packing_list_id = ?`,
-      [fromListId]
-    )) as { id: string; itemId: string | null }[];
-    for (const row of rows) await moveSharedRowTx(db, row, toListId);
-    return rows.length;
-  });
+  const count = await withTransaction(db, () => moveAllSharedItemsTx(db, fromListId, toListId));
   if (count > 0) notify([fromListId, toListId], 'move');
   return count;
 }

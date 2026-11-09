@@ -16,7 +16,8 @@ import {
   DestinationConflictError,
   DestinationValidationError,
 } from '../repositories/tripDestinationRepository';
-import { splitListIntoTrip, moveAllSharedItems } from '../services/tripSplitService';
+import { splitListIntoTrip, moveAllSharedItemsTx, validateSameTripDifferentDestinations, notify } from '../services/tripSplitService';
+import { withTransaction } from '../utils/transaction';
 
 export const tripRouter = Router();
 
@@ -724,18 +725,25 @@ tripRouter.delete('/:tripId/destinations/:destinationId', authMiddleware, tripAc
     if (count > 0 && !moveSharedItemsTo && !deleteList) {
       return res.status(409).json({ error: 'destination_has_items', itemCount: count });
     }
+    let target: Awaited<ReturnType<typeof tripDestinationRepository.getById>> | null = null;
     if (moveSharedItemsTo) {
-      const target = await tripDestinationRepository.getById(moveSharedItemsTo);
+      target = await tripDestinationRepository.getById(moveSharedItemsTo);
       if (!target || target.tripId !== existing.tripId || target.id === existing.id) {
         return res.status(400).json({ error: 'invalid_target_destination' });
       }
-      await moveAllSharedItems(existing.packingListId, target.packingListId);
+      await validateSameTripDifferentDestinations(existing.packingListId, target.packingListId);
     }
-    await tripDestinationRepository.softDelete(existing.id);
-    if (deleteList) {
-      await packingListRepository.softDelete(existing.packingListId);
-      await db.run(`DELETE FROM trip_packing_lists WHERE trip_id = ? AND packing_list_id = ?`, [existing.tripId, existing.packingListId]);
-    }
+    const moved = await withTransaction(db, async () => {
+      const movedCount = target ? await moveAllSharedItemsTx(db, existing.packingListId, target.packingListId) : 0;
+      const now = new Date().toISOString();
+      await db.run(`UPDATE trip_destinations SET deleted_at = ?, updated_at = ? WHERE id = ?`, [now, now, existing.id]);
+      if (deleteList) {
+        await db.run(`UPDATE packing_lists SET deleted_at = ? WHERE id = ?`, [now, existing.packingListId]);
+        await db.run(`DELETE FROM trip_packing_lists WHERE trip_id = ? AND packing_list_id = ?`, [existing.tripId, existing.packingListId]);
+      }
+      return movedCount;
+    });
+    if (target && moved > 0) notify([existing.packingListId, target.packingListId], 'move');
     return res.status(204).send();
   } catch (error) {
     return sendDestinationError(res, error, 'Failed to delete destination');

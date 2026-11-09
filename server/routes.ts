@@ -895,7 +895,10 @@ router.put('/packing-lists/:id', authMiddleware, async (req: Request, res: Respo
         if (e instanceof DestinationConflictError) {
           return res.status(409).json({ error: 'member_in_other_destination', memberId: e.memberId, destinationId: e.destinationId });
         }
-        return res.status(400).json({ error: 'Invalid memberIds for this packing list' });
+        if (e instanceof DestinationValidationError) {
+          return res.status(400).json({ error: 'Invalid memberIds for this packing list' });
+        }
+        throw e;
       }
       // reflect member_ids on returned list
       delete updates.memberIds;
