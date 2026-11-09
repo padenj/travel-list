@@ -53,6 +53,7 @@ async function setup(memberIds: string[] = ['m1']) {
   (api.getItemGroups as any).mockResolvedValue({ response: { ok: true }, data: { itemGroups: [] } });
   await act(async () => { utils = render(<GlobalListEditDrawer />); });
   await screen.findByLabelText('Bob');
+  await waitFor(() => expect(box('Bob').disabled).toBe(false));
   return utils;
 }
 
@@ -231,6 +232,7 @@ describe('GlobalListEditDrawer destination members', () => {
     current.listId = 'list-2';
     await act(async () => { utils.rerender(<GlobalListEditDrawer />); });
     await waitFor(() => expect(box('Bob').checked).toBe(true));
+    await waitFor(() => expect(box('Bob').disabled).toBe(false));
     expect(box('Ann').checked).toBe(false);
     await act(async () => { a.resolve(conflict409); });
     await act(async () => { await new Promise(r => setTimeout(r, 50)); });
@@ -248,6 +250,7 @@ describe('GlobalListEditDrawer destination members', () => {
     current.listId = 'list-2';
     await act(async () => { utils.rerender(<GlobalListEditDrawer />); });
     await waitFor(() => expect(box('Bob').checked).toBe(true));
+    await waitFor(() => expect(box('Bob').disabled).toBe(false));
     expect(box('Ann').checked).toBe(false);
   }
 
@@ -309,6 +312,7 @@ describe('GlobalListEditDrawer destination members', () => {
     current.listId = 'list-1';
     await act(async () => { utils.rerender(<GlobalListEditDrawer />); });
     await waitFor(() => expect(box('Ann').checked).toBe(true));
+    await waitFor(() => expect(box('Ann').disabled).toBe(false));
     await tick('Ann');
     expect(box('Ann').checked).toBe(false);
     await act(async () => { d.resolve([{ id: 'dest-2', name: 'Rome', memberIds: ['m2', 'm3'] }]); });
@@ -352,6 +356,74 @@ describe('GlobalListEditDrawer destination members', () => {
     await waitFor(() => expect(showNotification).toHaveBeenCalled());
     expect(box('Bob').checked).toBe(true);
     expect(box('Ann').checked).toBe(false);
+  });
+
+  const listData = (name: string, memberIds: string[]) => ({
+    response: { ok: true },
+    data: { name, items: [], template_ids: [], list: { member_ids: memberIds }, trip_destination: { tripId: 'trip-1', tripName: 'T', destinations: [] } },
+  });
+  const mockFamily = () => {
+    (api.getCurrentUserProfile as any).mockResolvedValue({
+      response: { ok: true },
+      data: { family: { id: 'f1', members: [{ id: 'm1', name: 'Ann' }, { id: 'm2', name: 'Bob' }] } },
+    });
+    (api.getItemGroups as any).mockResolvedValue({ response: { ok: true }, data: { itemGroups: [] } });
+  };
+
+  it('a slow load of A does not overwrite B', async () => {
+    const loadA = deferred();
+    mockFamily();
+    (api.getPackingList as any).mockImplementation((id: string) => (id === 'list-1' ? loadA.promise : Promise.resolve(listData('Rome', ['m2']))));
+    let utils: any;
+    await act(async () => { utils = render(<GlobalListEditDrawer />); });
+    current.listId = 'list-2';
+    await act(async () => { utils.rerender(<GlobalListEditDrawer />); });
+    await waitFor(() => expect(box('Bob').checked).toBe(true));
+    await waitFor(() => expect(box('Bob').disabled).toBe(false));
+    await act(async () => { loadA.resolve(listData('Paris', ['m1'])); });
+    await act(async () => { await new Promise(r => setTimeout(r, 50)); });
+    expect(box('Bob').checked).toBe(true);
+    expect(box('Ann').checked).toBe(false);
+    expect(box('Bob').disabled).toBe(false);
+  });
+
+  it('reopening A clears a stale conflict and disables Move while loading', async () => {
+    (api.updatePackingList as any).mockResolvedValue(conflict409);
+    (tripApi.listDestinations as any).mockResolvedValue([{ id: 'dest-2', name: 'Rome', memberIds: ['m2', 'm3'] }]);
+    const utils = await setup(['m1']);
+    await tick('Bob');
+    expect(await screen.findByText(/Bob is already in Rome/)).toBeTruthy();
+    current.listId = null as any;
+    await act(async () => { utils.rerender(<GlobalListEditDrawer />); });
+    const reload = deferred();
+    (api.getPackingList as any).mockReturnValue(reload.promise);
+    current.listId = 'list-1';
+    await act(async () => { utils.rerender(<GlobalListEditDrawer />); });
+    expect(screen.queryByText(/already in Rome/)).toBeNull();
+    expect(screen.queryByText('Move')).toBeNull();
+    expect(box('Ann').disabled).toBe(true);
+    expect(box('Bob').disabled).toBe(true);
+    await act(async () => { reload.resolve(listData('Paris', ['m1'])); });
+    await waitFor(() => expect(box('Ann').disabled).toBe(false));
+  });
+
+  it('a reload of A waits for the flushed save of A', async () => {
+    const put = deferred();
+    const utils = await setup(['m1']);
+    (api.updatePackingList as any).mockReturnValueOnce(put.promise);
+    await act(async () => { fireEvent.click(box('Bob')); });
+    (api.getPackingList as any).mockImplementation((id: string) => Promise.resolve(listData(id === 'list-1' ? 'Paris' : 'Rome', id === 'list-1' ? ['m1', 'm2'] : ['m2'])));
+    current.listId = 'list-2';
+    await act(async () => { utils.rerender(<GlobalListEditDrawer />); });
+    expect(api.updatePackingList).toHaveBeenCalledWith('list-1', { memberIds: ['m1', 'm2'] });
+    await waitFor(() => expect(api.getPackingList).toHaveBeenCalledWith('list-2'));
+    (api.getPackingList as any).mockClear();
+    current.listId = 'list-1';
+    await act(async () => { utils.rerender(<GlobalListEditDrawer />); });
+    await act(async () => { await new Promise(r => setTimeout(r, 50)); });
+    expect(api.getPackingList).not.toHaveBeenCalledWith('list-1');
+    await act(async () => { put.resolve(ok); });
+    await waitFor(() => expect(api.getPackingList).toHaveBeenCalledWith('list-1'));
   });
 
   it('closing within the debounce window still sends the PUT for the old list', async () => {

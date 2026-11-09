@@ -36,6 +36,7 @@ export default function GlobalListEditDrawer() {
   const savedMemberIds = useRef<string[]>([]);
   const newestSavedReq = useRef(0);
   const sessionRef = useRef(0);
+  const flushedSaves = useRef(new Map<string, Promise<unknown>>());
   const online = useOnline();
   const isDestination = !!tripId;
   const saveTimer = useRef<number | null>(null);
@@ -53,7 +54,12 @@ export default function GlobalListEditDrawer() {
   const [pendingRemovalTemplateIds, setPendingRemovalTemplateIds] = useState<string[] | null>(null);
 
   useEffect(() => {
-    sessionRef.current++;
+    const session = ++sessionRef.current;
+    const stale = () => sessionRef.current !== session;
+    setConflict(null);
+    setSelectedMemberIds([]);
+    savedMemberIds.current = [];
+    setTripId(null);
     if (debounceTimer.current) {
       window.clearTimeout(debounceTimer.current);
       debounceTimer.current = null;
@@ -63,9 +69,13 @@ export default function GlobalListEditDrawer() {
     const pending = pendingSave.current;
     pendingSave.current = null;
     if (pending) {
-      updatePackingList(pending.listId, { memberIds: pending.next }).catch(err => console.error('Failed to flush members', err));
+      const flush = updatePackingList(pending.listId, { memberIds: pending.next }).catch(err => console.error('Failed to flush members', err));
+      flushedSaves.current.set(pending.listId, flush);
     }
-    if (!isOpen || !listId) return;
+    if (!isOpen || !listId) {
+      setLoading(false);
+      return;
+    }
     newestSavedReq.current = ++memberReqCounter.current;
     setMoving(false);
     setSavingMembers(false);
@@ -76,7 +86,14 @@ export default function GlobalListEditDrawer() {
     (async () => {
       setLoading(true);
       try {
+        const flushing = flushedSaves.current.get(listId);
+        if (flushing) {
+          await flushing.catch(() => undefined);
+          if (flushedSaves.current.get(listId) === flushing) flushedSaves.current.delete(listId);
+          if (stale()) return;
+        }
         const res = await getPackingList(listId);
+        if (stale()) return;
         if (!res.response.ok) {
           setCurrentName(listName || null);
           if (!isEditingNameRef.current) {
@@ -105,16 +122,19 @@ export default function GlobalListEditDrawer() {
           let members: any[] = [];
           if (fid) {
             const familyRes = await getFamily(fid);
+            if (stale()) return;
             if (familyRes.response.ok) {
               members = familyRes.data.family?.members || [];
             }
           } else {
             const profile = await getCurrentUserProfile();
+            if (stale()) return;
             fid = profile.response.ok && profile.data.family ? profile.data.family.id : null;
             members = profile.response.ok && profile.data.family?.members ? profile.data.family.members : [];
           }
           if (fid) {
             const tRes = await getItemGroups(fid);
+            if (stale()) return;
             if (tRes.response.ok) setTemplates(tRes.data.itemGroups || tRes.data.templates || []);
           }
           setFamilyMembers(members);
@@ -124,7 +144,7 @@ export default function GlobalListEditDrawer() {
       } catch (err) {
         console.error('Failed to load list for edit drawer', err);
       } finally {
-        setLoading(false);
+        if (!stale()) setLoading(false);
       }
     })();
   }, [isOpen, listId, impersonatingFamilyId]);
@@ -441,6 +461,7 @@ export default function GlobalListEditDrawer() {
                     destinationName={conflict.destinationName}
                     onlyMember={conflict.onlyMember}
                     moving={moving}
+                    loading={loading}
                     offline={!online}
                     onMove={moveConflictMember}
                     onDismiss={() => setConflict(null)}
@@ -458,7 +479,7 @@ export default function GlobalListEditDrawer() {
                       <div key={m.id} style={{ padding: '6px 4px', borderBottom: '1px solid rgba(0,0,0,0.02)' }}>
                         <Checkbox
                           checked={checked}
-                          disabled={(isDestination && !online) || moving}
+                          disabled={(isDestination && !online) || moving || loading}
                           onChange={(e) => {
                             const on = (e.currentTarget as HTMLInputElement).checked;
                             const next = on ? Array.from(new Set([...(selectedMemberIds || []), m.id])) : (selectedMemberIds || []).filter(id => id !== m.id);
