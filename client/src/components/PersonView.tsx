@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { ActionIcon, Button, Checkbox, Group, Menu, Stack, Text, UnstyledButton } from '@mantine/core';
 import { IconDots, IconPlus } from '@tabler/icons-react';
 import { DashboardItem, DestinationGroup, orderPeople, partitionItems, remainingFor } from '../utils/dashboardGroups';
+import { useOnline } from '../utils/useOnline';
 import { getSwipeDirection, isSwipeBlocked } from '../utils/swipe';
 
 export interface PersonViewProps {
@@ -19,21 +20,6 @@ export interface PersonViewProps {
 interface MoveTarget {
   listId: string;
   name: string;
-}
-
-function useOnline(): boolean {
-  const [online, setOnline] = useState(typeof navigator === 'undefined' ? true : navigator.onLine);
-  useEffect(() => {
-    const on = () => setOnline(true);
-    const off = () => setOnline(false);
-    window.addEventListener('online', on);
-    window.addEventListener('offline', off);
-    return () => {
-      window.removeEventListener('online', on);
-      window.removeEventListener('offline', off);
-    };
-  }, []);
-  return online;
 }
 
 interface RowActions {

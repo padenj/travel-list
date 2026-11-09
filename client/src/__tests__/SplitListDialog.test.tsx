@@ -1,12 +1,12 @@
 /* @vitest-environment jsdom */
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithMantine } from '../test-utils/renderWithMantine';
 
 vi.mock('../api', () => ({ getPackingList: vi.fn(), getFamily: vi.fn() }));
 vi.mock('../api/tripApi', () => ({
-  tripApi: { listTrips: vi.fn(), createTrip: vi.fn(), splitList: vi.fn() },
+  tripApi: { listTrips: vi.fn(), createTrip: vi.fn(), splitList: vi.fn(), listDestinations: vi.fn(), updateDestination: vi.fn() },
   ApiConflictError: class ApiConflictError extends Error {
     constructor(message: string, public body: any) { super(message); }
   },
@@ -14,7 +14,7 @@ vi.mock('../api/tripApi', () => ({
 vi.mock('@mantine/notifications', () => ({ showNotification: vi.fn() }));
 
 import { getFamily, getPackingList } from '../api';
-import { tripApi } from '../api/tripApi';
+import { tripApi, ApiConflictError } from '../api/tripApi';
 import SplitListDialog from '../components/SplitListDialog';
 
 const assign = async (person: string, destination: string) => {
@@ -102,5 +102,113 @@ describe('SplitListDialog', () => {
       ],
       sharedItemsDestinationIndex: 1,
     });
+  });
+
+  const toStep3 = async () => {
+    await finishTripStep();
+    await screen.findByRole('group', { name: 'Destination for Ava' });
+    await assign('Dad', 'Destination 1');
+    await assign('Mom', 'Destination 1');
+    await assign('Ava', 'Destination 2');
+    await userEvent.click(screen.getByRole('button', { name: 'Next' }));
+  };
+
+  it('reuses the created trip when a split is retried', async () => {
+    (tripApi.splitList as any).mockRejectedValueOnce(new Error('boom'));
+    open();
+    await toStep3();
+    await userEvent.click(screen.getByRole('button', { name: 'Split list' }));
+    await screen.findByText("Couldn't split the list. Please try again.");
+    await userEvent.click(screen.getByRole('button', { name: 'Split list' }));
+    await waitFor(() => expect(tripApi.splitList).toHaveBeenCalledTimes(2));
+    expect(tripApi.createTrip).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows readable text for known server codes', async () => {
+    (tripApi.splitList as any).mockRejectedValueOnce(new ApiConflictError('x', { error: 'unassigned_member' } as any));
+    open();
+    await toStep3();
+    await userEvent.click(screen.getByRole('button', { name: 'Split list' }));
+    expect(await screen.findByText('Everyone on the list needs a destination.')).toBeTruthy();
+  });
+
+  it('asks to move a person who is already in another destination, then retries', async () => {
+    (getPackingList as any).mockResolvedValue({ response: { ok: true }, data: { list: { member_ids: ['dad', 'mom', 'ava'] }, items: [] } });
+    (tripApi.listTrips as any).mockResolvedValue([{ id: 't9', name: 'Existing' }]);
+    (tripApi.splitList as any)
+      .mockRejectedValueOnce(new ApiConflictError('c', { error: 'member_in_other_destination', memberId: 'ava', destinationId: 'd1' }))
+      .mockResolvedValueOnce({ destinations: [], skippedCount: 0 });
+    (tripApi.listDestinations as any).mockResolvedValue([{ id: 'd1', name: 'Rome', memberIds: ['ava', 'leo'] }]);
+    (tripApi.updateDestination as any).mockResolvedValue({});
+    open();
+    await userEvent.click(await screen.findByText('Existing trip'));
+    await userEvent.click(screen.getByRole('textbox', { name: 'Trip' }));
+    await userEvent.click(await screen.findByText('Existing'));
+    await userEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await screen.findByRole('group', { name: 'Destination for Ava' });
+    await assign('Dad', 'Destination 1');
+    await assign('Mom', 'Destination 1');
+    await assign('Ava', 'Destination 2');
+    await userEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Split list' }));
+    expect(await screen.findByText('Ava is already in Rome on this trip. Move them here?')).toBeTruthy();
+    await userEvent.click(screen.getByRole('button', { name: 'Move' }));
+    await waitFor(() => expect(tripApi.splitList).toHaveBeenCalledTimes(2));
+    expect(tripApi.updateDestination).toHaveBeenCalledWith('t9', 'd1', { memberIds: ['leo'] });
+    expect(tripApi.createTrip).not.toHaveBeenCalled();
+  });
+
+  it('can cancel the move prompt', async () => {
+    (tripApi.listTrips as any).mockResolvedValue([{ id: 't9', name: 'Existing' }]);
+    (tripApi.splitList as any).mockRejectedValueOnce(new ApiConflictError('c', { error: 'member_in_other_destination', memberId: 'ava', destinationId: 'd1' }));
+    (tripApi.listDestinations as any).mockResolvedValue([{ id: 'd1', name: 'Rome', memberIds: ['ava'] }]);
+    open();
+    await userEvent.click(await screen.findByText('Existing trip'));
+    await userEvent.click(screen.getByRole('textbox', { name: 'Trip' }));
+    await userEvent.click(await screen.findByText('Existing'));
+    await userEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await screen.findByRole('group', { name: 'Destination for Ava' });
+    await assign('Dad', 'Destination 1');
+    await assign('Mom', 'Destination 1');
+    await assign('Ava', 'Destination 2');
+    await userEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Split list' }));
+    await screen.findByRole('button', { name: 'Move' });
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('button', { name: 'Move' })).toBeNull();
+    expect(tripApi.updateDestination).not.toHaveBeenCalled();
+  });
+
+  it('recovers after adding and removing a third destination', async () => {
+    open();
+    await finishTripStep();
+    await screen.findByRole('group', { name: 'Destination for Ava' });
+    await assign('Dad', 'Destination 1');
+    await assign('Mom', 'Destination 1');
+    await assign('Ava', 'Destination 2');
+    await userEvent.click(screen.getByRole('button', { name: '+ Add destination' }));
+    const next = () => screen.getByRole('button', { name: 'Next' }) as HTMLButtonElement;
+    expect(next().disabled).toBe(true);
+    expect(screen.queryByRole('button', { name: 'Remove Destination 1' })).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: 'Remove Destination 3' }));
+    expect(next().disabled).toBe(false);
+  });
+
+  it('shows an error and blocks Next when the list fails to load', async () => {
+    (getPackingList as any).mockResolvedValue({ response: { ok: false }, data: {} });
+    open();
+    expect(await screen.findByText(/Could not load the list/)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText(/Start date/), { target: { value: '2027-03-01' } });
+    fireEvent.change(screen.getByLabelText(/End date/), { target: { value: '2027-03-08' } });
+    expect((screen.getByRole('button', { name: 'Next' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('disables Split when the browser goes offline', async () => {
+    open();
+    await toStep3();
+    act(() => { window.dispatchEvent(new Event('offline')); });
+    const btn = await screen.findByRole('button', { name: 'Needs a connection' });
+    expect((btn as HTMLButtonElement).disabled).toBe(true);
+    act(() => { window.dispatchEvent(new Event('online')); });
   });
 });
