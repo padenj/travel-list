@@ -161,7 +161,7 @@ This document maps server routes implemented in `server/routes.ts` to their purp
   - Client helper: `getFamilyPackingLists`
 
 - POST /families/:familyId/packing-lists
-  - Purpose: Create a packing list for a family (optionally populate from template).
+  - Purpose: Create a packing list for a family (optionally populate from template). The list gets its own dateless trip with one destination named after the list.
   - Client helper: `createPackingList`
 
 - GET /packing-lists/:id
@@ -173,11 +173,11 @@ This document maps server routes implemented in `server/routes.ts` to their purp
   - Client helper: `populatePackingListFromTemplate`
 
 - PUT /packing-lists/:id
-  - Purpose: Update packing list metadata (name, template assignments, memberIds, etc.). With `memberIds` on a destination list, enforces the one-destination-per-person rule (409 `member_in_other_destination`).
+  - Purpose: Update packing list metadata (name, template assignments, memberIds, etc.). With `memberIds` on a destination list, enforces the one-destination-per-person rule (409 `member_in_other_destination`). A `name` on a destination list renames the destination; the stored list name becomes its label ("<trip> · <destination>", or the trip name when they match).
   - Client helper: `updatePackingList`
 
 - DELETE /packing-lists/:id
-  - Purpose: Soft-delete a packing list. For a trip destination list, the destination is soft-deleted too.
+  - Purpose: Delete a packing list. If it is its trip's only destination, the whole trip is deleted (as `DELETE /trips/:tripId`). Otherwise its destination is deleted with the list (`deleteList`).
   - Client helper: `deletePackingList`
 
 - POST /packing-lists/:id/items
@@ -206,6 +206,30 @@ This document maps server routes implemented in `server/routes.ts` to their purp
 
 ---
 
+## Trips
+
+- GET /trips
+  - Purpose: The family's trips, including dateless ones.
+  - Client helper: `tripApi.listTrips`
+
+- POST /trips
+  - Purpose: Create a trip. Only `name` is required; dates are optional. The trip starts with one destination named after it, with `memberIds` (default: every family member).
+  - Client helper: `tripApi.createTrip`
+
+- PUT /trips/:tripId
+  - Purpose: Update a trip. A rename also renames any destination that had the trip's old name, then renames the destination lists to their new labels.
+  - Client helper: `tripApi.updateTrip`
+
+- DELETE /trips/:tripId
+  - Purpose: Delete a trip with its destinations and their lists.
+  - Client helper: `tripApi.deleteTrip`
+
+- POST /trips/:tripId/copy
+  - Purpose: Body `{ name, includeOneOffs }`. Creates a dateless trip with a copy of every destination and its list (members, item groups, unchecked items; one-off items only with `includeOneOffs`). Returns 201 `{ trip, destinations }`.
+  - Client helper: `tripApi.copyTrip`
+
+---
+
 ## Trip Destinations
 
 - GET /trips/:tripId/destinations
@@ -213,19 +237,19 @@ This document maps server routes implemented in `server/routes.ts` to their purp
   - Client helper: `tripApi.listDestinations`
 
 - POST /trips/:tripId/destinations
-  - Purpose: Create a destination with a new list (or adopt `packingListId`), set members, add item groups. 409 `member_in_other_destination` when a person is already in another destination.
+  - Purpose: Create a destination with a new list (or adopt `packingListId`, which must have no trip or be the only destination of a dateless "shell" trip — no dates, elements, bookings, locations, guests or other lists; otherwise 400 `list_in_other_trip`), set members, add item groups. 409 `member_in_other_destination` when a person is already in another destination, unless `moveFrom: true`, which moves them with their items. `sharedItemsTo: 'existing' | 'new'` (only used when the trip had one destination) decides where whole-family items go.
   - Client helper: `tripApi.createDestination`
 
 - PUT /trips/:tripId/destinations/:destinationId
-  - Purpose: Rename, recolor, reorder or change members (same 409 rule).
+  - Purpose: Rename, recolor, reorder or change members (same 409 rule; `moveFrom: true` moves people with their items; 400 `would_empty_destination` if that would leave another destination with nobody). Renaming updates the list name to the label.
   - Client helper: `tripApi.updateDestination`
 
 - DELETE /trips/:tripId/destinations/:destinationId
-  - Purpose: Remove a destination atomically. Body `{ moveSharedItemsTo?, deleteList? }`; 409 `destination_has_items` when the list has items and neither is given.
+  - Purpose: Remove a destination atomically. Body `{ moveSharedItemsTo?, deleteList? }`; 409 `last_destination` when it is the trip's only destination; 409 `destination_has_items` when the list has items and neither is given. A kept list moves into its own new trip.
   - Client helper: `tripApi.deleteDestination`
 
 - POST /trips/:tripId/split
-  - Purpose: Split a list into destinations in one transaction (personal items follow their people with their checks; shared items go to the chosen destination). Returns `{ destinations, skippedCount }`.
+  - Purpose: Kept for old clients. Split a list into destinations in one transaction on the shared move logic (personal items follow their people with their checks; shared items go to the chosen destination). Returns `{ destinations, skippedCount }`.
   - Client helper: `tripApi.splitList`
 
 ---

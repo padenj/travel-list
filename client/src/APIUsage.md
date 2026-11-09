@@ -32,7 +32,6 @@ This document maps functions exported from `client/src/api.ts` to the client-sid
 - `getFamilies`, `getFamily`, `createFamily`, `deleteFamily`:
   - client/src/pages/SystemAdminPage.tsx
   - client/src/components/BulkEditDrawer.tsx (uses `getFamily`)
-  - client/src/components/SplitListDialog.tsx (uses `getFamily`)
   - client/src/components/TripPackingSection.tsx (uses `getFamily`)
   - client/src/components/Dashboard.tsx (uses `getFamily`)
 
@@ -63,7 +62,6 @@ This document maps functions exported from `client/src/api.ts` to the client-sid
   - client/src/components/PackingListAuditPanel.tsx
   - client/src/components/PackingListItemAuditModal.tsx
   - client/src/pages/PackingListPage.tsx
-  - client/src/components/SplitListDialog.tsx (`getPackingList`, `getFamily`)
   - client/src/components/TripPackingSection.tsx (`getPackingList`, `getFamily`)
   - client/src/components/AddDestinationDialog.tsx (`getFamilyPackingLists`, `getItemGroups`)
 
@@ -106,10 +104,14 @@ Keep this checklist updated as you complete migration verification and removal s
   - client/src/components/ItemEditDrawer.tsx
 
 ### Trip tracking (`client/src/api/tripApi.ts`)
-- `getTrips`, `createTrip`, `updateTrip`, `deleteTrip`:
+- `getTrips`, `createTrip` (dates optional; the trip starts with one destination), `updateTrip` (a rename also renames its destination lists), `deleteTrip` (also deletes the trip's destinations and lists):
   - client/src/pages/TripsPage.tsx
+  - client/src/components/ManagePackingLists.tsx (`deleteTrip` from a trip card)
+- `copyTrip`:
+  - client/src/components/ManagePackingLists.tsx (Copy on a trip card; creates a dateless copy with every destination)
 - `getTrip`, `listElements`, `listParticipants`:
   - client/src/pages/TripDetailPage.tsx
+  - client/src/components/ManageDestinationsDrawer.tsx (`getTrip`)
 - `createElement`:
   - client/src/components/AddElementDialog.tsx (flight `name` omitted; the server titles flights from their legs)
 - `updateElement` (notes only, `null` clears), `deleteElement`:
@@ -137,14 +139,12 @@ Keep this checklist updated as you complete migration verification and removal s
   - not used by the UI (kept for API completeness)
 - `listSeatsForLeg`, `assignSeat`, `removeSeat`:
   - client/src/components/FlightSeatGrid.tsx (rendered in `components/FlightSeatsTab.tsx`, once per flight leg)
-- `listDestinations`, `deleteDestination` (409 `destination_has_items` → `ApiConflictError`):
-  - client/src/components/TripPackingSection.tsx (`listDestinations` is also used by `AddDestinationDialog.tsx` and `SplitListDialog.tsx`)
-- `createDestination`, `updateDestination`:
-  - client/src/components/AddDestinationDialog.tsx (`updateDestination` is also used by `SplitListDialog.tsx`)
-- `splitList` (409 `member_in_other_destination` → `ApiConflictError`):
-  - client/src/components/SplitListDialog.tsx
-- `listTrips`, `createTrip`:
-  - client/src/components/SplitListDialog.tsx (pick or create the trip being split into)
+- `listDestinations`, `deleteDestination` (409 `destination_has_items` or `last_destination` → `ApiConflictError`):
+  - client/src/components/TripPackingSection.tsx (`listDestinations` is also used by `AddDestinationDialog.tsx`, `GlobalListEditDrawer.tsx` and `utils/destinationErrors.ts`)
+- `createDestination` (`moveFrom`, `sharedItemsTo`), `updateDestination` (`moveFrom`):
+  - client/src/components/AddDestinationDialog.tsx (`updateDestination` is also used by `GlobalListEditDrawer.tsx` to rename the destination and to Move a person with their items)
+- `splitList`:
+  - not used by the UI (kept for old clients; Destinations replaced Split)
 
 ---
 

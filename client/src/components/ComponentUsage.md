@@ -76,6 +76,8 @@ Searchable item-group manager using a Mantine `Select` picker, an item-only list
 **Used in:**
   - `Dashboard`
 
+One entry per trip, labelled "<trip>" or "<trip> · N destinations" (`utils/listOptions.ts`). Upcoming trips come first by start date, then past trips (most recent first), then dateless trips by name. Choosing a trip activates its first destination's list.
+
 ### SplitRailLayout
 **Used in:**
   - Top-level layout in `AppRoutes`
@@ -107,9 +109,13 @@ Searchable item-group manager using a Mantine `Select` picker, an item-only list
   - `SplitRailLayout`
   - `ManagePackingLists`
 
+The title is the list's label. On a destination list the pencil renames the destination, "Destinations" opens `ManageDestinationsDrawer`, and Move in the member-conflict alert moves the person with their items (`moveFrom`).
+
 ### ManagePackingLists
 **Used in:**
   - `src/pages/PackingListPage`
+
+One card per trip with Set as active, Edit (one-destination trips), Destinations (`ManageDestinationsDrawer`), Copy (`tripApi.copyTrip`) and Delete (`tripApi.deleteTrip`). Trips with several destinations list each destination with its color, people and an Edit button. Trip actions are disabled offline.
 
 ### PackingListsSideBySide
 **Used in:**
@@ -227,7 +233,7 @@ Compact leg rows (`WN1234 · DEN 8:00a → DAL 10:00a`) with ✏️/🗑 per leg
 Inline-editable seat number per trip traveler.
 ### PersonView
 **Used in:**
-  - `Dashboard` (Person view)
+  - `Dashboard` (Person view; receives `categories` from `Dashboard`'s `getCategories` call)
 
 Person-first packing: a sticky chip row (one per traveler, colored by destination, showing items left), the selected person's items and their destination's shared items, a collapsed "N packed · M not needed" row, swipe to the next or previous person, and a ⋯ menu (Not needed / Move to <destination> / History). Move and not-needed actions are disabled offline (`useOnline`).
 
@@ -249,28 +255,29 @@ Person / Columns `SegmentedControl`. `useDashboardViewMode` stores the choice in
 
 Chooses which destination's notes and history are shown.
 
-### SplitListDialog
+### ManageDestinationsDrawer
 **Used in:**
-  - `Dashboard` ("Split by destination")
-  - `ManagePackingLists` ("Split")
+  - `Dashboard` ("Destinations")
+  - `GlobalListEditDrawer` ("Destinations")
+  - `ManagePackingLists` ("Destinations" on a trip card)
 
-Three steps: trip (new or existing), who goes where, and where shared items go. Uses `MemberConflictAlert` for members already in another destination, `destinationErrors` for server error messages, and is disabled offline (`useOnline`).
+Bottom drawer (full height on phones) that hosts `TripPackingSection` for one trip, so destinations can be added, renamed, re-peopled or deleted without leaving the page. Opening a destination list closes it.
 
 ### TripPackingSection
 **Used in:**
   - `TripDetailPage`
+  - `ManageDestinationsDrawer`
 
-Destination cards with travelers and progress. Tapping a card opens the dashboard; the menu renames, changes travelers or deletes. Calls `onChanged` after a destination is saved or deleted so the page reloads; write actions are disabled offline.
+Destination cards with travelers and progress. Tapping a card opens the dashboard; the menu renames, changes travelers or deletes. Delete is hidden on a trip's last destination. Calls `onChanged` after a destination is saved or deleted so the page reloads; write actions are disabled offline.
 
 ### AddDestinationDialog
 **Used in:**
   - `TripPackingSection`
 
-Create or edit a destination: name, travelers (moving someone from another destination asks first via `MemberConflictAlert`), optional item groups, or an existing list. Calls `onChanged` after saving.
+Create or edit a destination: name, travelers (moving someone from another destination asks first, then sends `moveFrom` so their items follow; `MemberConflictAlert` covers server conflicts), optional item groups, or an existing list (one with no trip, or the only destination of another dateless "shell" trip; dated trips' lists are filtered out). When the trip has one destination, asks whether shared items stay or move to the new one. Calls `onChanged` after saving.
 
 ### MemberConflictAlert
 **Used in:**
-  - `SplitListDialog`
   - `AddDestinationDialog`
   - `GlobalListEditDrawer`
 
