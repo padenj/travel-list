@@ -128,7 +128,7 @@ describe('splitListIntoTrip', () => {
     await expect(
       splitListIntoTrip({
         tripId: seed.tripId, tripName: 'Spring Break', familyId: seed.familyId, sourceListId,
-        destinations: [{ name: 'Paris', memberIds: [seed.dad] }, { name: 'Rome', memberIds: ['not-a-user'] }],
+        destinations: [{ name: 'Paris', memberIds: [seed.dad, seed.mom] }, { name: 'Rome', memberIds: [seed.ava, seed.leo, 'not-a-user'] }],
         sharedItemsDestinationIndex: 0,
       })
     ).rejects.toBeInstanceOf(DestinationValidationError);
