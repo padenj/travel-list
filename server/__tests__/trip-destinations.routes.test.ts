@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import request from 'supertest';
 import express from 'express';
+import { v4 as uuidv4 } from 'uuid';
 import routes from '../routes';
 import { closeDb } from '../db';
 import { TripRepository } from '../repositories/tripRepository';
@@ -457,6 +458,25 @@ describe('trip destination routes', () => {
     expect(destinations.body[0].memberIds.sort()).toEqual([seed.dad, seed.ava].sort());
   });
 
+  it('rejects a foreign memberId on create without leaving a half-created list', async () => {
+    const otherFamilyId = uuidv4();
+    await seed.db.run(`INSERT INTO families (id, name) VALUES (?, ?)`, [otherFamilyId, 'Other Family']);
+    const strangerId = uuidv4();
+    await seed.db.run(
+      `INSERT INTO users (id, name, username, role, familyId) VALUES (?, ?, ?, 'FamilyAdmin', ?)`,
+      [strangerId, 'Stranger', `stranger-${strangerId}`, otherFamilyId]
+    );
+    const before = await request(app).get(`/api/families/${seed.familyId}/packing-lists`).set('Authorization', auth);
+    const beforeCount = before.body.lists.length;
+
+    const created = await request(app).post(`/api/families/${seed.familyId}/packing-lists`).set('Authorization', auth)
+      .send({ name: 'Camping', memberIds: [seed.dad, strangerId] });
+
+    expect(created.status).toBe(400);
+    const after = await request(app).get(`/api/families/${seed.familyId}/packing-lists`).set('Authorization', auth);
+    expect(after.body.lists.length).toBe(beforeCount);
+  });
+
   it("deletes the whole trip when its only destination's list is deleted", async () => {
     const created = await request(app).post(`/api/families/${seed.familyId}/packing-lists`).set('Authorization', auth)
       .send({ name: 'Camping' });
@@ -487,6 +507,19 @@ describe('trip destination routes', () => {
     const put = await request(app).put(`/api/packing-lists/${res.body.destinations[0].packingListId}`).set('Authorization', auth)
       .send({ name: '  ' });
     expect(put.status).toBe(400);
+  });
+
+  it('rolls back the rename when memberIds conflict in the same update', async () => {
+    const { res } = await splitSource();
+    const paris = res.body.destinations[0];
+    // Ava is already a member of Grandma's destination in the same trip.
+    const put = await request(app).put(`/api/packing-lists/${paris.packingListId}`).set('Authorization', auth)
+      .send({ name: 'Lyon', memberIds: [seed.ava] });
+    expect(put.status).toBe(409);
+    const list = await seed.db.get(`SELECT name FROM packing_lists WHERE id = ?`, [paris.packingListId]);
+    expect(list.name).toBe('Spring Break · Paris');
+    const destinations = await request(app).get(`/api/trips/${seed.tripId}/destinations`).set('Authorization', auth);
+    expect(destinations.body.find((d: any) => d.packingListId === paris.packingListId).name).toBe('Paris');
   });
 
   it('still deletes an ordinary list', async () => {

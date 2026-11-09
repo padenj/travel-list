@@ -18,7 +18,7 @@ import { withTransaction } from './utils/transaction';
 import { tripRouter } from './routes/tripRoutes';
 import { TripDestinationRepository, DestinationConflictError, DestinationValidationError } from './repositories/tripDestinationRepository';
 import { moveSharedItem, MoveValidationError, notify } from './services/tripSplitService';
-import { createShellTripForListTx, renameDestinationTx, deleteDestinationTx } from './services/tripListService';
+import { createShellTripForListTx, deleteDestinationTx, updateDestination } from './services/tripListService';
 import { TripRepository } from './repositories/tripRepository';
 import { tripFileRouter } from './routes/tripFileRoutes';
 
@@ -728,29 +728,46 @@ router.post('/families/:familyId/packing-lists', authMiddleware, familyAccessMid
   const { name, templateId, includeTemplateAssignments = true, memberIds } = req.body;
   if (!name || name.trim() === '') return res.status(400).json({ error: 'Name is required' });
   try {
-    const newList = await packingListRepo.create({ id: uuidv4(), family_id: familyId, name: name.trim(), created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
-    // Persist member selection: if not provided, default to all current family members
+    // Resolve and validate memberIds against the family BEFORE creating anything, so a bad
+    // memberId never leaves behind a list with no trip.
+    let resolvedMemberIds: string[];
     if (!Array.isArray(memberIds) || memberIds.length === 0) {
-      // fetch current family members
       const familyMembers = await userRepo.findByFamilyId(familyId);
-      const ids = familyMembers.map(m => m.id);
-      await packingListRepo.setMemberIdsForPackingList(newList.id, ids);
-      newList.member_ids = ids;
+      resolvedMemberIds = familyMembers.map(m => m.id);
     } else {
-      await packingListRepo.setMemberIdsForPackingList(newList.id, memberIds);
-      newList.member_ids = memberIds;
+      const db0 = await getDb();
+      const placeholders = memberIds.map(() => '?').join(',');
+      const rows: any[] = await db0.all(
+        `SELECT id FROM users WHERE id IN (${placeholders}) AND familyId = ? AND deleted_at IS NULL`,
+        [...memberIds, familyId]
+      );
+      const foundIds = new Set(rows.map(r => r.id));
+      const invalid = memberIds.filter((m: string) => !foundIds.has(m));
+      if (invalid.length > 0) {
+        return res.status(400).json({ error: 'One or more memberIds are invalid for this family' });
+      }
+      resolvedMemberIds = memberIds;
     }
-    if (templateId) {
-      const before = await snapshotPackingListItemsForAudit(newList.id);
-      // record assignment and reconcile immediately for newly created list
-      await packingListRepo.setTemplatesForPackingList(newList.id, [templateId]);
-      await packingListRepo.reconcilePackingListAgainstTemplate(newList.id, templateId);
-      const after = await snapshotPackingListItemsForAudit(newList.id);
-      await auditPackingListDiff({ packingListId: newList.id, actorUserId: req.user?.id ?? null, before, after, source: 'create_list_with_template' });
-    }
-    // Every list belongs to a trip; a new list starts as the only destination of its own trip.
+
+    // List insert + member write + template reconciliation + shell trip are one transaction:
+    // if any later step fails the list never persists without a trip.
     const db = await getDb();
-    await withTransaction(db, () => createShellTripForListTx(db, { familyId, listId: newList.id, name: newList.name }));
+    const newList = await withTransaction(db, async () => {
+      const created = await packingListRepo.create({ id: uuidv4(), family_id: familyId, name: name.trim(), created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
+      await packingListRepo.setMemberIdsForPackingList(created.id, resolvedMemberIds);
+      created.member_ids = resolvedMemberIds;
+      if (templateId) {
+        const before = await snapshotPackingListItemsForAudit(created.id);
+        // record assignment and reconcile immediately for newly created list
+        await packingListRepo.setTemplatesForPackingList(created.id, [templateId]);
+        await packingListRepo.reconcilePackingListAgainstTemplate(created.id, templateId);
+        const after = await snapshotPackingListItemsForAudit(created.id);
+        await auditPackingListDiff({ packingListId: created.id, actorUserId: req.user?.id ?? null, before, after, source: 'create_list_with_template' });
+      }
+      // Every list belongs to a trip; a new list starts as the only destination of its own trip.
+      await createShellTripForListTx(db, { familyId, listId: created.id, name: created.name });
+      return created;
+    });
     return res.json({ list: newList });
   } catch (error) {
     console.error('Error creating packing list:', error);
@@ -889,25 +906,25 @@ router.put('/packing-lists/:id', authMiddleware, async (req: Request, res: Respo
       delete updates.templateIds;
       delete updates.removeItemsForRemovedTemplates;
     }
-    // Persist memberIds if provided
-    if (Object.prototype.hasOwnProperty.call(updates, 'name')) {
+    // Persist name/memberIds if provided. For a destination list both are applied atomically
+    // (members validated/written before the rename commits) and we notify only after success,
+    // so a 409/400 on the member update never leaves a stray rename applied.
+    const hasNameUpdate = Object.prototype.hasOwnProperty.call(updates, 'name');
+    const hasMemberIdsUpdate = Array.isArray(updates.memberIds);
+    if (hasNameUpdate || hasMemberIdsUpdate) {
       const destination = await tripDestinationRepo.findByPackingListId(id);
       if (destination) {
-        if (typeof updates.name !== 'string' || !updates.name.trim()) {
+        if (hasNameUpdate && (typeof updates.name !== 'string' || !updates.name.trim())) {
           return res.status(400).json({ error: 'Name is required' });
         }
-        const db = await getDb();
-        const changed = await withTransaction(db, () => renameDestinationTx(db, destination.id, updates.name.trim()));
-        notify([id, ...changed], 'destination');
-        // The stored list name is the label, already written above.
-        delete updates.name;
-      }
-    }
-    if (Array.isArray(updates.memberIds)) {
-      const destination = await tripDestinationRepo.findByPackingListId(id);
-      if (destination) {
         try {
-          await tripDestinationRepo.update(destination.id, existing.family_id, { memberIds: updates.memberIds });
+          const changed = await updateDestination({
+            destinationId: destination.id,
+            familyId: existing.family_id,
+            name: hasNameUpdate ? updates.name.trim() : undefined,
+            memberIds: hasMemberIdsUpdate ? updates.memberIds : undefined,
+          });
+          notify([id, ...changed], 'destination');
         } catch (e) {
           if (e instanceof DestinationConflictError) {
             return res.status(409).json({ error: 'member_in_other_destination', memberId: e.memberId, destinationId: e.destinationId });
@@ -917,15 +934,17 @@ router.put('/packing-lists/:id', authMiddleware, async (req: Request, res: Respo
           }
           throw e;
         }
-      } else {
+        // The stored list name is the label, already written by updateDestination.
+        delete updates.name;
+        delete updates.memberIds;
+      } else if (hasMemberIdsUpdate) {
         try {
           await packingListRepo.setMemberIdsForPackingList(id, updates.memberIds);
         } catch (e) {
           return res.status(400).json({ error: 'Invalid memberIds for this packing list' });
         }
+        delete updates.memberIds;
       }
-      // reflect member_ids on returned list
-      delete updates.memberIds;
     }
     const updated = await packingListRepo.update(id, updates);
     return res.json({ list: updated });
