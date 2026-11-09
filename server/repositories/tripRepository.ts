@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import { getDb } from '../db';
+import { withTransaction } from '../utils/transaction';
 
 export interface Trip {
   id: string;
@@ -89,14 +90,16 @@ export class TripRepository {
 
   async deleteTrip(tripId: string): Promise<void> {
     const db = await this.db;
-    await db.run(
-      `UPDATE trips SET deleted_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`,
-      [tripId]
-    );
-    // Destination lists are kept as ordinary packing lists.
-    await db.run(
-      `UPDATE trip_destinations SET deleted_at = datetime('now'), updated_at = datetime('now') WHERE trip_id = ? AND deleted_at IS NULL`,
-      [tripId]
-    );
+    await withTransaction(db, async () => {
+      await db.run(
+        `UPDATE trips SET deleted_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`,
+        [tripId]
+      );
+      // Destination lists are kept as ordinary packing lists.
+      await db.run(
+        `UPDATE trip_destinations SET deleted_at = datetime('now'), updated_at = datetime('now') WHERE trip_id = ? AND deleted_at IS NULL`,
+        [tripId]
+      );
+    });
   }
 }
