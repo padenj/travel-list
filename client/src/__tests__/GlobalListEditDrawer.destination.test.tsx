@@ -165,7 +165,7 @@ describe('GlobalListEditDrawer destination members', () => {
     expect(showNotification).not.toHaveBeenCalled();
   });
 
-  it('Move does not overwrite a newer tick made while its PUT is in flight', async () => {
+  it('disables member checkboxes while a Move PUT is in flight, then keeps the moved member', async () => {
     const put = deferred();
     (api.updatePackingList as any).mockResolvedValueOnce(conflict409).mockReturnValueOnce(put.promise).mockResolvedValue(ok);
     (tripApi.listDestinations as any).mockResolvedValue([{ id: 'dest-2', name: 'Rome', memberIds: ['m2', 'm3'] }]);
@@ -174,12 +174,15 @@ describe('GlobalListEditDrawer destination members', () => {
     await tick('Bob');
     await act(async () => { fireEvent.click(await screen.findByText('Move')); });
     await waitFor(() => expect(api.updatePackingList).toHaveBeenCalledTimes(2));
-    await act(async () => { fireEvent.click(box('Ann')); });
+    expect(box('Ann').disabled).toBe(true);
+    expect(box('Bob').disabled).toBe(true);
     await act(async () => { put.resolve(ok); });
-    expect(box('Ann').checked).toBe(false);
+    await waitFor(() => expect(box('Ann').disabled).toBe(false));
+    expect(api.updatePackingList).toHaveBeenLastCalledWith('list-1', { memberIds: ['m1', 'm2'] });
+    expect(box('Bob').checked).toBe(true);
   });
 
-  it('Move does not re-save a stale selection after a tick during updateDestination', async () => {
+  it('disables member checkboxes while updateDestination is pending, then saves the moved member', async () => {
     const upd = deferred();
     (api.updatePackingList as any).mockResolvedValueOnce(conflict409).mockResolvedValue(ok);
     (tripApi.listDestinations as any).mockResolvedValue([{ id: 'dest-2', name: 'Rome', memberIds: ['m2', 'm3'] }]);
@@ -187,10 +190,13 @@ describe('GlobalListEditDrawer destination members', () => {
     await setup();
     await tick('Bob');
     await act(async () => { fireEvent.click(await screen.findByText('Move')); });
-    await act(async () => { fireEvent.click(box('Ann')); });
+    expect(box('Ann').disabled).toBe(true);
+    expect(box('Bob').disabled).toBe(true);
     await act(async () => { upd.resolve({}); });
-    expect(box('Ann').checked).toBe(false);
-    expect(api.updatePackingList).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(api.updatePackingList).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(box('Ann').disabled).toBe(false));
+    expect(api.updatePackingList).toHaveBeenLastCalledWith('list-1', { memberIds: ['m1', 'm2'] });
+    expect(box('Bob').checked).toBe(true);
   });
 
   it('a stale success does not reset the rollback baseline', async () => {

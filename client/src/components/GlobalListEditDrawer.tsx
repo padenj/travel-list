@@ -234,14 +234,12 @@ export default function GlobalListEditDrawer() {
   const moveConflictMember = async () => {
     if (!conflict || !tripId) return;
     setMoving(true);
-    const startReq = memberReqCounter.current;
     try {
       const other = (await tripApi.listDestinations(tripId)).find(d => d.id === conflict.destinationId);
       if (other) {
         await tripApi.updateDestination(tripId, other.id, { memberIds: other.memberIds.filter(id => id !== conflict.memberId) });
       }
-      if (memberReqCounter.current !== startReq) return;
-      if (await putMembers(conflict.pending) && memberReqCounter.current === startReq + 1) {
+      if (await putMembers(conflict.pending)) {
         setSelectedMemberIds(conflict.pending);
       }
     } catch (err) {
@@ -427,7 +425,7 @@ export default function GlobalListEditDrawer() {
                       <div key={m.id} style={{ padding: '6px 4px', borderBottom: '1px solid rgba(0,0,0,0.02)' }}>
                         <Checkbox
                           checked={checked}
-                          disabled={isDestination && !online}
+                          disabled={(isDestination && !online) || moving}
                           onChange={(e) => {
                             const on = (e.currentTarget as HTMLInputElement).checked;
                             const next = on ? Array.from(new Set([...(selectedMemberIds || []), m.id])) : (selectedMemberIds || []).filter(id => id !== m.id);
