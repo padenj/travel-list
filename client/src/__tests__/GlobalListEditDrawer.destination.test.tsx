@@ -9,11 +9,11 @@ vi.mock('../api/tripApi', () => ({
   tripApi: { listDestinations: vi.fn(), updateDestination: vi.fn() },
 }));
 
-const { showNotification } = vi.hoisted(() => ({ showNotification: vi.fn() }));
+const { showNotification, current } = vi.hoisted(() => ({ showNotification: vi.fn(), current: { listId: 'list-1' } }));
 vi.mock('@mantine/notifications', () => ({ showNotification }));
 
 vi.mock('../contexts/ListEditDrawerContext', () => ({
-  useListEditDrawer: () => ({ isOpen: true, listId: 'list-1', listName: 'Paris', close: vi.fn(), renderFn: null, openForList: vi.fn() }),
+  useListEditDrawer: () => ({ isOpen: true, listId: current.listId, listName: 'Paris', close: vi.fn(), renderFn: null, openForList: vi.fn() }),
 }));
 vi.mock('../contexts/ActivePackingListContext', () => ({
   useActivePackingList: () => ({ pendingOpenEditId: null, clearPendingOpenEdit: vi.fn(), refreshLists: vi.fn() }),
@@ -41,6 +41,7 @@ const ok = { response: { ok: true, status: 200 }, data: {} };
 const conflict409 = { response: { ok: false, status: 409 }, data: { error: 'member_in_other_destination', memberId: 'm2', destinationId: 'dest-2' } };
 
 async function setup(memberIds: string[] = ['m1']) {
+  let utils: any;
   (api.getPackingList as any).mockResolvedValue({
     response: { ok: true },
     data: { name: 'Paris', items: [], template_ids: [], list: { member_ids: memberIds }, trip_destination: { tripId: 'trip-1', tripName: 'T', destinations: [] } },
@@ -50,8 +51,9 @@ async function setup(memberIds: string[] = ['m1']) {
     data: { family: { id: 'f1', members: [{ id: 'm1', name: 'Ann' }, { id: 'm2', name: 'Bob' }] } },
   });
   (api.getItemGroups as any).mockResolvedValue({ response: { ok: true }, data: { itemGroups: [] } });
-  await act(async () => { render(<GlobalListEditDrawer />); });
+  await act(async () => { utils = render(<GlobalListEditDrawer />); });
   await screen.findByLabelText('Bob');
+  return utils;
 }
 
 const box = (name: string) => screen.getByLabelText(name) as HTMLInputElement;
@@ -69,6 +71,7 @@ describe('GlobalListEditDrawer destination members', () => {
 
   beforeEach(() => {
     vi.resetAllMocks();
+    current.listId = 'list-1';
     (api.updatePackingList as any).mockResolvedValue(ok);
   });
 
@@ -212,5 +215,28 @@ describe('GlobalListEditDrawer destination members', () => {
     expect(api.updatePackingList).toHaveBeenCalledTimes(3);
     expect(box('Ann').checked).toBe(true);
     expect(box('Bob').checked).toBe(true);
+  });
+
+  it('a late 409 from list A does not set a conflict or change list B', async () => {
+    const a = deferred();
+    (api.updatePackingList as any).mockReturnValueOnce(a.promise).mockResolvedValue(ok);
+    (tripApi.listDestinations as any).mockResolvedValue([{ id: 'dest-2', name: 'Rome', memberIds: ['m2', 'm3'] }]);
+    const utils = await setup(['m1']);
+    await tick('Bob');
+    expect(api.updatePackingList).toHaveBeenCalledTimes(1);
+    (api.getPackingList as any).mockResolvedValue({
+      response: { ok: true },
+      data: { name: 'Rome', items: [], template_ids: [], list: { member_ids: ['m2'] }, trip_destination: { tripId: 'trip-1', tripName: 'T', destinations: [] } },
+    });
+    current.listId = 'list-2';
+    await act(async () => { utils.rerender(<GlobalListEditDrawer />); });
+    await waitFor(() => expect(box('Bob').checked).toBe(true));
+    expect(box('Ann').checked).toBe(false);
+    await act(async () => { a.resolve(conflict409); });
+    await act(async () => { await new Promise(r => setTimeout(r, 50)); });
+    expect(screen.queryByText(/already in Rome/)).toBeNull();
+    expect(screen.queryByText('Move')).toBeNull();
+    expect(box('Bob').checked).toBe(true);
+    expect(box('Ann').checked).toBe(false);
   });
 });

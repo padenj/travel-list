@@ -31,7 +31,7 @@ export default function GlobalListEditDrawer() {
   const [savingMembers, setSavingMembers] = useState(false);
   const [membersSaved, setMembersSaved] = useState(false);
   const [tripId, setTripId] = useState<string | null>(null);
-  const [conflict, setConflict] = useState<{ memberId: string; destinationId: string; destinationName: string; onlyMember: boolean; pending: string[] } | null>(null);
+  const [conflict, setConflict] = useState<{ listId: string; memberId: string; destinationId: string; destinationName: string; onlyMember: boolean; pending: string[] } | null>(null);
   const [moving, setMoving] = useState(false);
   const savedMemberIds = useRef<string[]>([]);
   const newestSavedReq = useRef(0);
@@ -52,6 +52,13 @@ export default function GlobalListEditDrawer() {
 
   useEffect(() => {
     if (!isOpen || !listId) return;
+    if (debounceTimer.current) {
+      window.clearTimeout(debounceTimer.current);
+      debounceTimer.current = null;
+    }
+    newestSavedReq.current = ++memberReqCounter.current;
+    setMoving(false);
+    setSavingMembers(false);
     isEditingNameRef.current = false;
     setIsEditingName(false);
     setCurrentName(listName || null);
@@ -198,7 +205,7 @@ export default function GlobalListEditDrawer() {
         const { memberId, destinationId } = res.data;
         const info = await describeMemberConflict(tripId, memberId, destinationId);
         if (!isLatest()) return false;
-        setConflict({ memberId, destinationId, ...info, pending: next });
+        setConflict({ listId, memberId, destinationId, ...info, pending: next });
       } else if (status === 400 && isDestination && next.length === 0) {
         showNotification({ title: 'Failed', message: 'A destination needs at least one person.', color: 'red' });
       } else {
@@ -233,6 +240,10 @@ export default function GlobalListEditDrawer() {
 
   const moveConflictMember = async () => {
     if (!conflict || !tripId) return;
+    if (conflict.listId !== listId) {
+      setConflict(null);
+      return;
+    }
     setMoving(true);
     try {
       const other = (await tripApi.listDestinations(tripId)).find(d => d.id === conflict.destinationId);
