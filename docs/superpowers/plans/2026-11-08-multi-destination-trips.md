@@ -1711,7 +1711,23 @@ git commit -m "feat(server): destination, split and move routes; trip context on
 Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
 ```
 
+### Addendum (from Task 2 review): keep the one-destination rule on the plain list-edit route
+
+`PUT /packing-lists/:id` in `server/routes.ts` (the `// Persist memberIds if provided` block, about line 881) calls `packingListRepo.setMemberIdsForPackingList` directly. On a destination list, that skips the one-destination rule and doesn't add new people as trip participants. Fix it inside this task:
+
+- [ ] **Addendum step A: Write a failing supertest** in `server/__tests__/trip-destinations.routes.test.ts`. Set up a trip with two destinations, where person P is in destination 1. Then `PUT /api/packing-lists/<destination 2 list id>` with `{ memberIds: [P] }` should return **409** with `{ error: 'member_in_other_destination', memberId, destinationId }`. Add a second test: putting a new family member Q (not in any destination) into destination 2's list returns 200, and Q is now a `trip_participants` row of the trip.
+
+- [ ] **Addendum step B: Implement.** In the `Array.isArray(updates.memberIds)` block, first call `tripDestinationRepo.findByPackingListId(id)`. Use the same `TripDestinationRepository` instance or import as the trip routes do, and create one at module level in `routes.ts` if needed.
+  - If the list belongs to a destination, call `tripDestinationRepo.update(destination.id, existing.family_id, { memberIds: updates.memberIds })`.
+    - Map `DestinationConflictError` to 409 `{ error: 'member_in_other_destination', memberId: err.memberId, destinationId: err.destinationId }`.
+    - Map `DestinationValidationError` to 400 `{ error: 'Invalid memberIds for this packing list' }`.
+  - Otherwise, keep the existing `setMemberIdsForPackingList` path unchanged.
+  - Use whatever variable the route already has for the list it loaded (check its name), not necessarily `existing`.
+
+- [ ] **Addendum step C:** Run the route tests and `npx tsc -p tsconfig.build.json --noEmit`, then commit.
+
 ---
+
 ## Task 7: Client types and API helpers
 
 **Files:**
