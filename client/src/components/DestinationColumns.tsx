@@ -28,8 +28,9 @@ export default function DestinationColumns({
                 padding: '6px 12px',
                 borderRadius: 8,
                 fontSize: 16,
-                color: 'white',
-                background: `var(--mantine-color-${g.color || 'blue'}-6)`,
+                color: `var(--mantine-color-${g.color || 'blue'}-light-color)`,
+                background: `var(--mantine-color-${g.color || 'blue'}-light)`,
+                borderLeft: `4px solid var(--mantine-color-${g.color || 'blue'}-filled)`,
               }}
             >
               {[g.name, g.members.map(m => m.name).join(', ')].filter(Boolean).join(' · ')}
@@ -46,6 +47,7 @@ export default function DestinationColumns({
             onToggleNotNeeded={(userId, itemId) => onToggleNotNeeded(g.listId, userId, itemId)}
             onOpenAddDrawer={userId => onOpenAddDrawer(g.listId, userId)}
             showWhole
+            fillViewport={groups.length <= 1}
             activeListId={g.listId}
             familyId={familyId}
             onRefresh={onRefresh}

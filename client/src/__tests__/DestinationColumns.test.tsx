@@ -64,4 +64,27 @@ describe('DestinationColumns', () => {
     expect(screen.queryByRole('heading')).toBeNull();
     expect(screen.getByText('columns for l1 (Whole Family)')).toBeTruthy();
   });
+
+  it('fills the viewport only for a single group', () => {
+    const { unmount } = renderWithMantine(
+      <DestinationColumns isTrip currentUserId={null} familyId="f1" groups={[group({ listId: 'a' }), group({ listId: 'b' })]} {...handlers} />
+    );
+    expect(sideBySideCalls.map(c => c.fillViewport)).toEqual([false, false]);
+    unmount();
+    sideBySideCalls.length = 0;
+    renderWithMantine(
+      <DestinationColumns isTrip currentUserId={null} familyId="f1" groups={[group({ listId: 'a' })]} {...handlers} />
+    );
+    expect(sideBySideCalls[0].fillViewport).toBe(true);
+  });
+
+  it('styles the band with the light variant and a filled left border', () => {
+    renderWithMantine(
+      <DestinationColumns isTrip currentUserId={null} familyId="f1" groups={[group({ name: 'Paris', color: 'teal' })]} {...handlers} />
+    );
+    const h = screen.getByRole('heading', { name: 'Paris' });
+    expect(h.style.background).toContain('--mantine-color-teal-light');
+    expect(h.style.color).toContain('--mantine-color-teal-light-color');
+    expect(h.style.borderLeft).toContain('--mantine-color-teal-filled');
+  });
 });

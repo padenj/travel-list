@@ -15,6 +15,8 @@ export interface PackingListProps {
   onOpenAddDrawer?: (userId: string | null) => void;
   showWhole?: boolean;
   wholeTitle?: string;
+  // when false, columns use natural content height (no viewport measurement); for stacked instances
+  fillViewport?: boolean;
   // active list id and family id are needed to edit/remove one-off packing-list items
   activeListId?: string | null;
   familyId?: string | null;
@@ -84,7 +86,7 @@ const ItemRow: React.FC<{ checked: boolean; onChange: (checked: boolean) => void
 // Fixed column width (px) used for all columns so they render equal widths
 const COLUMN_WIDTH = 203;
 
-export function PackingListsSideBySide({ userLists, wholeFamilyItems, onCheckItem, onItemNameClick, notNeededByUser = {}, notNeededWhole = [], onToggleNotNeeded, onOpenAddDrawer, showWhole = true, wholeTitle = 'Whole Family', activeListId, familyId, onRefresh, currentUserId }: PackingListProps) {
+export function PackingListsSideBySide({ userLists, wholeFamilyItems, onCheckItem, onItemNameClick, notNeededByUser = {}, notNeededWhole = [], onToggleNotNeeded, onOpenAddDrawer, showWhole = true, wholeTitle = 'Whole Family', fillViewport = true, activeListId, familyId, onRefresh, currentUserId }: PackingListProps) {
 
   // Measure available viewport height from the top of this component down to
   // the bottom of the window so columns can fill the visible area without
@@ -192,6 +194,7 @@ export function PackingListsSideBySide({ userLists, wholeFamilyItems, onCheckIte
   };
 
   useEffect(() => {
+    if (!fillViewport) { setAvailableHeight(null); return; }
     let rafId: number | null = null;
     const recalc = () => {
       if (!wrapperRef.current) return;
@@ -217,7 +220,7 @@ export function PackingListsSideBySide({ userLists, wholeFamilyItems, onCheckIte
       window.removeEventListener('scroll', schedule);
       window.removeEventListener('orientationchange', schedule);
     };
-  }, []);
+  }, [fillViewport]);
 
   // Render lists horizontally in a scrollable row. Each column is a simple
   // div (no Card box). Between columns we render a subtle vertical Divider.
@@ -248,7 +251,7 @@ export function PackingListsSideBySide({ userLists, wholeFamilyItems, onCheckIte
       );
     }
     return (
-      <div key={`col-${key}`} style={{ minWidth: COLUMN_WIDTH, width: `${COLUMN_WIDTH}px`, borderLeft: '2px solid #e0e0e0', borderRight: isLast ? '2px solid #e0e0e0' : undefined, height: availableHeight ? `${availableHeight}px` : '60vh', display: 'flex', flexDirection: 'column' }}>
+      <div key={`col-${key}`} style={{ minWidth: COLUMN_WIDTH, width: `${COLUMN_WIDTH}px`, borderLeft: '2px solid #e0e0e0', borderRight: isLast ? '2px solid #e0e0e0' : undefined, height: fillViewport ? (availableHeight ? `${availableHeight}px` : '60vh') : undefined, display: 'flex', flexDirection: 'column' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', paddingLeft: 14, background: '#fafafa', marginBottom: 0, borderTop: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <ActionIcon size="xs" variant="subtle" onClick={() => toggleCollapse(key)} aria-label={`Collapse ${title} column`} title="Collapse">
