@@ -261,4 +261,17 @@ describe('AddDestinationDialog', () => {
     expect(screen.queryByRole('button', { name: 'Move' })).toBeNull();
     expect(tripApi.createDestination).not.toHaveBeenCalled();
   });
+
+  it('opens the "use an existing list" dropdown above a 3110 modal', async () => {
+    (getFamilyPackingLists as any).mockResolvedValue({ response: { ok: true }, data: { lists: [{ id: 'l9', name: 'Spare list' }] } });
+    renderWithMantine(
+      <AddDestinationDialog opened onClose={vi.fn()} trip={trip} destinations={[]} familyMembers={familyMembers} editing={null} onSaved={vi.fn()} zIndex={3110} />
+    );
+    const select = await screen.findByPlaceholderText('Start a new list');
+    await userEvent.click(select);
+    await screen.findByText('Spare list');
+    const dropdown = document.querySelector('.mantine-Select-dropdown') as HTMLElement;
+    expect(dropdown).toBeTruthy();
+    expect(Number(dropdown.style.zIndex)).toBe(3120);
+  });
 });

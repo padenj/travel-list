@@ -203,6 +203,7 @@ export default function AddDestinationDialog({ opened, onClose, trip, destinatio
             data={freeLists.map(l => ({ value: l.id, label: l.name }))}
             value={existingListId}
             onChange={setExistingListId}
+            comboboxProps={{ zIndex: zIndex ? zIndex + 10 : undefined }}
           />
         )}
         {conflictLoading && <Loader size="sm" aria-label="Checking destinations" />}
