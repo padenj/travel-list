@@ -114,6 +114,19 @@ describe('Person view helpers', () => {
     expect(parts.notNeeded.map(i => i.id)).toEqual(['p2']);
   });
 
+  it('treats a checked item that is also not needed as not needed, not packed', () => {
+    const items = [
+      { ...paris().userLists[1].items[0], id: 'x1', checked: true },
+      { ...paris().userLists[1].items[0], id: 'x2', checked: true },
+      { ...paris().userLists[1].items[0], id: 'x3', checked: false },
+    ];
+    const parts = partitionItems(items, ['x1']);
+    expect(parts.notNeeded.map(i => i.id)).toEqual(['x1']);
+    expect(parts.packed.map(i => i.id)).toEqual(['x2']);
+    expect(parts.todo.map(i => i.id)).toEqual(['x3']);
+    expect([...parts.todo, ...parts.packed, ...parts.notNeeded]).toHaveLength(items.length);
+  });
+
   it('reports group progress excluding not-needed items', () => {
     expect(groupProgress(paris())).toEqual({ total: 2, done: 2, percent: 100 });
     expect(groupProgress(grandma())).toEqual({ total: 1, done: 0, percent: 0 });

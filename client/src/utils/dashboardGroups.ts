@@ -182,8 +182,8 @@ export function remainingFor(group: DestinationGroup, userId: string): number {
 export function partitionItems(items: DashboardItem[], notNeededIds: string[]) {
   return {
     todo: items.filter(it => !it.checked && !notNeededIds.includes(it.id)),
-    packed: items.filter(it => it.checked),
-    notNeeded: items.filter(it => !it.checked && notNeededIds.includes(it.id)),
+    packed: items.filter(it => it.checked && !notNeededIds.includes(it.id)),
+    notNeeded: items.filter(it => notNeededIds.includes(it.id)),
   };
 }
 
