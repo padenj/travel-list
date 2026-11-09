@@ -230,6 +230,17 @@ describe('trip destination routes', () => {
     expect(put.body).toMatchObject({ error: 'member_in_other_destination', memberId: seed.dad, destinationId: paris.id });
   });
 
+  it('returns 400 when an ordinary list gets a member from another family', async () => {
+    const listId = await createList(seed.familyId, 'Plain', [seed.dad]);
+    const other = await seedFamilyTrip();
+    const put = await request(app).put(`/api/packing-lists/${listId}`).set('Authorization', auth)
+      .send({ memberIds: [seed.dad, other.dad] });
+    expect(put.status).toBe(400);
+    expect(put.body).toEqual({ error: 'Invalid memberIds for this packing list' });
+    const rows = await seed.db.all(`SELECT member_id FROM packing_list_members WHERE packing_list_id = ?`, [listId]);
+    expect(rows.map((r: any) => r.member_id)).toEqual([seed.dad]);
+  });
+
   it('adds a new member to a destination list and to the trip participants', async () => {
     const created = await request(app).post(`/api/trips/${seed.tripId}/destinations`).set('Authorization', auth)
       .send({ name: 'Paris', memberIds: [seed.dad] });

@@ -885,21 +885,25 @@ router.put('/packing-lists/:id', authMiddleware, async (req: Request, res: Respo
     }
     // Persist memberIds if provided
     if (Array.isArray(updates.memberIds)) {
-      try {
-        const destination = await tripDestinationRepo.findByPackingListId(id);
-        if (destination) {
+      const destination = await tripDestinationRepo.findByPackingListId(id);
+      if (destination) {
+        try {
           await tripDestinationRepo.update(destination.id, existing.family_id, { memberIds: updates.memberIds });
-        } else {
+        } catch (e) {
+          if (e instanceof DestinationConflictError) {
+            return res.status(409).json({ error: 'member_in_other_destination', memberId: e.memberId, destinationId: e.destinationId });
+          }
+          if (e instanceof DestinationValidationError) {
+            return res.status(400).json({ error: 'Invalid memberIds for this packing list' });
+          }
+          throw e;
+        }
+      } else {
+        try {
           await packingListRepo.setMemberIdsForPackingList(id, updates.memberIds);
-        }
-      } catch (e) {
-        if (e instanceof DestinationConflictError) {
-          return res.status(409).json({ error: 'member_in_other_destination', memberId: e.memberId, destinationId: e.destinationId });
-        }
-        if (e instanceof DestinationValidationError) {
+        } catch (e) {
           return res.status(400).json({ error: 'Invalid memberIds for this packing list' });
         }
-        throw e;
       }
       // reflect member_ids on returned list
       delete updates.memberIds;
