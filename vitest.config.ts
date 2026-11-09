@@ -34,6 +34,7 @@ export default defineConfig({
       'client/src/__tests__/bookingCoverage.test.ts', // Booking coverage helpers
       'client/src/__tests__/dashboardGroups.test.ts', // Destination group builder and Person view helpers
       'client/src/__tests__/DestinationColumns.test.tsx', // Columns view destination bands
+      'client/src/__tests__/PersonView.test.tsx', // Person-first dashboard view
       'client/src/__tests__/PackingListsSideBySide.fillViewport.test.tsx', // fillViewport=false leaves column height natural
       'src/**/*.test.{ts,tsx}',           // Frontend unit tests
       'server/**/*.test.ts',              // Backend unit tests
