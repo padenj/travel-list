@@ -9,6 +9,14 @@ import { FlightTravelerSeatRepository } from '../repositories/flightTravelerSeat
 import { authMiddleware } from '../middleware';
 import { tripAccessMiddleware } from '../middleware/tripAccessMiddleware';
 import { lookupFlightStatsAutofill } from '../services/flightStatsLookupService';
+import { getDb } from '../db';
+import { PackingListRepository } from '../repositories';
+import {
+  TripDestinationRepository,
+  DestinationConflictError,
+  DestinationValidationError,
+} from '../repositories/tripDestinationRepository';
+import { splitListIntoTrip, moveAllSharedItems } from '../services/tripSplitService';
 
 export const tripRouter = Router();
 
@@ -19,6 +27,19 @@ const tripParticipantRepository = new TripParticipantRepository();
 const bookingRepository = new BookingRepository();
 const bookingTransactionRepository = new BookingTransactionRepository();
 const flightTravelerSeatRepository = new FlightTravelerSeatRepository();
+
+const tripDestinationRepository = new TripDestinationRepository();
+const packingListRepository = new PackingListRepository();
+
+function sendDestinationError(res: Response, error: unknown, fallback: string) {
+  if (error instanceof DestinationConflictError) {
+    return res.status(409).json({ error: 'member_in_other_destination', memberId: error.memberId, destinationId: error.destinationId });
+  }
+  if (error instanceof DestinationValidationError) {
+    return res.status(error.message === 'not_found' ? 404 : 400).json({ error: error.message });
+  }
+  return res.status(500).json({ error: fallback });
+}
 
 // List trips for authenticated user's family
 tripRouter.get('/', authMiddleware, async (req: Request, res: Response) => {
@@ -625,5 +646,116 @@ tripRouter.delete('/:tripId/legs/:legId/seats/:participantId', authMiddleware, t
     res.status(204).send();
   } catch (error) {
     res.status(500).json({ error: 'Failed to remove seat' });
+  }
+});
+
+// Destinations: one packing list per group of travelers
+tripRouter.get('/:tripId/destinations', authMiddleware, tripAccessMiddleware, async (req: Request, res: Response) => {
+  try {
+    res.json(await tripDestinationRepository.listForTrip(req.trip!.id));
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch destinations' });
+  }
+});
+
+tripRouter.post('/:tripId/destinations', authMiddleware, tripAccessMiddleware, async (req: Request, res: Response) => {
+  const { name, memberIds, itemGroupIds, packingListId } = req.body || {};
+  if (typeof name !== 'string' || !name.trim()) return res.status(400).json({ error: 'name is required' });
+  if (!Array.isArray(memberIds) || memberIds.length === 0) return res.status(400).json({ error: 'memberIds is required' });
+  const groupIds: string[] = Array.isArray(itemGroupIds) ? itemGroupIds : [];
+  try {
+    if (groupIds.length > 0) {
+      const db = await getDb();
+      const placeholders = groupIds.map(() => '?').join(',');
+      const found = await db.all(
+        `SELECT id FROM templates WHERE family_id = ? AND deleted_at IS NULL AND id IN (${placeholders})`,
+        [req.trip!.family_id, ...groupIds]
+      );
+      if (found.length !== new Set(groupIds).size) return res.status(400).json({ error: 'invalid_item_groups' });
+    }
+    const destination = await tripDestinationRepository.create({
+      tripId: req.trip!.id,
+      familyId: req.trip!.family_id,
+      name: name.trim(),
+      memberIds,
+      listName: `${req.trip!.name} – ${name.trim()}`,
+      packingListId: typeof packingListId === 'string' && packingListId ? packingListId : undefined,
+    });
+    if (groupIds.length > 0) {
+      const current = await packingListRepository.getTemplatesForPackingList(destination.packingListId);
+      await packingListRepository.setTemplatesForPackingList(destination.packingListId, Array.from(new Set([...current, ...groupIds])));
+      for (const groupId of groupIds) {
+        await packingListRepository.reconcilePackingListAgainstTemplate(destination.packingListId, groupId);
+      }
+    }
+    return res.status(201).json(destination);
+  } catch (error) {
+    return sendDestinationError(res, error, 'Failed to create destination');
+  }
+});
+
+tripRouter.put('/:tripId/destinations/:destinationId', authMiddleware, tripAccessMiddleware, async (req: Request, res: Response) => {
+  try {
+    const existing = await tripDestinationRepository.getById(req.params.destinationId);
+    if (!existing || existing.tripId !== req.trip!.id) return res.status(404).json({ error: 'Destination not found' });
+    const { name, color, position, memberIds } = req.body || {};
+    if (memberIds !== undefined && (!Array.isArray(memberIds) || memberIds.length === 0)) {
+      return res.status(400).json({ error: 'memberIds must be a non-empty array' });
+    }
+    const updated = await tripDestinationRepository.update(existing.id, req.trip!.family_id, {
+      name: typeof name === 'string' && name.trim() ? name.trim() : undefined,
+      color: typeof color === 'string' ? color : undefined,
+      position: typeof position === 'number' ? position : undefined,
+      memberIds,
+    });
+    return res.json(updated);
+  } catch (error) {
+    return sendDestinationError(res, error, 'Failed to update destination');
+  }
+});
+
+tripRouter.delete('/:tripId/destinations/:destinationId', authMiddleware, tripAccessMiddleware, async (req: Request, res: Response) => {
+  try {
+    const existing = await tripDestinationRepository.getById(req.params.destinationId);
+    if (!existing || existing.tripId !== req.trip!.id) return res.status(404).json({ error: 'Destination not found' });
+    const { moveSharedItemsTo, deleteList } = req.body || {};
+    const db = await getDb();
+    const { count } = await db.get(`SELECT COUNT(*) AS count FROM packing_list_items WHERE packing_list_id = ?`, [existing.packingListId]);
+    if (count > 0 && !moveSharedItemsTo && !deleteList) {
+      return res.status(409).json({ error: 'destination_has_items', itemCount: count });
+    }
+    if (moveSharedItemsTo) {
+      const target = await tripDestinationRepository.getById(moveSharedItemsTo);
+      if (!target || target.tripId !== existing.tripId || target.id === existing.id) {
+        return res.status(400).json({ error: 'invalid_target_destination' });
+      }
+      await moveAllSharedItems(existing.packingListId, target.packingListId);
+    }
+    await tripDestinationRepository.softDelete(existing.id);
+    if (deleteList) {
+      await packingListRepository.softDelete(existing.packingListId);
+      await db.run(`DELETE FROM trip_packing_lists WHERE trip_id = ? AND packing_list_id = ?`, [existing.tripId, existing.packingListId]);
+    }
+    return res.status(204).send();
+  } catch (error) {
+    return sendDestinationError(res, error, 'Failed to delete destination');
+  }
+});
+
+tripRouter.post('/:tripId/split', authMiddleware, tripAccessMiddleware, async (req: Request, res: Response) => {
+  const { sourceListId, destinations, sharedItemsDestinationIndex } = req.body || {};
+  if (typeof sourceListId !== 'string' || !sourceListId) return res.status(400).json({ error: 'sourceListId is required' });
+  try {
+    const result = await splitListIntoTrip({
+      tripId: req.trip!.id,
+      tripName: req.trip!.name,
+      familyId: req.trip!.family_id,
+      sourceListId,
+      destinations,
+      sharedItemsDestinationIndex: Number(sharedItemsDestinationIndex ?? 0),
+    });
+    return res.status(201).json(result);
+  } catch (error) {
+    return sendDestinationError(res, error, 'Failed to split list');
   }
 });

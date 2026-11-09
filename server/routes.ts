@@ -15,6 +15,8 @@ import { ERROR_CODES, USER_ROLES, HTTP_STATUS } from './constants';
 import { User, LoginRequest, ChangePasswordRequest } from './server-types';
 import { v4 as uuidv4 } from 'uuid';
 import { tripRouter } from './routes/tripRoutes';
+import { TripDestinationRepository, DestinationConflictError, DestinationValidationError } from './repositories/tripDestinationRepository';
+import { moveSharedItem, MoveValidationError } from './services/tripSplitService';
 import { tripFileRouter } from './routes/tripFileRoutes';
 
 // Extend Request type to include user
@@ -37,6 +39,7 @@ import { seedTemplatesForFamily } from './seed-templates';
 const templateRepo = new TemplateRepository();
 import { PackingListRepository } from './repositories';
 const packingListRepo = new PackingListRepository();
+const tripDestinationRepo = new TripDestinationRepository();
 import { addClient, removeClient, broadcastEvent, getClients, sseLog } from './sse';
 
 async function snapshotPackingListItemsForAudit(packingListId: string): Promise<Map<string, { name: string; appliesToScope: AppliesToScope }>> {
@@ -700,12 +703,13 @@ router.get('/families/:familyId/packing-lists', authMiddleware, familyAccessMidd
   const { familyId } = req.params;
   try {
     const lists = await packingListRepo.findAll(familyId);
+    const summaries = await tripDestinationRepo.getListSummariesForFamily(familyId);
     // Attach member_ids for each list to keep responses lightweight
     const listsWithMembers = [] as any[];
     for (const l of lists) {
       const memberIds = await packingListRepo.getMemberIdsForPackingList(l.id);
       const { notes: _notes, ...listSummary } = l as any;
-      listsWithMembers.push({ ...listSummary, member_ids: memberIds });
+      listsWithMembers.push({ ...listSummary, member_ids: memberIds, trip_destination: summaries.get(l.id) ?? null });
     }
     return res.json({ lists: listsWithMembers });
   } catch (error) {
@@ -769,7 +773,8 @@ router.get('/packing-lists/:id', authMiddleware, async (req: Request, res: Respo
   const memberIds = await packingListRepo.getMemberIdsForPackingList(id);
   (list as any).member_ids = memberIds;
   const listWithNotes = { ...(list as any), notes: typeof (list as any).notes === 'string' ? (list as any).notes : null };
-  return res.json({ list: listWithNotes, items: sanitizedItems, checks, not_needed_rows: notNeededRows, template_ids: templateIds });
+  const tripDestination = await tripDestinationRepo.getTripContextForList(id);
+  return res.json({ list: listWithNotes, items: sanitizedItems, checks, not_needed_rows: notNeededRows, template_ids: templateIds, trip_destination: tripDestination });
   } catch (error) {
     console.error('Error fetching packing list:', error);
     return res.status(500).json({ error: 'Failed to fetch packing list' });
@@ -880,8 +885,16 @@ router.put('/packing-lists/:id', authMiddleware, async (req: Request, res: Respo
     // Persist memberIds if provided
     if (Array.isArray(updates.memberIds)) {
       try {
-        await packingListRepo.setMemberIdsForPackingList(id, updates.memberIds);
+        const destination = await tripDestinationRepo.findByPackingListId(id);
+        if (destination) {
+          await tripDestinationRepo.update(destination.id, existing.family_id, { memberIds: updates.memberIds });
+        } else {
+          await packingListRepo.setMemberIdsForPackingList(id, updates.memberIds);
+        }
       } catch (e) {
+        if (e instanceof DestinationConflictError) {
+          return res.status(409).json({ error: 'member_in_other_destination', memberId: e.memberId, destinationId: e.destinationId });
+        }
         return res.status(400).json({ error: 'Invalid memberIds for this packing list' });
       }
       // reflect member_ids on returned list
@@ -1117,6 +1130,26 @@ router.patch('/packing-lists/:listId/items/:itemId/not-needed', authMiddleware, 
   } catch (error) {
     console.error('Error updating not_needed:', error);
     return res.status(500).json({ error: 'Failed to update not_needed' });
+  }
+});
+
+// Move a shared (whole-family) item to another destination of the same trip
+router.post('/packing-lists/:listId/items/:pliId/move', authMiddleware, async (req: Request, res: Response) => {
+  const { listId, pliId } = req.params;
+  const { toListId } = req.body || {};
+  if (typeof toListId !== 'string' || !toListId) return res.status(400).json({ error: 'toListId is required' });
+  try {
+    const list = await packingListRepo.findById(listId);
+    if (!list) return res.status(404).json({ error: 'Packing list not found' });
+    if (req.user?.role !== 'SystemAdmin' && req.user?.familyId !== list.family_id) return res.status(403).json({ error: 'Forbidden' });
+    const item = await moveSharedItem({ fromListId: listId, pliId, toListId });
+    return res.json({ item });
+  } catch (error) {
+    if (error instanceof MoveValidationError) {
+      return res.status(error.message === 'item_not_found' ? 404 : 400).json({ error: error.message });
+    }
+    console.error('Error moving packing list item:', error);
+    return res.status(500).json({ error: 'Failed to move item' });
   }
 });
 
