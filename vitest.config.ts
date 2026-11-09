@@ -32,6 +32,7 @@ export default defineConfig({
       'client/src/__tests__/FlightLegForm.test.tsx', // Single-leg form
       'client/src/__tests__/FlightLegList.test.tsx', // Inline leg editing
       'client/src/__tests__/bookingCoverage.test.ts', // Booking coverage helpers
+      'client/src/__tests__/dashboardGroups.test.ts', // Destination group builder and Person view helpers
       'src/**/*.test.{ts,tsx}',           // Frontend unit tests
       'server/**/*.test.ts',              // Backend unit tests
       'tests/integration/**/*.test.ts',   // Integration tests
