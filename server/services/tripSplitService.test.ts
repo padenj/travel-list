@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { v4 as uuidv4 } from 'uuid';
 import { closeDb, getDb } from '../db';
-import { splitListIntoTrip } from './tripSplitService';
+import { splitListIntoTrip, moveSharedItem, moveAllSharedItems, MoveValidationError } from './tripSplitService';
 import { DestinationValidationError, TripDestinationRepository } from '../repositories/tripDestinationRepository';
 import {
   seedFamilyTrip, createList, createMasterItem, addToList, setCheck, listRows, checksFor,
@@ -193,5 +193,79 @@ describe('splitListIntoTrip', () => {
     }
 
     expect(await snapshot()).toEqual(before);
+  });
+});
+
+describe('moveSharedItem', () => {
+  let seed: Awaited<ReturnType<typeof seedFamilyTrip>>;
+  let parisList: string;
+  let grandmaList: string;
+
+  beforeEach(async () => {
+    seed = await seedFamilyTrip();
+    const source = await createList(seed.familyId, 'Spring list', [seed.dad, seed.mom, seed.ava, seed.leo]);
+    const result = await splitListIntoTrip({
+      tripId: seed.tripId, tripName: 'Spring Break', familyId: seed.familyId, sourceListId: source,
+      destinations: [{ name: 'Paris', memberIds: [seed.dad, seed.mom] }, { name: "Grandma's", memberIds: [seed.ava, seed.leo] }],
+      sharedItemsDestinationIndex: 0,
+    });
+    parisList = result.destinations[0].packingListId;
+    grandmaList = result.destinations[1].packingListId;
+  });
+
+  afterEach(async () => {
+    await closeDb();
+  });
+
+  it('moves a shared item with its checks', async () => {
+    const item = await createMasterItem(seed.familyId, 'Car seat', { wholeFamily: true });
+    const row = await addToList(parisList, item);
+    await setCheck(row, null, true);
+
+    const moved = await moveSharedItem({ fromListId: parisList, pliId: row, toListId: grandmaList });
+
+    expect(moved).toEqual({ id: row, listId: grandmaList });
+    expect(await listRows(parisList)).toEqual([]);
+    expect((await listRows(grandmaList)).map(r => r.id)).toEqual([row]);
+    expect(await checksFor(row)).toEqual([{ member_id: null, checked: 1 }]);
+  });
+
+  it('merges into an existing row and keeps it checked if either was checked', async () => {
+    const item = await createMasterItem(seed.familyId, 'Sunscreen', { wholeFamily: true });
+    const source = await addToList(parisList, item);
+    const target = await addToList(grandmaList, item);
+    await setCheck(source, null, true);
+
+    const moved = await moveSharedItem({ fromListId: parisList, pliId: source, toListId: grandmaList });
+
+    expect(moved.id).toBe(target);
+    expect(await listRows(parisList)).toEqual([]);
+    expect(await checksFor(target)).toEqual([{ member_id: null, checked: 1 }]);
+    expect(await checksFor(source)).toEqual([]);
+  });
+
+  it('refuses to move personal items', async () => {
+    const item = await createMasterItem(seed.familyId, 'Passport', { memberIds: [seed.dad] });
+    const row = await addToList(parisList, item);
+    await expect(moveSharedItem({ fromListId: parisList, pliId: row, toListId: grandmaList }))
+      .rejects.toThrow('personal_item');
+  });
+
+  it('refuses lists that are not destinations of the same trip', async () => {
+    const other = await createList(seed.familyId, 'Other', [seed.dad]);
+    const item = await createMasterItem(seed.familyId, 'Umbrella', { wholeFamily: true });
+    const row = await addToList(parisList, item);
+    await expect(moveSharedItem({ fromListId: parisList, pliId: row, toListId: other }))
+      .rejects.toBeInstanceOf(MoveValidationError);
+  });
+
+  it('moves all shared items at once', async () => {
+    const a = await addToList(parisList, await createMasterItem(seed.familyId, 'A', { wholeFamily: true }));
+    const b = await addToList(parisList, await createMasterItem(seed.familyId, 'B', { wholeFamily: true }));
+    await addToList(parisList, await createMasterItem(seed.familyId, 'Passport', { memberIds: [seed.dad] }));
+
+    expect(await moveAllSharedItems(parisList, grandmaList)).toBe(2);
+    expect((await listRows(grandmaList)).map(r => r.id).sort()).toEqual([a, b].sort());
+    expect(await listRows(parisList)).toHaveLength(1);
   });
 });

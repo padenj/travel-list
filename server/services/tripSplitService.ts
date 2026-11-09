@@ -164,3 +164,66 @@ export async function splitListIntoTrip(input: SplitInput): Promise<SplitResult>
   notify(listIds, 'split');
   return { destinations: await destinationRepo.listForTrip(input.tripId), skippedCount };
 }
+
+async function moveSharedRowTx(db: Database, row: { id: string; itemId: string | null }, toListId: string): Promise<string> {
+  const existing = row.itemId
+    ? await db.get(`SELECT id FROM packing_list_items WHERE packing_list_id = ? AND item_id = ?`, [toListId, row.itemId])
+    : null;
+  if (!existing) {
+    await moveRowTx(db, row.id, toListId);
+    return row.id;
+  }
+  const sourceChecked = await db.get(
+    `SELECT 1 AS yes FROM packing_list_item_checks WHERE packing_list_item_id = ? AND checked = 1 LIMIT 1`,
+    [row.id]
+  );
+  const targetChecked = await db.get(
+    `SELECT 1 AS yes FROM packing_list_item_checks WHERE packing_list_item_id = ? AND checked = 1 LIMIT 1`,
+    [existing.id]
+  );
+  if (sourceChecked && !targetChecked) {
+    await db.run(`DELETE FROM packing_list_item_checks WHERE packing_list_item_id = ?`, [existing.id]);
+    await db.run(
+      `INSERT INTO packing_list_item_checks (id, packing_list_item_id, member_id, checked, checked_at) VALUES (?, ?, NULL, 1, ?)`,
+      [uuidv4(), existing.id, new Date().toISOString()]
+    );
+  }
+  for (const table of ['packing_list_item_checks', 'packing_list_item_not_needed', 'packing_list_item_templates']) {
+    await db.run(`DELETE FROM ${table} WHERE packing_list_item_id = ?`, [row.id]);
+  }
+  await db.run(`DELETE FROM packing_list_items WHERE id = ?`, [row.id]);
+  return existing.id;
+}
+
+export async function moveSharedItem(input: { fromListId: string; pliId: string; toListId: string }): Promise<{ id: string; listId: string }> {
+  const from = await destinationRepo.findByPackingListId(input.fromListId);
+  const to = await destinationRepo.findByPackingListId(input.toListId);
+  if (!from || !to || from.tripId !== to.tripId || from.id === to.id) {
+    throw new MoveValidationError('not_same_trip');
+  }
+  const db = await getDb();
+  const row = await db.get(
+    `SELECT pli.id, pli.item_id AS itemId, CASE WHEN iwf.item_id IS NULL THEN 0 ELSE 1 END AS whole
+     FROM packing_list_items pli LEFT JOIN item_whole_family iwf ON iwf.item_id = pli.item_id
+     WHERE pli.id = ? AND pli.packing_list_id = ?`,
+    [input.pliId, input.fromListId]
+  );
+  if (!row) throw new MoveValidationError('item_not_found');
+  if (!row.whole) throw new MoveValidationError('personal_item');
+
+  const id = await withTransaction(db, () => moveSharedRowTx(db, row, input.toListId));
+  notify([input.fromListId, input.toListId], 'move');
+  return { id, listId: input.toListId };
+}
+
+export async function moveAllSharedItems(fromListId: string, toListId: string): Promise<number> {
+  const db = await getDb();
+  const rows = await db.all(
+    `SELECT pli.id FROM packing_list_items pli JOIN item_whole_family iwf ON iwf.item_id = pli.item_id WHERE pli.packing_list_id = ?`,
+    [fromListId]
+  );
+  for (const { id } of rows as { id: string }[]) {
+    await moveSharedItem({ fromListId, pliId: id, toListId });
+  }
+  return rows.length;
+}
