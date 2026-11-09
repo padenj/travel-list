@@ -137,6 +137,14 @@ export async function splitListIntoTrip(input: SplitInput): Promise<SplitResult>
 
   const listIds: string[] = [];
   const skippedCount = await withTransaction(db, async () => {
+    const sourceMembers = (await db.all(
+      `SELECT member_id FROM packing_list_members WHERE packing_list_id = ?`,
+      [input.sourceListId]
+    )) as { member_id: string }[];
+    const assigned = new Set(input.destinations.flatMap(d => d.memberIds));
+    if (sourceMembers.some(m => !assigned.has(m.member_id))) {
+      throw new DestinationValidationError('unassigned_member');
+    }
     for (const [index, dest] of input.destinations.entries()) {
       const name = dest.name.trim();
       const destinationId = await destinationRepo.insertDestinationTx(db, {
