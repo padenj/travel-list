@@ -28,11 +28,12 @@ if (!hasTestingLibs) {
 
   vi.mock('../api');
 
-  const { requestOpenEdit, openForList, showNotification, activeListState } = vi.hoisted(() => ({
+  const { requestOpenEdit, openForList, showNotification, activeListState, columnsProps } = vi.hoisted(() => ({
     requestOpenEdit: vi.fn(),
     openForList: vi.fn(),
     showNotification: vi.fn(),
     activeListState: { id: 'list-1' as string },
+    columnsProps: { last: null as any },
   }));
 
   vi.mock('@mantine/notifications', () => ({ showNotification }));
@@ -78,6 +79,19 @@ if (!hasTestingLibs) {
   vi.mock('../components/PackingListItemAuditModal', () => ({
     default: () => null,
   }));
+  vi.mock('../components/PersonView', () => ({ default: () => null }));
+  vi.mock('../components/DestinationColumns', () => ({
+    default: (props: any) => {
+      columnsProps.last = props;
+      return null;
+    },
+  }));
+  vi.mock('../components/DashboardViewToggle', () => ({
+    default: () => null,
+    useDashboardViewMode: () => ['columns', () => {}],
+  }));
+  vi.mock('../components/NotesDestinationPicker', () => ({ default: () => null }));
+  vi.mock('../components/SplitListDialog', () => ({ default: () => null }));
 
   vi.mock('@mantine/core', () => {
     const React = require('react');
@@ -112,6 +126,7 @@ if (!hasTestingLibs) {
       vi.clearAllMocks();
       vi.useRealTimers();
       activeListState.id = 'list-1';
+      columnsProps.last = null;
       (apiModule.getCurrentUserProfile as any).mockResolvedValue({
         response: { ok: true },
         data: { user: { id: 'u1' }, family: { id: 'f1', members: [] } },
@@ -327,6 +342,103 @@ if (!hasTestingLibs) {
       await Promise.resolve();
 
       expect((textarea as HTMLTextAreaElement).value).toBe('second-save');
+    });
+    const tripContext = {
+      tripId: 't1',
+      tripName: 'Spring Break',
+      destinations: [
+        { id: 'd1', tripId: 't1', name: 'Paris', color: 'blue', position: 0, packingListId: 'list-1', memberIds: [] },
+        { id: 'd2', tripId: 't1', name: "Grandma's", color: 'green', position: 1, packingListId: 'list-2', memberIds: [] },
+      ],
+    };
+
+    it('loads every destination of the trip as a group', async () => {
+      (apiModule.getPackingList as any).mockImplementation(() => Promise.resolve({
+        response: { ok: true },
+        data: { items: [], checks: [], list: { notes: '' }, trip_destination: tripContext },
+      }));
+
+      render(
+        <MemoryRouter>
+          <Dashboard />
+        </MemoryRouter>
+      );
+
+      await waitFor(() => expect(columnsProps.last?.groups.map((g: any) => g.name)).toEqual(['Paris', "Grandma's"]));
+      expect(apiModule.getPackingList).toHaveBeenCalledWith('list-2');
+      expect(columnsProps.last.isTrip).toBe(true);
+      expect(screen.getByText('Spring Break · 2 destinations')).toBeTruthy();
+    });
+
+    it('refreshes when another destination of the trip changes', async () => {
+      (apiModule.getPackingList as any).mockImplementation(() => Promise.resolve({
+        response: { ok: true },
+        data: { items: [], checks: [], list: { notes: '' }, trip_destination: tripContext },
+      }));
+      render(
+        <MemoryRouter>
+          <Dashboard />
+        </MemoryRouter>
+      );
+      await waitFor(() => expect(columnsProps.last?.groups).toHaveLength(2));
+      const before = (apiModule.getPackingList as any).mock.calls.length;
+
+      window.dispatchEvent(new CustomEvent('server-event', { detail: { type: 'packing_list_changed', listId: 'list-2', data: {} } }));
+
+      await waitFor(() => expect((apiModule.getPackingList as any).mock.calls.length).toBeGreaterThan(before));
+    });
+
+    it('offers splitting an ordinary list', async () => {
+      render(
+        <MemoryRouter>
+          <Dashboard />
+        </MemoryRouter>
+      );
+      expect(await screen.findByRole('button', { name: 'Split by destination' })).toBeTruthy();
+    });
+
+    it('loads the whole trip in destination order when a later destination list is active', async () => {
+      activeListState.id = 'list-2';
+      (apiModule.getPackingList as any).mockImplementation(() => Promise.resolve({
+        response: { ok: true },
+        data: { items: [], checks: [], list: { notes: '' }, trip_destination: tripContext },
+      }));
+      render(
+        <MemoryRouter>
+          <Dashboard />
+        </MemoryRouter>
+      );
+      await waitFor(() => expect(columnsProps.last?.groups.map((g: any) => g.listId)).toEqual(['list-1', 'list-2']));
+      expect(apiModule.getPackingList).toHaveBeenCalledWith('list-1');
+      expect(screen.queryByRole('button', { name: 'Split by destination' })).toBeNull();
+    });
+
+    it('sends checks to the list of the destination they belong to', async () => {
+      (apiModule.getPackingList as any).mockImplementation((listId: string) => Promise.resolve({
+        response: { ok: true },
+        data: {
+          items: [{ id: `pli-${listId}`, item_id: null, display_name: 'Tent', whole_family: true, members: [] }],
+          checks: [],
+          list: { notes: '' },
+          trip_destination: tripContext,
+        },
+      }));
+      (apiModule.togglePackingListItemCheck as any).mockResolvedValue({ response: { ok: true }, data: {} });
+      render(
+        <MemoryRouter>
+          <Dashboard />
+        </MemoryRouter>
+      );
+      await waitFor(() => expect(columnsProps.last?.groups).toHaveLength(2));
+
+      columnsProps.last.onCheckItem('list-2', null, 'pli-list-2', true);
+
+      await waitFor(() => expect(apiModule.togglePackingListItemCheck).toHaveBeenCalledWith('list-2', 'pli-list-2', null, true));
+      await waitFor(() => {
+        const [paris, grandmas] = columnsProps.last.groups;
+        expect(grandmas.wholeFamilyItems[0].checked).toBe(true);
+        expect(paris.wholeFamilyItems[0].checked).toBe(false);
+      });
     });
   });
 }
