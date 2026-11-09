@@ -5,6 +5,7 @@ import ActivePackingListSelector from './ActivePackingListSelector';
 import AddItemsDrawer from './AddItemsDrawer';
 import PackingListAuditPanel from './PackingListAuditPanel';
 import PackingListItemAuditModal from './PackingListItemAuditModal';
+import { useOnline } from '../utils/useOnline';
 import PersonView from './PersonView';
 import DestinationColumns from './DestinationColumns';
 import DashboardViewToggle, { useDashboardViewMode } from './DashboardViewToggle';
@@ -26,6 +27,7 @@ export default function Dashboard(): React.ReactElement {
   const { activeListId, requestOpenEdit, availableLists, refreshLists } = useActivePackingList();
   const { openForList } = useListEditDrawer();
   const { impersonatingFamilyId } = useImpersonation();
+  const online = useOnline();
   const [viewMode, setViewMode] = useDashboardViewMode();
   const [groups, setGroups] = useState<DestinationGroup[]>([]);
   const [tripInfo, setTripInfo] = useState<{ id: string; name: string } | null>(null);
@@ -37,14 +39,13 @@ export default function Dashboard(): React.ReactElement {
   const [auditRefreshKey, setAuditRefreshKey] = useState(0);
   const [itemAudit, setItemAudit] = useState<{ listId: string; pliId: string; name: string } | null>(null);
   const [itemAuditOpened, setItemAuditOpened] = useState(false);
-  // Which destination the notes editor and audit panel follow; reset whenever the active list changes.
-  const [notesSelection, setNotesSelection] = useState<{ activeId: string | null; listId: string } | null>(null);
+  // Which destination the notes editor and audit panel follow; reported by PersonView.
+  const [notesSelection, setNotesSelection] = useState<{ listId: string } | null>(null);
   const [notesExpanded, setNotesExpanded] = useState(false);
   const [notesDraft, setNotesDraft] = useState('');
   const [loadedNotes, setLoadedNotes] = useState('');
-  // Fall back to the active list if the chosen destination is no longer part of the loaded trip.
-  const notesListId = notesSelection && notesSelection.activeId === activeListId
-    && (groups.length === 0 || groups.some(g => g.listId === notesSelection.listId))
+  // Keep the chosen destination while it is still part of the loaded trip; otherwise follow the active list.
+  const notesListId = notesSelection && groups.some(g => g.listId === notesSelection.listId)
     ? notesSelection.listId
     : activeListId;
 
@@ -277,7 +278,7 @@ export default function Dashboard(): React.ReactElement {
   }, [notesListId, clearNotesSaveTimer, getNotesGeneration, loadedNotes, notesDraft, saveNotes]);
 
   const selectNotesGroup = useCallback((listId: string) => {
-    setNotesSelection({ activeId: activeListIdRef.current, listId });
+    setNotesSelection({ listId });
   }, []);
 
   const handleItemNameClick = useCallback((listId: string, pliId: string, name: string) => {
@@ -378,7 +379,9 @@ export default function Dashboard(): React.ReactElement {
                 openForList(notesListId, listNameFor(notesListId));
               }}>Edit list</Button>
               {activeListId && !isTrip && groups.length > 0 && (
-                <Button size="xs" variant="light" onClick={() => setSplitOpen(true)}>Split by destination</Button>
+                <Button size="xs" variant="light" disabled={!online} onClick={() => setSplitOpen(true)}>
+                  {online ? 'Split by destination' : 'Needs a connection'}
+                </Button>
               )}
             </Group>
             {activeListId && <DashboardViewToggle value={viewMode} onChange={setViewMode} />}

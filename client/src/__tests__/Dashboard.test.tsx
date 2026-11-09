@@ -28,12 +28,14 @@ if (!hasTestingLibs) {
 
   vi.mock('../api');
 
-  const { requestOpenEdit, openForList, showNotification, activeListState, columnsProps } = vi.hoisted(() => ({
+  const { requestOpenEdit, openForList, showNotification, activeListState, columnsProps, personViewState, auditProps } = vi.hoisted(() => ({
     requestOpenEdit: vi.fn(),
     openForList: vi.fn(),
     showNotification: vi.fn(),
     activeListState: { id: 'list-1' as string },
     columnsProps: { last: null as any },
+    personViewState: { mode: 'columns' as string, report: null as string | null },
+    auditProps: { last: null as any },
   }));
 
   vi.mock('@mantine/notifications', () => ({ showNotification }));
@@ -74,12 +76,23 @@ if (!hasTestingLibs) {
     default: () => null,
   }));
   vi.mock('../components/PackingListAuditPanel', () => ({
-    default: () => null,
+    default: (props: any) => {
+      auditProps.last = props;
+      return null;
+    },
   }));
   vi.mock('../components/PackingListItemAuditModal', () => ({
     default: () => null,
   }));
-  vi.mock('../components/PersonView', () => ({ default: () => null }));
+  vi.mock('../components/PersonView', () => ({
+    default: (props: any) => {
+      const React = require('react');
+      React.useEffect(() => {
+        if (personViewState.report) props.onSelectedGroupChange?.(personViewState.report);
+      }, []);
+      return null;
+    },
+  }));
   vi.mock('../components/DestinationColumns', () => ({
     default: (props: any) => {
       columnsProps.last = props;
@@ -88,7 +101,7 @@ if (!hasTestingLibs) {
   }));
   vi.mock('../components/DashboardViewToggle', () => ({
     default: () => null,
-    useDashboardViewMode: () => ['columns', () => {}],
+    useDashboardViewMode: () => [personViewState.mode, () => {}],
   }));
   vi.mock('../components/NotesDestinationPicker', () => ({ default: () => null }));
   vi.mock('../components/SplitListDialog', () => ({ default: () => null }));
@@ -127,6 +140,9 @@ if (!hasTestingLibs) {
       vi.useRealTimers();
       activeListState.id = 'list-1';
       columnsProps.last = null;
+      auditProps.last = null;
+      personViewState.mode = 'columns';
+      personViewState.report = null;
       (apiModule.getCurrentUserProfile as any).mockResolvedValue({
         response: { ok: true },
         data: { user: { id: 'u1' }, family: { id: 'f1', members: [] } },
@@ -439,6 +455,51 @@ if (!hasTestingLibs) {
         expect(grandmas.wholeFamilyItems[0].checked).toBe(true);
         expect(paris.wholeFamilyItems[0].checked).toBe(false);
       });
+    });
+
+    it('disables splitting while offline', async () => {
+      Object.defineProperty(navigator, 'onLine', { configurable: true, get: () => false });
+      try {
+        render(
+          <MemoryRouter>
+            <Dashboard />
+          </MemoryRouter>
+        );
+        const button = await screen.findByRole('button', { name: 'Needs a connection' });
+        expect((button as HTMLButtonElement).disabled).toBe(true);
+        expect(screen.queryByRole('button', { name: 'Split by destination' })).toBeNull();
+      } finally {
+        delete (navigator as any).onLine;
+      }
+    });
+
+    it('keeps notes and audit on the person view destination when the active list changes within the trip', async () => {
+      personViewState.mode = 'person';
+      personViewState.report = 'list-2';
+      activeListState.id = 'list-2';
+      (apiModule.getPackingList as any).mockImplementation(() => Promise.resolve({
+        response: { ok: true },
+        data: { items: [], checks: [], list: { notes: '' }, trip_destination: tripContext },
+      }));
+      const view = render(
+        <MemoryRouter>
+          <Dashboard />
+        </MemoryRouter>
+      );
+      await waitFor(() => expect(auditProps.last?.packingListId).toBe('list-2'));
+
+      activeListState.id = 'list-1';
+      view.rerender(
+        <MemoryRouter>
+          <Dashboard />
+        </MemoryRouter>
+      );
+      await waitFor(() => expect(apiModule.getPackingList).toHaveBeenCalled());
+      await Promise.resolve();
+      expect(auditProps.last.packingListId).toBe('list-2');
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Edit list' }));
+      expect(openForList).toHaveBeenCalledWith('list-2', expect.anything());
     });
   });
 }
