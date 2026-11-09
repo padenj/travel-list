@@ -271,6 +271,101 @@ describe('trip destination routes', () => {
     expect(remaining.trip_destination.destinationCount).toBe(1);
   });
 
+  it('moves a person and their items when creating a destination with moveFrom', async () => {
+    const paris = await request(app).post(`/api/trips/${seed.tripId}/destinations`).set('Authorization', auth)
+      .send({ name: 'Paris', memberIds: [seed.dad, seed.ava] });
+    const teddy = await addToList(paris.body.packingListId, await createMasterItem(seed.familyId, 'Teddy', { memberIds: [seed.ava] }));
+
+    const rome = await request(app).post(`/api/trips/${seed.tripId}/destinations`).set('Authorization', auth)
+      .send({ name: 'Rome', memberIds: [seed.ava], moveFrom: true });
+
+    expect(rome.status).toBe(201);
+    expect(rome.body.memberIds).toEqual([seed.ava]);
+    expect((await listRows(rome.body.packingListId)).map(r => r.id)).toEqual([teddy]);
+    const parisNow = await request(app).get(`/api/trips/${seed.tripId}/destinations`).set('Authorization', auth);
+    expect(parisNow.body.find((d: any) => d.id === paris.body.id).memberIds).toEqual([seed.dad]);
+  });
+
+  it('moves a person and their items when updating a destination with moveFrom', async () => {
+    const { res } = await splitSource();
+    const [paris, grandma] = res.body.destinations;
+    const passport = await addToList(paris.packingListId, await createMasterItem(seed.familyId, 'Passport', { memberIds: [seed.mom] }));
+
+    const put = await request(app).put(`/api/trips/${seed.tripId}/destinations/${grandma.id}`).set('Authorization', auth)
+      .send({ memberIds: [seed.ava, seed.leo, seed.mom], moveFrom: true });
+
+    expect(put.status).toBe(200);
+    expect(put.body.memberIds.sort()).toEqual([seed.ava, seed.leo, seed.mom].sort());
+    expect((await listRows(grandma.packingListId)).map(r => r.id)).toEqual([passport]);
+  });
+
+  it('returns 400 would_empty_destination when moveFrom would leave a destination with nobody', async () => {
+    const { res } = await splitSource();
+    const grandma = res.body.destinations[1];
+    const put = await request(app).put(`/api/trips/${seed.tripId}/destinations/${grandma.id}`).set('Authorization', auth)
+      .send({ memberIds: [seed.ava, seed.leo, seed.dad, seed.mom], moveFrom: true });
+    expect(put.status).toBe(400);
+    expect(put.body.error).toBe('would_empty_destination');
+  });
+
+  it("moves whole-family items to the new destination when sharedItemsTo is 'new'", async () => {
+    const paris = await request(app).post(`/api/trips/${seed.tripId}/destinations`).set('Authorization', auth)
+      .send({ name: 'Paris', memberIds: [seed.dad] });
+    const carSeat = await addToList(paris.body.packingListId, await createMasterItem(seed.familyId, 'Car seat', { wholeFamily: true }));
+    const rome = await request(app).post(`/api/trips/${seed.tripId}/destinations`).set('Authorization', auth)
+      .send({ name: 'Rome', memberIds: [seed.mom], sharedItemsTo: 'new' });
+    expect(rome.status).toBe(201);
+    expect((await listRows(rome.body.packingListId)).map(r => r.id)).toEqual([carSeat]);
+  });
+
+  it('rejects an unknown sharedItemsTo value', async () => {
+    const res = await request(app).post(`/api/trips/${seed.tripId}/destinations`).set('Authorization', auth)
+      .send({ name: 'Rome', memberIds: [seed.mom], sharedItemsTo: 'elsewhere' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('invalid_shared_items_to');
+  });
+
+  it('names destination lists with the label', async () => {
+    const home = await request(app).post(`/api/trips/${seed.tripId}/destinations`).set('Authorization', auth)
+      .send({ name: 'Spring Break', memberIds: [seed.dad] });
+    const rome = await request(app).post(`/api/trips/${seed.tripId}/destinations`).set('Authorization', auth)
+      .send({ name: 'Rome', memberIds: [seed.mom] });
+    const name = async (id: string) => (await seed.db.get(`SELECT name FROM packing_lists WHERE id = ?`, [id])).name;
+    expect(await name(home.body.packingListId)).toBe('Spring Break');
+    expect(await name(rome.body.packingListId)).toBe('Spring Break · Rome');
+  });
+
+  it('renames the trip with its only destination when their names matched', async () => {
+    const home = await request(app).post(`/api/trips/${seed.tripId}/destinations`).set('Authorization', auth)
+      .send({ name: 'Spring Break', memberIds: [seed.dad] });
+    const put = await request(app).put(`/api/trips/${seed.tripId}/destinations/${home.body.id}`).set('Authorization', auth)
+      .send({ name: 'Easter' });
+    expect(put.status).toBe(200);
+    expect((await new TripRepository().getTripById(seed.tripId))!.name).toBe('Easter');
+  });
+
+  it('refuses to delete the last destination of a trip', async () => {
+    const paris = await request(app).post(`/api/trips/${seed.tripId}/destinations`).set('Authorization', auth)
+      .send({ name: 'Paris', memberIds: [seed.dad] });
+    const res = await request(app).delete(`/api/trips/${seed.tripId}/destinations/${paris.body.id}`).set('Authorization', auth)
+      .send({ deleteList: true });
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe('last_destination');
+  });
+
+  it('puts a kept list with items into a trip of its own', async () => {
+    const { res } = await splitSource();
+    const grandma = res.body.destinations[1];
+    await addToList(grandma.packingListId, await createMasterItem(seed.familyId, 'Teddy', { memberIds: [seed.ava] }));
+    const deleted = await request(app).delete(`/api/trips/${seed.tripId}/destinations/${grandma.id}`).set('Authorization', auth)
+      .send({ moveSharedItemsTo: res.body.destinations[0].id });
+    expect(deleted.status).toBe(204);
+    const lists = await request(app).get(`/api/families/${seed.familyId}/packing-lists`).set('Authorization', auth);
+    const kept = lists.body.lists.find((l: any) => l.id === grandma.packingListId);
+    expect(kept.trip_destination).toMatchObject({ tripName: "Grandma's", destinationName: "Grandma's", destinationCount: 1 });
+    expect(kept.name).toBe("Grandma's");
+  });
+
   describe('SSE notifications', () => {
     const notifiedLists = (spy: ReturnType<typeof vi.spyOn>) =>
       spy.mock.calls

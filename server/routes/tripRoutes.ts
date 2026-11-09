@@ -16,7 +16,13 @@ import {
   DestinationConflictError,
   DestinationValidationError,
 } from '../repositories/tripDestinationRepository';
-import { splitListIntoTrip, moveAllSharedItemsTx, notify } from '../services/tripSplitService';
+import { splitListIntoTrip, notify } from '../services/tripSplitService';
+import {
+  createDestination,
+  updateDestination,
+  deleteDestinationTx,
+  LastDestinationError,
+} from '../services/tripListService';
 import { withTransaction } from '../utils/transaction';
 
 export const tripRouter = Router();
@@ -35,6 +41,9 @@ const packingListRepository = new PackingListRepository();
 function sendDestinationError(res: Response, error: unknown, fallback: string) {
   if (error instanceof DestinationConflictError) {
     return res.status(409).json({ error: 'member_in_other_destination', memberId: error.memberId, destinationId: error.destinationId });
+  }
+  if (error instanceof LastDestinationError) {
+    return res.status(409).json({ error: 'last_destination' });
   }
   if (error instanceof DestinationValidationError) {
     return res.status(error.message === 'not_found' ? 404 : 400).json({ error: error.message });
@@ -660,9 +669,12 @@ tripRouter.get('/:tripId/destinations', authMiddleware, tripAccessMiddleware, as
 });
 
 tripRouter.post('/:tripId/destinations', authMiddleware, tripAccessMiddleware, async (req: Request, res: Response) => {
-  const { name, memberIds, itemGroupIds, packingListId } = req.body || {};
+  const { name, memberIds, itemGroupIds, packingListId, moveFrom, sharedItemsTo } = req.body || {};
   if (typeof name !== 'string' || !name.trim()) return res.status(400).json({ error: 'name is required' });
   if (!Array.isArray(memberIds) || memberIds.length === 0) return res.status(400).json({ error: 'memberIds is required' });
+  if (sharedItemsTo !== undefined && sharedItemsTo !== 'existing' && sharedItemsTo !== 'new') {
+    return res.status(400).json({ error: 'invalid_shared_items_to' });
+  }
   const groupIds: string[] = Array.isArray(itemGroupIds) ? itemGroupIds : [];
   try {
     if (groupIds.length > 0) {
@@ -674,13 +686,16 @@ tripRouter.post('/:tripId/destinations', authMiddleware, tripAccessMiddleware, a
       );
       if (found.length !== new Set(groupIds).size) return res.status(400).json({ error: 'invalid_item_groups' });
     }
-    const destination = await tripDestinationRepository.create({
+    const { destinationId, touchedListIds } = await createDestination({
       tripId: req.trip!.id,
       familyId: req.trip!.family_id,
       name: name.trim(),
       memberIds,
       packingListId: typeof packingListId === 'string' && packingListId ? packingListId : undefined,
+      moveFrom: moveFrom === true,
+      sharedItemsTo,
     });
+    const destination = (await tripDestinationRepository.getById(destinationId))!;
     if (groupIds.length > 0) {
       const current = await packingListRepository.getTemplatesForPackingList(destination.packingListId);
       await packingListRepository.setTemplatesForPackingList(destination.packingListId, Array.from(new Set([...current, ...groupIds])));
@@ -689,7 +704,7 @@ tripRouter.post('/:tripId/destinations', authMiddleware, tripAccessMiddleware, a
       }
     }
     const tripLists = (await tripDestinationRepository.listForTrip(req.trip!.id)).map(d => d.packingListId);
-    notify([destination.packingListId, ...tripLists], 'destination');
+    notify([...touchedListIds, ...tripLists], moveFrom === true ? 'move' : 'destination');
     return res.status(201).json(destination);
   } catch (error) {
     return sendDestinationError(res, error, 'Failed to create destination');
@@ -700,18 +715,21 @@ tripRouter.put('/:tripId/destinations/:destinationId', authMiddleware, tripAcces
   try {
     const existing = await tripDestinationRepository.getById(req.params.destinationId);
     if (!existing || existing.tripId !== req.trip!.id) return res.status(404).json({ error: 'Destination not found' });
-    const { name, color, position, memberIds } = req.body || {};
+    const { name, color, position, memberIds, moveFrom } = req.body || {};
     if (memberIds !== undefined && (!Array.isArray(memberIds) || memberIds.length === 0)) {
       return res.status(400).json({ error: 'memberIds must be a non-empty array' });
     }
-    const updated = await tripDestinationRepository.update(existing.id, req.trip!.family_id, {
+    const touched = await updateDestination({
+      destinationId: existing.id,
+      familyId: req.trip!.family_id,
       name: typeof name === 'string' && name.trim() ? name.trim() : undefined,
       color: typeof color === 'string' ? color : undefined,
       position: typeof position === 'number' ? position : undefined,
       memberIds,
+      moveFrom: moveFrom === true,
     });
-    notify([existing.packingListId], 'destination');
-    return res.json(updated);
+    notify(touched, moveFrom === true ? 'move' : 'destination');
+    return res.json(await tripDestinationRepository.getById(existing.id));
   } catch (error) {
     return sendDestinationError(res, error, 'Failed to update destination');
   }
@@ -722,6 +740,8 @@ tripRouter.delete('/:tripId/destinations/:destinationId', authMiddleware, tripAc
     const existing = await tripDestinationRepository.getById(req.params.destinationId);
     if (!existing || existing.tripId !== req.trip!.id) return res.status(404).json({ error: 'Destination not found' });
     const { moveSharedItemsTo, deleteList } = req.body || {};
+    const siblings = await tripDestinationRepository.listForTrip(existing.tripId);
+    if (siblings.length <= 1) return res.status(409).json({ error: 'last_destination' });
     const db = await getDb();
     const { count } = await db.get(`SELECT COUNT(*) AS count FROM packing_list_items WHERE packing_list_id = ?`, [existing.packingListId]);
     if (count > 0 && !moveSharedItemsTo && !deleteList) {
@@ -734,16 +754,14 @@ tripRouter.delete('/:tripId/destinations/:destinationId', authMiddleware, tripAc
         return res.status(400).json({ error: 'invalid_target_destination' });
       }
     }
-    const moved = await withTransaction(db, async () => {
-      const movedCount = target ? await moveAllSharedItemsTx(db, existing.packingListId, target.packingListId) : 0;
-      const now = new Date().toISOString();
-      await db.run(`UPDATE trip_destinations SET deleted_at = ?, updated_at = ? WHERE id = ?`, [now, now, existing.id]);
-      if (deleteList) {
-        await db.run(`UPDATE packing_lists SET deleted_at = ? WHERE id = ?`, [now, existing.packingListId]);
-        await db.run(`DELETE FROM trip_packing_lists WHERE trip_id = ? AND packing_list_id = ?`, [existing.tripId, existing.packingListId]);
-      }
-      return movedCount;
-    });
+    const moved = await withTransaction(db, () =>
+      deleteDestinationTx(db, {
+        destination: existing,
+        familyId: req.trip!.family_id,
+        moveSharedItemsToListId: target ? target.packingListId : null,
+        deleteList: deleteList === true,
+      })
+    );
     const remainingLists = (await tripDestinationRepository.listForTrip(existing.tripId)).map(d => d.packingListId);
     notify([existing.packingListId, ...remainingLists], moved > 0 ? 'move' : 'destination');
     return res.status(204).send();
