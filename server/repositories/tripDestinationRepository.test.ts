@@ -220,13 +220,13 @@ describe('TripDestinationRepository', () => {
     expect(await repo.findByPackingListId(paris.packingListId)).toBeNull();
   });
 
-  it('drops destinations but keeps their lists when the trip is deleted', async () => {
+  it('drops destinations and their lists when the trip is deleted', async () => {
     const paris = await createParis();
     await new TripRepository().deleteTrip(seed.tripId);
     expect(await repo.listForTrip(seed.tripId)).toEqual([]);
     const row = await seed.db.get(`SELECT deleted_at FROM trip_destinations WHERE id = ?`, [paris.id]);
     expect(row.deleted_at).not.toBeNull();
     const list = await seed.db.get(`SELECT deleted_at FROM packing_lists WHERE id = ?`, [paris.packingListId]);
-    expect(list.deleted_at).toBeNull();
+    expect(list.deleted_at).not.toBeNull();
   });
 });

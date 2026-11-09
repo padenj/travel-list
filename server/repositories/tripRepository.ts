@@ -95,7 +95,12 @@ export class TripRepository {
         `UPDATE trips SET deleted_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`,
         [tripId]
       );
-      // Destination lists are kept as ordinary packing lists.
+      // Every list belongs to its trip, so the lists go with it.
+      await db.run(
+        `UPDATE packing_lists SET deleted_at = datetime('now'), updated_at = datetime('now')
+         WHERE deleted_at IS NULL AND id IN (SELECT packing_list_id FROM trip_destinations WHERE trip_id = ? AND deleted_at IS NULL)`,
+        [tripId]
+      );
       await db.run(
         `UPDATE trip_destinations SET deleted_at = datetime('now'), updated_at = datetime('now') WHERE trip_id = ? AND deleted_at IS NULL`,
         [tripId]
