@@ -272,6 +272,7 @@ Create or edit a destination: name, travelers (moving someone from another desti
 **Used in:**
   - `SplitListDialog`
   - `AddDestinationDialog`
+  - `GlobalListEditDrawer`
 
 Inline alert shown when a person is already in another destination, with a "Move" action (and a warning when they are that destination's only member). Move is disabled offline.
 

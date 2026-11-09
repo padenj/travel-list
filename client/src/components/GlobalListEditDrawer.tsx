@@ -8,6 +8,10 @@ import { showNotification } from '@mantine/notifications';
 import ItemEditDrawer from './ItemEditDrawer';
 import AddItemsDrawer from './AddItemsDrawer';
 import { useImpersonation } from '../contexts/ImpersonationContext';
+import { tripApi } from '../api/tripApi';
+import { useOnline } from '../utils/useOnline';
+import { describeMemberConflict } from '../utils/destinationErrors';
+import MemberConflictAlert from './MemberConflictAlert';
 
 export default function GlobalListEditDrawer() {
   const { isOpen, listId, listName, close, renderFn, openForList } = useListEditDrawer();
@@ -26,6 +30,12 @@ export default function GlobalListEditDrawer() {
   const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
   const [savingMembers, setSavingMembers] = useState(false);
   const [membersSaved, setMembersSaved] = useState(false);
+  const [tripId, setTripId] = useState<string | null>(null);
+  const [conflict, setConflict] = useState<{ memberId: string; destinationId: string; destinationName: string; onlyMember: boolean; pending: string[] } | null>(null);
+  const [moving, setMoving] = useState(false);
+  const savedMemberIds = useRef<string[]>([]);
+  const online = useOnline();
+  const isDestination = !!tripId;
   const saveTimer = useRef<number | null>(null);
   const debounceTimer = useRef<number | null>(null);
   const isEditingNameRef = useRef(false);
@@ -67,6 +77,9 @@ export default function GlobalListEditDrawer() {
         setEditAssignedTemplates(Array.isArray(res.data.template_ids) ? res.data.template_ids : []);
         const memberIds = Array.isArray(res.data.list?.member_ids) ? res.data.list.member_ids : (Array.isArray(res.data.member_ids) ? res.data.member_ids : []);
         setSelectedMemberIds(memberIds || []);
+        savedMemberIds.current = memberIds || [];
+        setTripId(res.data.trip_destination?.tripId ?? null);
+        setConflict(null);
 
         try {
           let fid: string | null = impersonatingFamilyId;
@@ -155,28 +168,68 @@ export default function GlobalListEditDrawer() {
     }
   }
 
+  const putMembers = async (next: string[]): Promise<boolean> => {
+    if (!listId) return false;
+    try {
+      const res = await updatePackingList(listId, { memberIds: next });
+      if (res.response && res.response.ok) {
+        savedMemberIds.current = next;
+        setSelectedMemberIds(next);
+        setConflict(null);
+        setMembersSaved(true);
+        if (saveTimer.current) window.clearTimeout(saveTimer.current);
+        saveTimer.current = window.setTimeout(() => setMembersSaved(false), 2500);
+        return true;
+      }
+      setSelectedMemberIds(savedMemberIds.current);
+      const status = res.response?.status;
+      if (status === 409 && res.data?.error === 'member_in_other_destination' && tripId) {
+        const { memberId, destinationId } = res.data;
+        const info = await describeMemberConflict(tripId, memberId, destinationId);
+        setConflict({ memberId, destinationId, ...info, pending: next });
+      } else if (status === 400 && isDestination && next.length === 0) {
+        showNotification({ title: 'Failed', message: 'A destination needs at least one person.', color: 'red' });
+      } else {
+        showNotification({ title: 'Failed', message: 'Could not save members', color: 'red' });
+      }
+    } catch (err) {
+      console.error('Failed to save members', err);
+      setSelectedMemberIds(savedMemberIds.current);
+      showNotification({ title: 'Failed', message: 'Could not save members', color: 'red' });
+    }
+    return false;
+  };
+
   const saveMemberSelection = (next: string[]) => {
     if (!listId) return;
     if (debounceTimer.current) window.clearTimeout(debounceTimer.current);
     setMembersSaved(false);
+    setConflict(null);
     setSavingMembers(true);
     debounceTimer.current = window.setTimeout(async () => {
       try {
-        const res = await updatePackingList(listId || '', { memberIds: next });
-        if (res.response && res.response.ok) {
-          setMembersSaved(true);
-          if (saveTimer.current) window.clearTimeout(saveTimer.current);
-          saveTimer.current = window.setTimeout(() => setMembersSaved(false), 2500);
-        } else {
-          showNotification({ title: 'Failed', message: 'Could not save members', color: 'red' });
-        }
-      } catch (err) {
-        console.error('Failed to save members', err);
-        showNotification({ title: 'Failed', message: 'Could not save members', color: 'red' });
+        await putMembers(next);
       } finally {
         setSavingMembers(false);
       }
     }, 500);
+  };
+
+  const moveConflictMember = async () => {
+    if (!conflict || !tripId) return;
+    setMoving(true);
+    try {
+      const other = (await tripApi.listDestinations(tripId)).find(d => d.id === conflict.destinationId);
+      if (other) {
+        await tripApi.updateDestination(tripId, other.id, { memberIds: other.memberIds.filter(id => id !== conflict.memberId) });
+      }
+      await putMembers(conflict.pending);
+    } catch (err) {
+      console.error('Failed to move member', err);
+      showNotification({ title: 'Failed', message: 'Could not move that person', color: 'red' });
+    } finally {
+      setMoving(false);
+    }
   };
 
   const startRenaming = () => {
@@ -330,6 +383,20 @@ export default function GlobalListEditDrawer() {
                   {membersSaved ? <IconCheck size={16} color="green" /> : null}
                 </div>
               </div>
+              {conflict ? (
+                <div style={{ marginBottom: 8 }}>
+                  <MemberConflictAlert
+                    who={familyMembers.find(m => m.id === conflict.memberId)?.name || familyMembers.find(m => m.id === conflict.memberId)?.username || 'This person'}
+                    destinationName={conflict.destinationName}
+                    onlyMember={conflict.onlyMember}
+                    moving={moving}
+                    offline={!online}
+                    onMove={moveConflictMember}
+                    onDismiss={() => setConflict(null)}
+                  />
+                </div>
+              ) : null}
+              {isDestination && !online ? <Text size="xs" c="dimmed" mb={4}>Needs a connection</Text> : null}
               <div style={{ maxHeight: 260, overflow: 'auto', border: '1px solid rgba(0,0,0,0.04)', borderRadius: 6, padding: 8 }}>
                 {familyMembers.length === 0 ? (
                   <Text c="dimmed" size="sm">No family members</Text>
@@ -340,6 +407,7 @@ export default function GlobalListEditDrawer() {
                       <div key={m.id} style={{ padding: '6px 4px', borderBottom: '1px solid rgba(0,0,0,0.02)' }}>
                         <Checkbox
                           checked={checked}
+                          disabled={isDestination && !online}
                           onChange={(e) => {
                             const on = (e.currentTarget as HTMLInputElement).checked;
                             const next = on ? Array.from(new Set([...(selectedMemberIds || []), m.id])) : (selectedMemberIds || []).filter(id => id !== m.id);
