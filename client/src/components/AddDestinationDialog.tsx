@@ -18,6 +18,7 @@ export interface AddDestinationDialogProps {
   editing: TripDestination | null;
   onSaved: () => void;
   onChanged?: () => void;
+  zIndex?: number;
 }
 
 interface MoveConflict {
@@ -30,7 +31,7 @@ interface MoveConflict {
 const FALLBACK_ERROR = "Couldn't save the destination. Please try again.";
 const chipStyles = { root: { maxWidth: '100%' }, label: { maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis' } };
 
-export default function AddDestinationDialog({ opened, onClose, trip, destinations, familyMembers, editing, onSaved, onChanged }: AddDestinationDialogProps) {
+export default function AddDestinationDialog({ opened, onClose, trip, destinations, familyMembers, editing, onSaved, onChanged, zIndex }: AddDestinationDialogProps) {
   const isMobile = useMediaQuery('(max-width: 48em)', undefined, { getInitialValueInEffect: false });
   const online = useOnline();
   const [name, setName] = useState('');
@@ -163,7 +164,7 @@ export default function AddDestinationDialog({ opened, onClose, trip, destinatio
   };
 
   return (
-    <Modal opened={opened} onClose={onClose} title={editing ? `Edit ${editing.name}` : 'Add destination'} fullScreen={!!isMobile}>
+    <Modal opened={opened} onClose={onClose} title={editing ? `Edit ${editing.name}` : 'Add destination'} fullScreen={!!isMobile} zIndex={zIndex}>
       <Stack>
         <TextInput label="Destination name" placeholder="e.g. Grandma's" value={name} onChange={e => setName(e.currentTarget.value)} />
         <Text size="sm" fw={500}>Who's going?</Text>

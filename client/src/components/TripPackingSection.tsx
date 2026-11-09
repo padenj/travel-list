@@ -24,7 +24,17 @@ const itemsLabel = (n: number) => `${n} ${n === 1 ? 'item' : 'items'}`;
 // Long destination names must wrap instead of overflowing the button on phones.
 const wrapButtonStyles = { root: { height: 'auto', minHeight: 36, paddingBlock: 6 }, label: { whiteSpace: 'normal' as const, textAlign: 'center' as const } };
 
-export default function TripPackingSection({ trip, onChanged }: { trip: Trip; onChanged?: () => void }) {
+export interface TripPackingSectionProps {
+  trip: Trip;
+  onChanged?: () => void;
+  /** Called after a destination list is opened on the dashboard (the drawer closes itself). */
+  onOpenList?: () => void;
+  /** Set when shown inside a drawer, so menus and dialogs open above it. */
+  zIndex?: number;
+}
+
+export default function TripPackingSection({ trip, onChanged, onOpenList, zIndex }: TripPackingSectionProps) {
+  const layerZ = zIndex ? zIndex + 10 : undefined;
   const navigate = useNavigate();
   const online = useOnline();
   const { setActiveListId } = useActivePackingList();
@@ -72,6 +82,7 @@ export default function TripPackingSection({ trip, onChanged }: { trip: Trip; on
   const openOnDashboard = (destination: TripDestination) => {
     setActiveListId(destination.packingListId);
     navigate('/');
+    onOpenList?.();
   };
 
   const deleteDestination = async (destination: TripDestination, options: { moveSharedItemsTo?: string; deleteList?: boolean } = {}) => {
@@ -125,7 +136,7 @@ export default function TripPackingSection({ trip, onChanged }: { trip: Trip; on
                 <Text size="xs" c="dimmed">{`${itemsLabel(total)} · ${percent}% packed`}</Text>
                 <Progress value={percent} size="sm" mt={4} color={destination.color || 'blue'} />
               </UnstyledButton>
-              <Menu position="bottom-end" withinPortal>
+              <Menu position="bottom-end" withinPortal zIndex={layerZ}>
                 <Menu.Target>
                   <ActionIcon variant="subtle" color="gray" size="lg" aria-label={`Actions for ${destination.name}`}>
                     <IconDots size={18} />
@@ -163,11 +174,13 @@ export default function TripPackingSection({ trip, onChanged }: { trip: Trip; on
           void load();
           onChanged?.();
         }}
+        zIndex={layerZ}
       />
 
       <Modal
         opened={!!pendingDelete}
         onClose={() => setPendingDelete(null)}
+        zIndex={layerZ}
         title={pendingDelete ? `${pendingDelete.destination.name} still has ${itemsLabel(pendingDelete.itemCount)}` : ''}
       >
         <Stack>

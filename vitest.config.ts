@@ -12,6 +12,7 @@ export default defineConfig({
       'client/src/__tests__/SplitListDialog.test.tsx', // Split-by-destination dialog
       'client/src/__tests__/AddDestinationDialog.test.tsx', // Destination create/edit with member moves
       'client/src/__tests__/TripPackingSection.test.tsx', // Trip page packing cards
+      'client/src/__tests__/ManageDestinationsDrawer.test.tsx', // Destinations drawer
       'client/src/__tests__/GlobalListEditDrawer.test.tsx', // Targeted client regression coverage
       'client/src/__tests__/GlobalListEditDrawer.destination.test.tsx', // Destination member conflicts in the edit drawer
       'client/src/__tests__/Dashboard.test.tsx', // Dashboard edit-list regression coverage

@@ -92,6 +92,21 @@ describe('TripPackingSection', () => {
     expect(screen.getByText('dashboard page')).toBeTruthy();
   });
 
+  it('tells the opener when a list is opened', async () => {
+    (tripApi.listDestinations as any).mockResolvedValue([paris]);
+    const onOpenList = vi.fn();
+    renderWithMantine(
+      <MemoryRouter initialEntries={['/trips/t1']}>
+        <Routes>
+          <Route path="/trips/t1" element={<TripPackingSection trip={trip} onOpenList={onOpenList} />} />
+          <Route path="/" element={<div>dashboard page</div>} />
+        </Routes>
+      </MemoryRouter>
+    );
+    await userEvent.click(await screen.findByRole('button', { name: 'Open Paris packing list' }));
+    expect(onOpenList).toHaveBeenCalled();
+  });
+
   it('opens the edit dialog from Rename and Change members', async () => {
     (tripApi.listDestinations as any).mockResolvedValue([paris]);
     renderSection();
