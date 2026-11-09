@@ -37,6 +37,15 @@ export default function GlobalListEditDrawer() {
   const newestSavedReq = useRef(0);
   const sessionRef = useRef(0);
   const flushedSaves = useRef(new Map<string, Promise<unknown>>());
+  const trackSave = <T,>(id: string, p: Promise<T>): Promise<T> => {
+    const prev = flushedSaves.current.get(id);
+    const settled = p.then(() => undefined, () => undefined);
+    const chain: Promise<unknown> = (prev ? Promise.all([prev, settled]) : settled).then(() => {
+      if (flushedSaves.current.get(id) === chain) flushedSaves.current.delete(id);
+    });
+    flushedSaves.current.set(id, chain);
+    return p;
+  };
   const online = useOnline();
   const isDestination = !!tripId;
   const saveTimer = useRef<number | null>(null);
@@ -69,8 +78,7 @@ export default function GlobalListEditDrawer() {
     const pending = pendingSave.current;
     pendingSave.current = null;
     if (pending) {
-      const flush = updatePackingList(pending.listId, { memberIds: pending.next }).catch(err => console.error('Failed to flush members', err));
-      flushedSaves.current.set(pending.listId, flush);
+      trackSave(pending.listId, updatePackingList(pending.listId, { memberIds: pending.next })).catch(err => console.error('Failed to flush members', err));
     }
     if (!isOpen || !listId) {
       setLoading(false);
@@ -86,11 +94,12 @@ export default function GlobalListEditDrawer() {
     (async () => {
       setLoading(true);
       try {
-        const flushing = flushedSaves.current.get(listId);
-        if (flushing) {
+        let flushing = flushedSaves.current.get(listId);
+        while (flushing) {
           await flushing.catch(() => undefined);
-          if (flushedSaves.current.get(listId) === flushing) flushedSaves.current.delete(listId);
           if (stale()) return;
+          const next = flushedSaves.current.get(listId);
+          flushing = next === flushing ? undefined : next;
         }
         const res = await getPackingList(listId);
         if (stale()) return;
@@ -213,7 +222,7 @@ export default function GlobalListEditDrawer() {
     const reqId = ++memberReqCounter.current;
     const isLatest = () => memberReqCounter.current === reqId;
     try {
-      const res = await updatePackingList(listId, { memberIds: next });
+      const res = await trackSave(listId, updatePackingList(listId, { memberIds: next }));
       if (!isCurrentList()) return false;
       if (res.response && res.response.ok) {
         if (reqId >= newestSavedReq.current) {
@@ -287,11 +296,14 @@ export default function GlobalListEditDrawer() {
     // If the list switches mid-Move we still finish the server steps for the original list
     // (so the member is never left in no destination) but touch no UI state.
     try {
-      const other = (await tripApi.listDestinations(tripId)).find(d => d.id === conflict.destinationId);
-      if (other) {
-        await tripApi.updateDestination(tripId, other.id, { memberIds: other.memberIds.filter(id => id !== conflict.memberId) });
-      }
-      const saved = await putMembers(conflict.pending, session);
+      const sequence = (async () => {
+        const other = (await tripApi.listDestinations(tripId)).find(d => d.id === conflict.destinationId);
+        if (other) {
+          await tripApi.updateDestination(tripId, other.id, { memberIds: other.memberIds.filter(id => id !== conflict.memberId) });
+        }
+        return putMembers(conflict.pending, session);
+      })();
+      const saved = await trackSave(conflict.listId, sequence);
       if (switched()) return;
       if (saved) setSelectedMemberIds(conflict.pending);
     } catch (err) {

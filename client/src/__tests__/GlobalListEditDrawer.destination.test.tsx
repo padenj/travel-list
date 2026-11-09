@@ -311,11 +311,12 @@ describe('GlobalListEditDrawer destination members', () => {
     });
     current.listId = 'list-1';
     await act(async () => { utils.rerender(<GlobalListEditDrawer />); });
+    // The reload of A now waits for the in-flight Move, which then finishes without touching the UI.
+    await act(async () => { d.resolve([{ id: 'dest-2', name: 'Rome', memberIds: ['m2', 'm3'] }]); });
     await waitFor(() => expect(box('Ann').checked).toBe(true));
     await waitFor(() => expect(box('Ann').disabled).toBe(false));
     await tick('Ann');
     expect(box('Ann').checked).toBe(false);
-    await act(async () => { d.resolve([{ id: 'dest-2', name: 'Rome', memberIds: ['m2', 'm3'] }]); });
     await act(async () => { await new Promise(r => setTimeout(r, 50)); });
     expect(box('Ann').checked).toBe(false);
     expect(box('Bob').checked).toBe(false);
@@ -436,5 +437,43 @@ describe('GlobalListEditDrawer destination members', () => {
     expect(api.updatePackingList).toHaveBeenCalledWith('list-1', { memberIds: ['m1', 'm2'] });
     await act(async () => { await new Promise(r => setTimeout(r, 600)); });
     expect(api.updatePackingList).toHaveBeenCalledTimes(1);
+  });
+
+  async function switchAwayAndBack(utils: any) {
+    (api.getPackingList as any).mockImplementation((id: string) => Promise.resolve(listData(id === 'list-1' ? 'Paris' : 'Rome', id === 'list-1' ? ['m1', 'm2'] : ['m2'])));
+    current.listId = 'list-2';
+    await act(async () => { utils.rerender(<GlobalListEditDrawer />); });
+    await waitFor(() => expect(api.getPackingList).toHaveBeenCalledWith('list-2'));
+    (api.getPackingList as any).mockClear();
+    current.listId = 'list-1';
+    await act(async () => { utils.rerender(<GlobalListEditDrawer />); });
+    await act(async () => { await new Promise(r => setTimeout(r, 50)); });
+    expect(api.getPackingList).not.toHaveBeenCalledWith('list-1');
+  }
+
+  it('a reload of A waits for a PUT already sent by the debounce timer', async () => {
+    const put = deferred();
+    const utils = await setup(['m1']);
+    (api.updatePackingList as any).mockReturnValueOnce(put.promise);
+    await tick('Bob');
+    expect(api.updatePackingList).toHaveBeenCalledTimes(1);
+    await switchAwayAndBack(utils);
+    await act(async () => { put.resolve(ok); });
+    await waitFor(() => expect(api.getPackingList).toHaveBeenCalledWith('list-1'));
+  });
+
+  it('a reload of A waits for a Move held at updateDestination', async () => {
+    const upd = deferred();
+    (api.updatePackingList as any).mockResolvedValueOnce(conflict409).mockResolvedValue(ok);
+    (tripApi.listDestinations as any).mockResolvedValue([{ id: 'dest-2', name: 'Rome', memberIds: ['m2', 'm3'] }]);
+    (tripApi.updateDestination as any).mockReturnValue(upd.promise);
+    const utils = await setup(['m1']);
+    await tick('Bob');
+    await act(async () => { fireEvent.click(await screen.findByText('Move')); });
+    await waitFor(() => expect(tripApi.updateDestination).toHaveBeenCalled());
+    await switchAwayAndBack(utils);
+    await act(async () => { upd.resolve({}); });
+    await waitFor(() => expect(api.getPackingList).toHaveBeenCalledWith('list-1'));
+    expect(api.updatePackingList).toHaveBeenLastCalledWith('list-1', { memberIds: ['m1', 'm2'] });
   });
 });
