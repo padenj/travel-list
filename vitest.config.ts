@@ -17,6 +17,7 @@ export default defineConfig({
       'client/src/__tests__/Dashboard.test.tsx', // Dashboard edit-list regression coverage
       'client/src/__tests__/ActivePackingListContext.test.tsx', // Active packing list context coverage
       'client/src/__tests__/listOptions.test.ts', // Selector grouping of trip destination lists
+      'client/src/__tests__/destinationLabel.test.ts', // Destination list label helper
       'client/src/__tests__/ManagePackingLists.test.tsx', // Manage packing lists active-list coverage
       'client/src/__tests__/TripsPage.test.tsx', // Trips page create action coverage
       'client/src/__tests__/TripDetailPage.test.tsx', // Trip detail add actions coverage
