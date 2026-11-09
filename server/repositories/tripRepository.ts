@@ -93,5 +93,10 @@ export class TripRepository {
       `UPDATE trips SET deleted_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`,
       [tripId]
     );
+    // Destination lists are kept as ordinary packing lists.
+    await db.run(
+      `UPDATE trip_destinations SET deleted_at = datetime('now'), updated_at = datetime('now') WHERE trip_id = ? AND deleted_at IS NULL`,
+      [tripId]
+    );
   }
 }

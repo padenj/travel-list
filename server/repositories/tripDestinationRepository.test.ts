@@ -5,6 +5,7 @@ import {
   DestinationConflictError,
   DestinationValidationError,
 } from './tripDestinationRepository';
+import { TripRepository } from './tripRepository';
 import { seedFamilyTrip, createList } from '../test-utils/destinationFixtures';
 
 describe('trip_destinations schema', () => {
@@ -166,5 +167,15 @@ describe('TripDestinationRepository', () => {
     await repo.softDelete(paris.id);
     expect(await repo.getById(paris.id)).toBeNull();
     expect(await repo.findByPackingListId(paris.packingListId)).toBeNull();
+  });
+
+  it('drops destinations but keeps their lists when the trip is deleted', async () => {
+    const paris = await createParis();
+    await new TripRepository().deleteTrip(seed.tripId);
+    expect(await repo.listForTrip(seed.tripId)).toEqual([]);
+    const row = await seed.db.get(`SELECT deleted_at FROM trip_destinations WHERE id = ?`, [paris.id]);
+    expect(row.deleted_at).not.toBeNull();
+    const list = await seed.db.get(`SELECT deleted_at FROM packing_lists WHERE id = ?`, [paris.packingListId]);
+    expect(list.deleted_at).toBeNull();
   });
 });
