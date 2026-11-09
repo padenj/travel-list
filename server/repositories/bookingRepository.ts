@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import { getDb } from '../db';
+import { withTransaction } from '../utils/transaction';
 
 export interface Booking {
   id: string;
@@ -200,8 +201,7 @@ export class BookingRepository {
     }
 
     const db = await this.db;
-    await db.run('BEGIN TRANSACTION');
-    try {
+    await withTransaction(db, async () => {
       if (Object.keys(dbUpdates).length > 0) {
         const fields = Object.keys(dbUpdates).map(k => `${k} = ?`).join(', ');
         await db.run(`UPDATE bookings SET ${fields}, updated_at = datetime('now') WHERE id = ?`, [...Object.values(dbUpdates), id]);
@@ -218,11 +218,7 @@ export class BookingRepository {
           await db.run(`INSERT INTO booking_travelers (booking_id, participant_id) VALUES (?, ?)`, [id, participantId]);
         }
       }
-      await db.run('COMMIT');
-    } catch (error) {
-      try { await db.run('ROLLBACK'); } catch (e) {}
-      throw error;
-    }
+    });
     return this.getBookingById(id) as Promise<Booking>;
   }
 

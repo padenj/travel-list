@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import { getDb } from '../db';
+import { withTransaction } from '../utils/transaction';
 import { flightTitle } from '../utils/flightTitle';
 
 export interface TripElement {
@@ -351,8 +352,7 @@ export class TripElementRepository {
       }
     }
 
-    await db.run('BEGIN TRANSACTION');
-    try {
+    await withTransaction(db, async () => {
       const keepIds = new Set(legs.filter(l => l.id).map(l => l.id as string));
       for (const id of existingIds) {
         if (!keepIds.has(id)) {
@@ -388,11 +388,7 @@ export class TripElementRepository {
 
       await this.recomputeLayovers(elementId);
       await this.refreshFlightTitle(elementId);
-      await db.run('COMMIT');
-    } catch (error) {
-      try { await db.run('ROLLBACK'); } catch (e) {}
-      throw error;
-    }
+    });
     return (((await this.getElementById(elementId)) as any)?.legs ?? []) as FlightLeg[];
   }
 

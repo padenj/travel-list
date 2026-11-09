@@ -1808,25 +1808,18 @@ router.put('/families/:familyId/members/order', authMiddleware, async (req: Requ
     const db = await (await import('./db')).getDb();
     try {
       console.log('🔄 Starting transaction');
-      await db.run('BEGIN TRANSACTION');
-      for (let idx = 0; idx < memberIds.length; idx++) {
-        const id = memberIds[idx];
-        // position lower means earlier/left-most
-        console.log(`🔄 Updating member ${id} to position ${idx}`);
-        const result = await db.run(`UPDATE users SET position = ?, updated_at = ? WHERE id = ?`, [idx, new Date().toISOString(), id]);
-        console.log(`🔄 Update result for ${id}:`, result);
-      }
-      console.log('🔄 Committing transaction');
-      await db.run('COMMIT');
+      await withTransaction(db, async () => {
+        for (let idx = 0; idx < memberIds.length; idx++) {
+          const id = memberIds[idx];
+          // position lower means earlier/left-most
+          console.log(`🔄 Updating member ${id} to position ${idx}`);
+          const result = await db.run(`UPDATE users SET position = ?, updated_at = ? WHERE id = ?`, [idx, new Date().toISOString(), id]);
+          console.log(`🔄 Update result for ${id}:`, result);
+        }
+      });
       console.log('✅ Transaction committed successfully');
     } catch (e) {
-      console.error('❌ Transaction error:', e);
-      try { 
-        console.log('🔄 Rolling back transaction');
-        await db.run('ROLLBACK'); 
-      } catch (er) {
-        console.error('❌ Rollback error:', er);
-      }
+      console.error('❌ Transaction error (rolled back):', e);
       throw e;
     }
 
