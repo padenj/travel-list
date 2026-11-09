@@ -44,6 +44,8 @@ export default function AddDestinationDialog({ opened, onClose, trip, destinatio
   const [conflict, setConflict] = useState<MoveConflict | null>(null);
   const [conflictLoading, setConflictLoading] = useState(false);
   const [sharedItemsTo, setSharedItemsTo] = useState<'existing' | 'new'>('existing');
+  // People the user agreed to move here from another destination (toggle prompt or conflict alert).
+  const [confirmedMoves, setConfirmedMoves] = useState<string[]>([]);
 
   useEffect(() => {
     if (!opened) return;
@@ -54,6 +56,7 @@ export default function AddDestinationDialog({ opened, onClose, trip, destinatio
     setConflict(null);
     setConflictLoading(false);
     setSharedItemsTo('existing');
+    setConfirmedMoves([]);
     if (editing) return;
     let cancelled = false;
     (async () => {
@@ -61,9 +64,13 @@ export default function AddDestinationDialog({ opened, onClose, trip, destinatio
         const [groupsRes, listsRes] = await Promise.all([getItemGroups(trip.familyId), getFamilyPackingLists(trip.familyId)]);
         if (cancelled) return;
         setItemGroups(groupsRes.response.ok ? groupsRes.data.itemGroups || [] : []);
-        // A list can join this trip if it has no trip or is the only destination of another trip.
-        const adoptable = (l: any) =>
-          !l.trip_destination || (l.trip_destination.destinationCount === 1 && l.trip_destination.tripId !== trip.id);
+        // A list can join this trip if it has no trip, or is the only destination of another dateless trip.
+        // The server also refuses trips with bookings or elements, which the client can't see.
+        const adoptable = (l: any) => {
+          const td = l.trip_destination;
+          if (!td) return true;
+          return td.destinationCount === 1 && td.tripId !== trip.id && !td.tripStartDate && !td.tripEndDate;
+        };
         setFreeLists(listsRes.response.ok ? (listsRes.data.lists || []).filter(adoptable) : []);
       } catch {
         // optional extras; the dialog still works without them
@@ -80,14 +87,18 @@ export default function AddDestinationDialog({ opened, onClose, trip, destinatio
   const toggleMember = (member: any) => {
     if (memberIds.includes(member.id)) {
       setMemberIds(ids => ids.filter(id => id !== member.id));
+      setConfirmedMoves(ids => ids.filter(id => id !== member.id));
       return;
     }
     const owner = ownerOf(member.id);
-    if (owner && !window.confirm(`Move ${memberName(member)} from ${owner.name}?`)) return;
+    if (owner) {
+      if (!window.confirm(`Move ${memberName(member)} from ${owner.name}?`)) return;
+      setConfirmedMoves(ids => (ids.includes(member.id) ? ids : [...ids, member.id]));
+    }
     setMemberIds(ids => [...ids, member.id]);
   };
 
-  const save = async (forceMove = false) => {
+  const save = async (confirmed: string[] = confirmedMoves) => {
     setSaving(true);
     setConflict(null);
     try {
@@ -99,11 +110,23 @@ export default function AddDestinationDialog({ opened, onClose, trip, destinatio
         showNotification({ title: 'Cannot move everyone', message: `${emptied.name} needs at least one traveler`, color: 'red' });
         return;
       }
+      const unchanged = !!editing && memberIds.length === editing.memberIds.length && memberIds.every(id => editing.memberIds.includes(id));
+      // Only move people (and their items) the user agreed to move; ask about anyone else found elsewhere.
+      const elsewhere = unchanged ? [] : memberIds.filter(id => others.some(d => d.memberIds.includes(id)));
+      const unconfirmed = elsewhere.find(id => !confirmed.includes(id));
+      if (unconfirmed) {
+        const from = others.find(d => d.memberIds.includes(unconfirmed))!;
+        setConflict({
+          memberId: unconfirmed,
+          destinationId: from.id,
+          destinationName: from.name,
+          onlyMember: from.memberIds.every(id => id === unconfirmed),
+        });
+        return;
+      }
       // The server moves these people, and their items, in the same transaction.
-      const moveFrom = forceMove || others.some(d => d.memberIds.some(id => memberIds.includes(id)));
-      const move = moveFrom ? { moveFrom: true } : {};
+      const move = elsewhere.length > 0 ? { moveFrom: true } : {};
       if (editing) {
-        const unchanged = memberIds.length === editing.memberIds.length && memberIds.every(id => editing.memberIds.includes(id));
         await tripApi.updateDestination(trip.id, editing.id, unchanged ? { name: name.trim() } : { name: name.trim(), memberIds, ...move });
       } else {
         const payload: DestinationWritePayload = {
@@ -136,7 +159,9 @@ export default function AddDestinationDialog({ opened, onClose, trip, destinatio
 
   const moveAndRetry = () => {
     if (!conflict) return;
-    void save(true);
+    const next = confirmedMoves.includes(conflict.memberId) ? confirmedMoves : [...confirmedMoves, conflict.memberId];
+    setConfirmedMoves(next);
+    void save(next);
   };
 
   return (

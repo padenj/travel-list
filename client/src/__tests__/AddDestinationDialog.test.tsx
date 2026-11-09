@@ -199,7 +199,27 @@ describe('AddDestinationDialog', () => {
   it('uses freshly fetched destinations, not the stale prop, to decide on moveFrom', async () => {
     const beach = { ...grandma, id: 'd2', name: 'Beach', memberIds: ['leo', 'dad'] };
     (tripApi.listDestinations as any).mockResolvedValue([{ ...grandma, memberIds: ['ava'] }, beach]);
-    vi.stubGlobal('confirm', vi.fn(() => true));
+    const confirm = vi.fn(() => true);
+    vi.stubGlobal('confirm', confirm);
+    const onSaved = vi.fn();
+    renderWithMantine(
+      <AddDestinationDialog opened onClose={vi.fn()} trip={trip} destinations={[grandma]} familyMembers={familyMembers} editing={null} onSaved={onSaved} />
+    );
+    await userEvent.type(screen.getByLabelText(/Destination name/), 'Paris');
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Dad' }));
+    expect(confirm).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    // Dad joined Beach after the dialog opened: ask before moving him.
+    expect(await screen.findByText('Dad is already in Beach on this trip. Move them here?')).toBeTruthy();
+    expect(tripApi.createDestination).not.toHaveBeenCalled();
+    expect(tripApi.updateDestination).not.toHaveBeenCalled();
+    expect(onSaved).not.toHaveBeenCalled();
+  });
+
+  it('sends moveFrom once the conflict alert confirms the move', async () => {
+    const beach = { ...grandma, id: 'd2', name: 'Beach', memberIds: ['leo', 'dad'] };
+    (tripApi.listDestinations as any).mockResolvedValue([{ ...grandma, memberIds: ['ava'] }, beach]);
     const onSaved = vi.fn();
     renderWithMantine(
       <AddDestinationDialog opened onClose={vi.fn()} trip={trip} destinations={[grandma]} familyMembers={familyMembers} editing={null} onSaved={onSaved} />
@@ -207,12 +227,52 @@ describe('AddDestinationDialog', () => {
     await userEvent.type(screen.getByLabelText(/Destination name/), 'Paris');
     await userEvent.click(screen.getByRole('checkbox', { name: 'Dad' }));
     await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Move' }));
 
     await waitFor(() => expect(onSaved).toHaveBeenCalled());
-    expect(tripApi.updateDestination).not.toHaveBeenCalled();
+    expect(tripApi.createDestination).toHaveBeenCalledTimes(1);
     expect(tripApi.createDestination).toHaveBeenCalledWith('t1', {
       name: 'Paris', memberIds: ['dad'], itemGroupIds: [], packingListId: undefined, moveFrom: true,
     });
+  });
+
+  it('does not let one confirmed move cover another person', async () => {
+    const beach = { ...grandma, id: 'd2', name: 'Beach', memberIds: ['leo', 'dad'] };
+    (tripApi.listDestinations as any).mockResolvedValue([{ ...grandma, memberIds: ['ava', 'leo'] }, beach]);
+    vi.stubGlobal('confirm', vi.fn(() => true));
+    const onSaved = vi.fn();
+    renderWithMantine(
+      <AddDestinationDialog opened onClose={vi.fn()} trip={trip} destinations={[grandma]} familyMembers={familyMembers} editing={null} onSaved={onSaved} />
+    );
+    await userEvent.type(screen.getByLabelText(/Destination name/), 'Paris');
+    await userEvent.click(screen.getByRole('checkbox', { name: "Ava (at Grandma's)" }));
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Dad' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(await screen.findByText('Dad is already in Beach on this trip. Move them here?')).toBeTruthy();
+    expect(tripApi.createDestination).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole('button', { name: 'Move' }));
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(tripApi.createDestination).toHaveBeenCalledWith('t1', expect.objectContaining({ memberIds: ['ava', 'dad'], moveFrom: true }));
+  });
+
+  it('asks before Change members moves someone who joined another destination meanwhile', async () => {
+    const paris = { id: 'd2', tripId: 't1', name: 'Paris', color: 'blue', position: 1, packingListId: 'l2', memberIds: ['dad'] };
+    (tripApi.listDestinations as any).mockResolvedValue([{ ...grandma, memberIds: ['ava', 'leo'] }, paris]);
+    const onSaved = vi.fn();
+    renderWithMantine(
+      <AddDestinationDialog opened onClose={vi.fn()} trip={trip} destinations={[{ ...grandma, memberIds: ['ava'] }, paris]} familyMembers={familyMembers} editing={paris} onSaved={onSaved} />
+    );
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Leo' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(await screen.findByText("Leo is already in Grandma's on this trip. Move them here?")).toBeTruthy();
+    expect(tripApi.updateDestination).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole('button', { name: 'Move' }));
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(tripApi.updateDestination).toHaveBeenCalledWith('t1', 'd2', { name: 'Paris', memberIds: ['dad', 'leo'], moveFrom: true });
   });
 
   it('does not send memberIds when only the name changed', async () => {
@@ -314,12 +374,14 @@ describe('AddDestinationDialog', () => {
     expect(screen.queryByRole('radio')).toBeNull();
   });
 
-  it('offers lists that are the only destination of another trip as existing lists', async () => {
+  it('offers lists that are the only destination of another dateless trip as existing lists', async () => {
     (getFamilyPackingLists as any).mockResolvedValue({
       response: { ok: true },
       data: {
         lists: [
-          { id: 'solo', name: 'Camping', trip_destination: { tripId: 't7', destinationCount: 1 } },
+          { id: 'solo', name: 'Camping', trip_destination: { tripId: 't7', destinationCount: 1, tripStartDate: null, tripEndDate: null } },
+          { id: 'dated', name: 'Ski week', trip_destination: { tripId: 't9', destinationCount: 1, tripStartDate: '2027-01-02', tripEndDate: '2027-01-09' } },
+          { id: 'half', name: 'Lake', trip_destination: { tripId: 't10', destinationCount: 1, tripStartDate: null, tripEndDate: '2027-07-01' } },
           { id: 'multi', name: 'Easter · Rome', trip_destination: { tripId: 't8', destinationCount: 2 } },
           { id: 'mine', name: "Spring Break · Grandma's", trip_destination: { tripId: 't1', destinationCount: 1 } },
           { id: 'legacy', name: 'Old list', trip_destination: null },
@@ -333,6 +395,8 @@ describe('AddDestinationDialog', () => {
     expect(await screen.findByRole('option', { name: 'Camping' })).toBeTruthy();
     expect(screen.getByRole('option', { name: 'Old list' })).toBeTruthy();
     expect(screen.queryByRole('option', { name: 'Easter · Rome' })).toBeNull();
+    expect(screen.queryByRole('option', { name: 'Ski week' })).toBeNull();
+    expect(screen.queryByRole('option', { name: 'Lake' })).toBeNull();
     expect(screen.queryByRole('option', { name: "Spring Break · Grandma's" })).toBeNull();
   });
 

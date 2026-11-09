@@ -5,6 +5,7 @@ export const DESTINATION_ERROR_TEXT: Record<string, string> = {
   unassigned_member: 'Everyone on the list needs a destination.',
   member_in_two_destinations: 'Someone is in two destinations.',
   list_already_destination: 'This list is already part of a trip.',
+  list_in_other_trip: 'That list belongs to a trip with dates or bookings. Pick another list or start a new one.',
   list_not_found: "That list couldn't be found. It may have been deleted.",
   members_required: 'Choose at least one traveler.',
   'memberIds is required': 'Choose at least one traveler.',

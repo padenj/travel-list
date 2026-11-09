@@ -354,6 +354,59 @@ describe('trip destination routes', () => {
     expect(res.body.error).toBe('last_destination');
   });
 
+  describe('adopting the list of another trip', () => {
+    const otherTrip = async (dates: { startDate?: string; endDate?: string } = {}) => {
+      const trip = await new TripRepository().createTrip(seed.familyId, { name: 'Beach', ...dates });
+      const dest = await request(app).post(`/api/trips/${trip.id}/destinations`).set('Authorization', auth)
+        .send({ name: 'Beach', memberIds: [seed.dad] });
+      expect(dest.status).toBe(201);
+      return { tripId: trip.id, destinationId: dest.body.id as string, listId: dest.body.packingListId as string };
+    };
+    const adopt = (listId: string) =>
+      request(app).post(`/api/trips/${seed.tripId}/destinations`).set('Authorization', auth)
+        .send({ name: 'Beach', memberIds: [seed.dad], packingListId: listId });
+    const isLive = async (table: string, id: string) =>
+      !(await seed.db.get(`SELECT deleted_at FROM ${table} WHERE id = ?`, [id])).deleted_at;
+
+    it('refuses a list whose trip has dates and leaves that trip alone', async () => {
+      const other = await otherTrip({ startDate: '2027-06-01', endDate: '2027-06-05' });
+      const res = await adopt(other.listId);
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('list_in_other_trip');
+      expect(await isLive('trips', other.tripId)).toBe(true);
+      expect(await isLive('trip_destinations', other.destinationId)).toBe(true);
+      const link = await seed.db.get(`SELECT 1 AS x FROM trip_packing_lists WHERE trip_id = ? AND packing_list_id = ?`, [other.tripId, other.listId]);
+      expect(link).toBeTruthy();
+    });
+
+    it('refuses a list whose dateless trip has a booking', async () => {
+      const other = await otherTrip();
+      await seed.db.run(`INSERT INTO bookings (id, trip_id) VALUES (?, ?)`, [uuidv4(), other.tripId]);
+      const res = await adopt(other.listId);
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('list_in_other_trip');
+      expect(await isLive('trips', other.tripId)).toBe(true);
+    });
+
+    it('refuses a list whose dateless trip has a trip element', async () => {
+      const other = await otherTrip();
+      await seed.db.run(`INSERT INTO trip_elements (id, trip_id, element_type, name) VALUES (?, ?, 'hotel', 'Inn')`, [uuidv4(), other.tripId]);
+      const res = await adopt(other.listId);
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('list_in_other_trip');
+      expect(await isLive('trips', other.tripId)).toBe(true);
+    });
+
+    it('adopts a list from a dateless shell trip and retires the shell', async () => {
+      const other = await otherTrip();
+      const res = await adopt(other.listId);
+      expect(res.status).toBe(201);
+      expect(res.body.packingListId).toBe(other.listId);
+      expect(await isLive('trips', other.tripId)).toBe(false);
+      expect(await isLive('trip_destinations', other.destinationId)).toBe(false);
+    });
+  });
+
   it('puts a kept list with items into a trip of its own', async () => {
     const { res } = await splitSource();
     const grandma = res.body.destinations[1];

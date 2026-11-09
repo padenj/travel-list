@@ -268,7 +268,30 @@ export class TripDestinationRepository {
     }
   }
 
-  // A list may join another trip only if it is the sole destination of its current trip; that trip is retired.
+  /**
+   * A trip is a "shell" when retiring it loses nothing but the list: no dates, and no live trip_elements
+   * (which own flight_legs, confirmations, attachments and element details), bookings, trip_locations,
+   * guest trip_participants (user_id NULL; family participants are added automatically with list members),
+   * or links to other live packing lists.
+   */
+  private async isShellTripTx(db: Database, tripId: string, listId: string): Promise<boolean> {
+    const row = await db.get(
+      `SELECT t.start_date AS startDate, t.end_date AS endDate,
+         EXISTS (SELECT 1 FROM trip_elements WHERE trip_id = t.id AND deleted_at IS NULL)
+         OR EXISTS (SELECT 1 FROM bookings WHERE trip_id = t.id)
+         OR EXISTS (SELECT 1 FROM trip_locations WHERE trip_id = t.id)
+         OR EXISTS (SELECT 1 FROM trip_participants WHERE trip_id = t.id AND user_id IS NULL)
+         OR EXISTS (
+           SELECT 1 FROM trip_packing_lists tpl JOIN packing_lists pl ON pl.id = tpl.packing_list_id
+           WHERE tpl.trip_id = t.id AND tpl.packing_list_id <> ? AND pl.deleted_at IS NULL
+         ) AS hasContent
+       FROM trips t WHERE t.id = ?`,
+      [listId, tripId]
+    );
+    return !!row && !row.startDate && !row.endDate && !row.hasContent;
+  }
+
+  // A list may join another trip only if it is the sole destination of a shell trip; that trip is retired.
   private async releaseFromLoneTripTx(db: Database, listId: string, tripId: string, now: string): Promise<void> {
     const taken = await db.get(
       `SELECT d.id, d.trip_id AS tripId FROM trip_destinations d JOIN trips t ON t.id = d.trip_id
@@ -281,6 +304,7 @@ export class TripDestinationRepository {
       [taken.tripId]
     );
     if (taken.tripId === tripId || n !== 1) throw new DestinationValidationError('list_already_destination');
+    if (!(await this.isShellTripTx(db, taken.tripId, listId))) throw new DestinationValidationError('list_in_other_trip');
     await db.run(`UPDATE trip_destinations SET deleted_at = ?, updated_at = ? WHERE id = ?`, [now, now, taken.id]);
     await db.run(`UPDATE trips SET deleted_at = ?, updated_at = ? WHERE id = ?`, [now, now, taken.tripId]);
     await db.run(`DELETE FROM trip_packing_lists WHERE trip_id = ? AND packing_list_id = ?`, [taken.tripId, listId]);

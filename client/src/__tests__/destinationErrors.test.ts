@@ -9,6 +9,7 @@ describe('destinationErrorText', () => {
     expect(destinationErrorText(new Error('would_empty_destination'), 'x')).toBe('That would leave another destination with no travelers.');
     expect(destinationErrorText({ body: { error: 'last_destination' } }, 'x')).toBe('A trip needs at least one destination.');
     expect(destinationErrorText(new Error('invalid_shared_items_to'), 'x')).toBe('Choose where the shared items go.');
+    expect(destinationErrorText(new Error('list_in_other_trip'), 'x')).toBe('That list belongs to a trip with dates or bookings. Pick another list or start a new one.');
   });
 
   it('falls back for unknown codes', () => {
