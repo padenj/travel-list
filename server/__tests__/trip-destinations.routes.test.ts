@@ -582,4 +582,102 @@ describe('trip destination routes', () => {
     const row = await seed.db.get(`SELECT deleted_at FROM packing_lists WHERE id = ?`, [listId]);
     expect(row.deleted_at).toBeTruthy();
   });
+
+  describe('splitting into a trip created without memberIds (legacy clients)', () => {
+    // Old clients call POST /trips with no memberIds, then split a separate list into the fresh trip.
+    // That create auto-fills one placeholder destination with every family member on an empty list.
+    const createLegacyTrip = async () => {
+      const created = await request(app).post('/api/trips').set('Authorization', auth)
+        .send({ name: 'Road Trip' });
+      expect(created.status).toBe(201);
+      return created.body.id as string;
+    };
+
+    it('retires the empty placeholder destination so the split succeeds', async () => {
+      const tripId = await createLegacyTrip();
+      const source = await createList(seed.familyId, 'Spring list', [seed.dad, seed.mom, seed.ava, seed.leo]);
+
+      const before = await request(app).get(`/api/trips/${tripId}/destinations`).set('Authorization', auth);
+      expect(before.body).toHaveLength(1);
+      const placeholder = before.body[0];
+
+      const res = await request(app).post(`/api/trips/${tripId}/split`).set('Authorization', auth).send({
+        sourceListId: source,
+        destinations: [
+          { name: 'Paris', memberIds: [seed.dad, seed.mom] },
+          { name: "Grandma's", memberIds: [seed.ava, seed.leo] },
+        ],
+        sharedItemsDestinationIndex: 0,
+      });
+
+      expect(res.status).toBe(201);
+      expect(res.body.destinations.map((d: any) => d.name)).toEqual(['Paris', "Grandma's"]);
+
+      const after = await request(app).get(`/api/trips/${tripId}/destinations`).set('Authorization', auth);
+      expect(after.body.map((d: any) => d.id)).toEqual(res.body.destinations.map((d: any) => d.id));
+
+      const placeholderDestination = await seed.db.get(`SELECT deleted_at FROM trip_destinations WHERE id = ?`, [placeholder.id]);
+      expect(placeholderDestination.deleted_at).toBeTruthy();
+      const placeholderList = await seed.db.get(`SELECT deleted_at FROM packing_lists WHERE id = ?`, [placeholder.packingListId]);
+      expect(placeholderList.deleted_at).toBeTruthy();
+      const link = await seed.db.get(
+        `SELECT COUNT(*) AS n FROM trip_packing_lists WHERE trip_id = ? AND packing_list_id = ?`,
+        [tripId, placeholder.packingListId]
+      );
+      expect(link.n).toBe(0);
+    });
+
+    it('still returns 409 when the single destination list already has items', async () => {
+      const tripId = await createLegacyTrip();
+      const before = await request(app).get(`/api/trips/${tripId}/destinations`).set('Authorization', auth);
+      const placeholder = before.body[0];
+      await addToList(placeholder.packingListId, await createMasterItem(seed.familyId, 'Teddy', { memberIds: [seed.ava] }));
+      const source = await createList(seed.familyId, 'Spring list', [seed.dad, seed.mom, seed.ava, seed.leo]);
+
+      const res = await request(app).post(`/api/trips/${tripId}/split`).set('Authorization', auth).send({
+        sourceListId: source,
+        destinations: [
+          { name: 'Paris', memberIds: [seed.dad, seed.mom] },
+          { name: "Grandma's", memberIds: [seed.ava, seed.leo] },
+        ],
+        sharedItemsDestinationIndex: 0,
+      });
+
+      expect(res.status).toBe(409);
+      expect(res.body.error).toBe('member_in_other_destination');
+      const placeholderDestination = await seed.db.get(`SELECT deleted_at FROM trip_destinations WHERE id = ?`, [placeholder.id]);
+      expect(placeholderDestination.deleted_at).toBeNull();
+    });
+
+    it('leaves the placeholder intact when the split fails validation after the placeholder check', async () => {
+      const tripId = await createLegacyTrip();
+      const before = await request(app).get(`/api/trips/${tripId}/destinations`).set('Authorization', auth);
+      const placeholder = before.body[0];
+      // sourceListId includes a member not covered by either destination, so validation fails after the
+      // placeholder would have been retired and the conflict check would have passed.
+      const source = await createList(seed.familyId, 'Spring list', [seed.dad, seed.mom, seed.ava, seed.leo]);
+
+      const res = await request(app).post(`/api/trips/${tripId}/split`).set('Authorization', auth).send({
+        sourceListId: source,
+        destinations: [
+          { name: 'Paris', memberIds: [seed.dad, seed.mom] },
+          { name: "Grandma's", memberIds: [seed.ava] },
+        ],
+        sharedItemsDestinationIndex: 0,
+      });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('unassigned_member');
+
+      const placeholderDestination = await seed.db.get(`SELECT deleted_at FROM trip_destinations WHERE id = ?`, [placeholder.id]);
+      expect(placeholderDestination.deleted_at).toBeNull();
+      const placeholderList = await seed.db.get(`SELECT deleted_at FROM packing_lists WHERE id = ?`, [placeholder.packingListId]);
+      expect(placeholderList.deleted_at).toBeNull();
+      const link = await seed.db.get(
+        `SELECT COUNT(*) AS n FROM trip_packing_lists WHERE trip_id = ? AND packing_list_id = ?`,
+        [tripId, placeholder.packingListId]
+      );
+      expect(link.n).toBe(1);
+    });
+  });
 });

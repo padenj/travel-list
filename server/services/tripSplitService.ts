@@ -213,14 +213,41 @@ async function countUnownedRowsTx(db: Database, listId: string, assigned: Set<st
   return count;
 }
 
+/**
+ * Old clients call `POST /trips` (no memberIds) and then split into the fresh trip. That create
+ * auto-fills a single first destination with every family member on an empty list, which would
+ * otherwise collide with the split's own member assignment. If the trip still has exactly one live
+ * destination and its list has no items, it's that untouched placeholder: retire it (soft-delete the
+ * destination and its list, drop the trip_packing_lists link) so the split's destinations are all that
+ * remain. Caller owns the transaction, so a later failure rolls this back along with everything else.
+ */
+async function retirePlaceholderDestinationTx(db: Database, tripId: string): Promise<void> {
+  const destinations = (await db.all(
+    `SELECT id, packing_list_id AS listId FROM trip_destinations WHERE trip_id = ? AND deleted_at IS NULL`,
+    [tripId]
+  )) as { id: string; listId: string }[];
+  if (destinations.length !== 1) return;
+  const [destination] = destinations;
+  const { count } = await db.get(
+    `SELECT COUNT(*) AS count FROM packing_list_items WHERE packing_list_id = ?`,
+    [destination.listId]
+  );
+  if (count > 0) return;
+  const now = new Date().toISOString();
+  await db.run(`UPDATE trip_destinations SET deleted_at = ?, updated_at = ? WHERE id = ?`, [now, now, destination.id]);
+  await db.run(`UPDATE packing_lists SET deleted_at = ? WHERE id = ?`, [now, destination.listId]);
+  await db.run(`DELETE FROM trip_packing_lists WHERE trip_id = ? AND packing_list_id = ?`, [tripId, destination.listId]);
+}
+
 export async function splitListIntoTrip(input: SplitInput): Promise<SplitResult> {
   validateSplitInput(input);
   const db = await getDb();
-  const conflict = await destinationRepo.findConflict(db, input.tripId, input.destinations.flatMap(d => d.memberIds));
-  if (conflict) throw conflict;
 
   const listIds: string[] = [];
   const skippedCount = await withTransaction(db, async () => {
+    await retirePlaceholderDestinationTx(db, input.tripId);
+    const conflict = await destinationRepo.findConflict(db, input.tripId, input.destinations.flatMap(d => d.memberIds));
+    if (conflict) throw conflict;
     const sourceMembers = (await db.all(
       `SELECT member_id FROM packing_list_members WHERE packing_list_id = ?`,
       [input.sourceListId]
