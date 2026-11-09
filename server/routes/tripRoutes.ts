@@ -22,6 +22,9 @@ import {
   updateDestination,
   deleteDestinationTx,
   LastDestinationError,
+  createTripWithFirstDestination,
+  applyTripRenameTx,
+  copyTrip,
 } from '../services/tripListService';
 import { withTransaction } from '../utils/transaction';
 
@@ -61,23 +64,33 @@ tripRouter.get('/', authMiddleware, async (req: Request, res: Response) => {
   }
 });
 
-// Create trip
+// Create trip (dates optional); it starts with one destination named after it
 tripRouter.post('/', authMiddleware, async (req: Request, res: Response) => {
   try {
-    const { name, description, tripType, startDate, endDate, status } = req.body;
-    if (!name || !startDate || !endDate) {
-      return res.status(400).json({ error: 'Missing required fields: name, startDate, endDate' });
+    const { name, description, tripType, startDate, endDate, status, memberIds } = req.body || {};
+    if (typeof name !== 'string' || !name.trim()) {
+      return res.status(400).json({ error: 'Missing required field: name' });
     }
-    const trip = await tripRepository.createTrip((req as any).user.familyId, {
-      name,
+    const familyId = (req as any).user.familyId;
+    let members: string[] = Array.isArray(memberIds) ? memberIds : [];
+    if (members.length === 0) {
+      const db = await getDb();
+      members = ((await db.all(`SELECT id FROM users WHERE familyId = ? AND deleted_at IS NULL`, [familyId])) as { id: string }[])
+        .map(u => u.id);
+    }
+    const { tripId } = await createTripWithFirstDestination({
+      familyId,
+      name: name.trim(),
       description,
       tripType,
       startDate,
       endDate,
       status,
+      memberIds: members,
     });
-    res.status(201).json(trip);
+    res.status(201).json(await tripRepository.getTripById(tripId));
   } catch (error) {
+    if (error instanceof DestinationValidationError) return res.status(400).json({ error: error.message });
     res.status(500).json({ error: 'Failed to create trip' });
   }
 });
@@ -95,23 +108,58 @@ tripRouter.get('/:tripId', authMiddleware, tripAccessMiddleware, async (req: Req
   }
 });
 
-// Update trip
+// Update trip; a new name flows to destinations that carried the old one and to every list label
 tripRouter.put('/:tripId', authMiddleware, tripAccessMiddleware, async (req: Request, res: Response) => {
+  const body = req.body || {};
+  if ('name' in body && (typeof body.name !== 'string' || !body.name.trim())) {
+    return res.status(400).json({ error: 'name must be a non-empty string' });
+  }
   try {
-    const trip = await tripRepository.updateTrip(req.trip!.id, req.body);
-    res.json(trip);
+    const db = await getDb();
+    const oldName = req.trip!.name;
+    const updates = 'name' in body ? { ...body, name: body.name.trim() } : body;
+    const changed = await withTransaction(db, async () => {
+      await tripRepository.updateTrip(req.trip!.id, updates);
+      return 'name' in updates && updates.name !== oldName
+        ? applyTripRenameTx(db, req.trip!.id, oldName, updates.name)
+        : [];
+    });
+    notify(changed, 'destination');
+    res.json(await tripRepository.getTripById(req.trip!.id));
   } catch (error) {
     res.status(500).json({ error: 'Failed to update trip' });
   }
 });
 
-// Delete trip
+// Delete trip with its destinations and lists
 tripRouter.delete('/:tripId', authMiddleware, tripAccessMiddleware, async (req: Request, res: Response) => {
   try {
+    const lists = (await tripDestinationRepository.listForTrip(req.trip!.id)).map(d => d.packingListId);
     await tripRepository.deleteTrip(req.trip!.id);
+    notify(lists, 'destination');
     res.status(204).send();
   } catch (error) {
     res.status(500).json({ error: 'Failed to delete trip' });
+  }
+});
+
+// Copy a trip's destinations and lists into a new dateless trip
+tripRouter.post('/:tripId/copy', authMiddleware, tripAccessMiddleware, async (req: Request, res: Response) => {
+  const { name, includeOneOffs } = req.body || {};
+  if (typeof name !== 'string' || !name.trim()) return res.status(400).json({ error: 'name is required' });
+  try {
+    const tripId = await copyTrip({
+      sourceTripId: req.trip!.id,
+      familyId: req.trip!.family_id,
+      name: name.trim(),
+      includeOneOffs: includeOneOffs === true,
+    });
+    return res.status(201).json({
+      trip: await tripRepository.getTripById(tripId),
+      destinations: await tripDestinationRepository.listForTrip(tripId),
+    });
+  } catch (error) {
+    return sendDestinationError(res, error, 'Failed to copy trip');
   }
 });
 

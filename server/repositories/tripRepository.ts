@@ -17,8 +17,6 @@ export interface Trip {
 }
 
 export class TripRepository {
-  private db = getDb();
-
   async createTrip(familyId: string, trip: {
     name: string;
     description?: string;
@@ -28,7 +26,7 @@ export class TripRepository {
     status?: string;
   }): Promise<Trip> {
     const id = uuidv4();
-    const db = await this.db;
+    const db = await getDb();
     await db.run(
       `INSERT INTO trips (id, family_id, name, description, trip_type, start_date, end_date, status, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
@@ -38,7 +36,7 @@ export class TripRepository {
   }
 
   async getTripById(tripId: string): Promise<Trip | undefined> {
-    const db = await this.db;
+    const db = await getDb();
     const row = await db.get(
       `SELECT id, family_id as familyId, name, description, trip_type as tripType, start_date as startDate, end_date as endDate, status, created_at as createdAt, updated_at as updatedAt, deleted_at as deletedAt
        FROM trips WHERE id = ? AND deleted_at IS NULL`,
@@ -48,7 +46,7 @@ export class TripRepository {
   }
 
   async getTripsByFamily(familyId: string): Promise<Trip[]> {
-    const db = await this.db;
+    const db = await getDb();
     const rows = await db.all(
       `SELECT id, family_id as familyId, name, description, trip_type as tripType, start_date as startDate, end_date as endDate, status, created_at as createdAt, updated_at as updatedAt, deleted_at as deletedAt
        FROM trips WHERE family_id = ? AND deleted_at IS NULL ORDER BY start_date DESC`,
@@ -58,7 +56,7 @@ export class TripRepository {
   }
 
   async updateTrip(tripId: string, updates: Partial<Trip>): Promise<Trip> {
-    const db = await this.db;
+    const db = await getDb();
     const dbUpdates: Record<string, any> = {};
     const fieldMap: Record<string, string> = {
       name: 'name',
@@ -89,7 +87,7 @@ export class TripRepository {
   }
 
   async deleteTrip(tripId: string): Promise<void> {
-    const db = await this.db;
+    const db = await getDb();
     await withTransaction(db, async () => {
       await db.run(
         `UPDATE trips SET deleted_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`,
