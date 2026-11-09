@@ -17,6 +17,7 @@ export interface AddDestinationDialogProps {
   familyMembers: any[];
   editing: TripDestination | null;
   onSaved: () => void;
+  onChanged?: () => void;
 }
 
 interface MoveConflict {
@@ -29,7 +30,7 @@ interface MoveConflict {
 const FALLBACK_ERROR = "Couldn't save the destination. Please try again.";
 const chipStyles = { root: { maxWidth: '100%' }, label: { maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis' } };
 
-export default function AddDestinationDialog({ opened, onClose, trip, destinations, familyMembers, editing, onSaved }: AddDestinationDialogProps) {
+export default function AddDestinationDialog({ opened, onClose, trip, destinations, familyMembers, editing, onSaved, onChanged }: AddDestinationDialogProps) {
   const isMobile = useMediaQuery('(max-width: 48em)', undefined, { getInitialValueInEffect: false });
   const online = useOnline();
   const [name, setName] = useState('');
@@ -81,33 +82,54 @@ export default function AddDestinationDialog({ opened, onClose, trip, destinatio
   };
 
   const save = async () => {
-    // Fail before changing anything if a move would leave another destination empty.
-    const emptied = destinations.find(d => d.id !== editing?.id && d.memberIds.length > 0 && d.memberIds.every(id => memberIds.includes(id)));
-    if (emptied) {
-      showNotification({ title: 'Cannot move everyone', message: `${emptied.name} needs at least one traveler`, color: 'red' });
-      return;
-    }
     setSaving(true);
     setConflict(null);
+    const moved: { id: string; originalMemberIds: string[] }[] = [];
+    let phase: 'prepare' | 'final' = 'prepare';
+    let wrote = false;
     try {
-      for (const owner of destinations) {
-        if (owner.id === editing?.id || !owner.memberIds.some(id => memberIds.includes(id))) continue;
-        await tripApi.updateDestination(trip.id, owner.id, { memberIds: owner.memberIds.filter(id => !memberIds.includes(id)) });
+      const current = await tripApi.listDestinations(trip.id);
+      const others = current.filter(d => d.id !== editing?.id);
+      // Fail before changing anything if a move would leave another destination empty.
+      const emptied = others.find(d => d.memberIds.length > 0 && d.memberIds.every(id => memberIds.includes(id)));
+      if (emptied) {
+        showNotification({ title: 'Cannot move everyone', message: `${emptied.name} needs at least one traveler`, color: 'red' });
+        return;
       }
+      for (const owner of others) {
+        if (!owner.memberIds.some(id => memberIds.includes(id))) continue;
+        await tripApi.updateDestination(trip.id, owner.id, { memberIds: owner.memberIds.filter(id => !memberIds.includes(id)) });
+        moved.push({ id: owner.id, originalMemberIds: owner.memberIds });
+        wrote = true;
+      }
+      phase = 'final';
       if (editing) {
-        await tripApi.updateDestination(trip.id, editing.id, { name: name.trim(), memberIds });
+        const unchanged = memberIds.length === editing.memberIds.length && memberIds.every(id => editing.memberIds.includes(id));
+        await tripApi.updateDestination(trip.id, editing.id, unchanged ? { name: name.trim() } : { name: name.trim(), memberIds });
       } else {
         await tripApi.createDestination(trip.id, { name: name.trim(), memberIds, itemGroupIds, packingListId: existingListId || undefined });
       }
+      wrote = true;
       onSaved();
+      onChanged?.();
     } catch (err) {
-      if (err instanceof ApiConflictError && err.body?.error === 'member_in_other_destination') {
+      for (const move of [...moved].reverse()) {
+        try {
+          await tripApi.updateDestination(trip.id, move.id, { memberIds: move.originalMemberIds });
+        } catch {
+          // best effort; the parent reload shows the real state
+        }
+      }
+      if (wrote) onChanged?.();
+      if (phase === 'final' && err instanceof ApiConflictError && err.body?.error === 'member_in_other_destination') {
         // Someone else moved this person since the trip page loaded.
         const { memberId, destinationId } = err.body;
         setConflictLoading(true);
         const info = await describeMemberConflict(trip.id, memberId, destinationId);
         setConflictLoading(false);
         setConflict({ memberId, destinationId, ...info });
+      } else if (phase === 'prepare' && err instanceof ApiConflictError && err.body?.error === 'member_in_other_destination') {
+        showNotification({ title: 'Could not save destination', message: 'The trip changed, please try again.', color: 'red' });
       } else {
         showNotification({ title: 'Could not save destination', message: destinationErrorText(err, FALLBACK_ERROR), color: 'red' });
       }
@@ -129,6 +151,7 @@ export default function AddDestinationDialog({ opened, onClose, trip, destinatio
         return;
       }
       await tripApi.updateDestination(trip.id, source.id, { memberIds: remaining });
+      onChanged?.();
     } catch (err) {
       setConflict(null);
       showNotification({ title: 'Could not move traveler', message: destinationErrorText(err, FALLBACK_ERROR), color: 'red' });

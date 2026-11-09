@@ -31,6 +31,7 @@ describe('AddDestinationDialog', () => {
     (getFamilyPackingLists as any).mockResolvedValue({ response: { ok: true }, data: { lists: [] } });
     (tripApi.createDestination as any).mockResolvedValue({});
     (tripApi.updateDestination as any).mockResolvedValue({});
+    (tripApi.listDestinations as any).mockResolvedValue([]);
   });
 
   afterEach(() => {
@@ -58,6 +59,7 @@ describe('AddDestinationDialog', () => {
   it('moves a traveler out of another destination after confirming', async () => {
     const confirm = vi.fn(() => true);
     vi.stubGlobal('confirm', confirm);
+    (tripApi.listDestinations as any).mockResolvedValue([grandma]);
     const onSaved = vi.fn();
     renderWithMantine(
       <AddDestinationDialog opened onClose={vi.fn()} trip={trip} destinations={[grandma]} familyMembers={familyMembers} editing={null} onSaved={onSaved} />
@@ -83,6 +85,7 @@ describe('AddDestinationDialog', () => {
   });
 
   it('refuses to empty another destination', async () => {
+    (tripApi.listDestinations as any).mockResolvedValue([{ ...grandma, memberIds: ['ava'] }]);
     vi.stubGlobal('confirm', vi.fn(() => true));
     renderWithMantine(
       <AddDestinationDialog opened onClose={vi.fn()} trip={trip} destinations={[{ ...grandma, memberIds: ['ava'] }]} familyMembers={familyMembers} editing={null} onSaved={vi.fn()} />
@@ -97,6 +100,7 @@ describe('AddDestinationDialog', () => {
   });
 
   it('renames and changes travelers when editing', async () => {
+    (tripApi.listDestinations as any).mockResolvedValue([grandma]);
     const onSaved = vi.fn();
     renderWithMantine(
       <AddDestinationDialog opened onClose={vi.fn()} trip={trip} destinations={[grandma]} familyMembers={familyMembers} editing={grandma} onSaved={onSaved} />
@@ -134,7 +138,7 @@ describe('AddDestinationDialog', () => {
   });
 
   it('explains when the conflicting traveler is the only one at the other destination', async () => {
-    (tripApi.listDestinations as any).mockResolvedValue([{ ...grandma, memberIds: ['ava'] }]);
+    (tripApi.listDestinations as any).mockResolvedValueOnce([]).mockResolvedValue([{ ...grandma, memberIds: ['ava'] }]);
     (tripApi.createDestination as any).mockRejectedValueOnce(conflict('ava', 'd1'));
     renderWithMantine(
       <AddDestinationDialog opened onClose={vi.fn()} trip={trip} destinations={[]} familyMembers={familyMembers} editing={null} onSaved={vi.fn()} />
@@ -188,5 +192,73 @@ describe('AddDestinationDialog', () => {
     expect((btn as HTMLButtonElement).disabled).toBe(true);
     act(() => { window.dispatchEvent(new Event('online')); });
     expect(await screen.findByRole('button', { name: 'Save' })).toBeTruthy();
+  });
+
+  it('uses freshly fetched destinations, not the stale prop, for moves', async () => {
+    const beach = { ...grandma, id: 'd2', name: 'Beach', memberIds: ['leo', 'dad'] };
+    (tripApi.listDestinations as any).mockResolvedValue([{ ...grandma, memberIds: ['ava'] }, beach]);
+    vi.stubGlobal('confirm', vi.fn(() => true));
+    const onSaved = vi.fn();
+    renderWithMantine(
+      <AddDestinationDialog opened onClose={vi.fn()} trip={trip} destinations={[grandma]} familyMembers={familyMembers} editing={null} onSaved={onSaved} />
+    );
+    await userEvent.type(screen.getByLabelText(/Destination name/), 'Paris');
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Dad' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(tripApi.updateDestination).toHaveBeenCalledTimes(1);
+    expect(tripApi.updateDestination).toHaveBeenCalledWith('t1', 'd2', { memberIds: ['leo'] });
+    expect(tripApi.updateDestination).not.toHaveBeenCalledWith('t1', 'd1', expect.anything());
+  });
+
+  it('does not send memberIds when only the name changed', async () => {
+    (tripApi.listDestinations as any).mockResolvedValue([grandma]);
+    const onSaved = vi.fn();
+    renderWithMantine(
+      <AddDestinationDialog opened onClose={vi.fn()} trip={trip} destinations={[grandma]} familyMembers={familyMembers} editing={grandma} onSaved={onSaved} />
+    );
+    const name = screen.getByLabelText(/Destination name/);
+    await userEvent.clear(name);
+    await userEvent.type(name, 'Nana');
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(tripApi.updateDestination).toHaveBeenCalledWith('t1', 'd1', { name: 'Nana' });
+  });
+
+  it('restores moved travelers and calls onChanged when the final create fails', async () => {
+    (tripApi.listDestinations as any).mockResolvedValue([grandma]);
+    (tripApi.createDestination as any).mockRejectedValueOnce(new Error('boom'));
+    vi.stubGlobal('confirm', vi.fn(() => true));
+    const onSaved = vi.fn();
+    const onChanged = vi.fn();
+    renderWithMantine(
+      <AddDestinationDialog opened onClose={vi.fn()} trip={trip} destinations={[grandma]} familyMembers={familyMembers} editing={null} onSaved={onSaved} onChanged={onChanged} />
+    );
+    await userEvent.type(screen.getByLabelText(/Destination name/), 'Paris');
+    await userEvent.click(screen.getByRole('checkbox', { name: "Ava (at Grandma's)" }));
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(onChanged).toHaveBeenCalled());
+    expect(tripApi.updateDestination).toHaveBeenNthCalledWith(1, 't1', 'd1', { memberIds: ['leo'] });
+    expect(tripApi.updateDestination).toHaveBeenNthCalledWith(2, 't1', 'd1', { memberIds: ['ava', 'leo'] });
+    expect(onSaved).not.toHaveBeenCalled();
+  });
+
+  it('shows a generic message when a preliminary move hits a 409', async () => {
+    (tripApi.listDestinations as any).mockResolvedValue([grandma]);
+    (tripApi.updateDestination as any).mockRejectedValueOnce(conflict('leo', 'd9'));
+    vi.stubGlobal('confirm', vi.fn(() => true));
+    renderWithMantine(
+      <AddDestinationDialog opened onClose={vi.fn()} trip={trip} destinations={[grandma]} familyMembers={familyMembers} editing={null} onSaved={vi.fn()} />
+    );
+    await userEvent.type(screen.getByLabelText(/Destination name/), 'Paris');
+    await userEvent.click(screen.getByRole('checkbox', { name: "Ava (at Grandma's)" }));
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(showNotification).toHaveBeenCalledWith(expect.objectContaining({ message: 'The trip changed, please try again.' })));
+    expect(screen.queryByRole('button', { name: 'Move' })).toBeNull();
+    expect(tripApi.createDestination).not.toHaveBeenCalled();
   });
 });

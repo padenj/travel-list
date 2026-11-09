@@ -112,7 +112,7 @@ export function TripDetailPage() {
         refreshKey={participantsVersion}
         onParticipantsChanged={setParticipants}
       />
-      <TripPackingSection trip={trip} />
+      <TripPackingSection trip={trip} onChanged={reload} />
 
       {reloadError && (
         <Alert color="red" mt="sm" withCloseButton onClose={() => setReloadError(null)}>{reloadError}</Alert>

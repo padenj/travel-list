@@ -24,7 +24,7 @@ const itemsLabel = (n: number) => `${n} ${n === 1 ? 'item' : 'items'}`;
 // Long destination names must wrap instead of overflowing the button on phones.
 const wrapButtonStyles = { root: { height: 'auto', minHeight: 36, paddingBlock: 6 }, label: { whiteSpace: 'normal' as const, textAlign: 'center' as const } };
 
-export default function TripPackingSection({ trip }: { trip: Trip }) {
+export default function TripPackingSection({ trip, onChanged }: { trip: Trip; onChanged?: () => void }) {
   const navigate = useNavigate();
   const online = useOnline();
   const { setActiveListId } = useActivePackingList();
@@ -80,6 +80,7 @@ export default function TripPackingSection({ trip }: { trip: Trip }) {
       await tripApi.deleteDestination(trip.id, destination.id, options);
       setPendingDelete(null);
       await load();
+      onChanged?.();
     } catch (err) {
       if (err instanceof ApiConflictError && err.body?.error === 'destination_has_items') {
         setPendingDelete({ destination, itemCount: Number(err.body.itemCount) || 0 });
@@ -157,9 +158,10 @@ export default function TripPackingSection({ trip }: { trip: Trip }) {
         destinations={destinations}
         familyMembers={familyMembers}
         editing={dialog?.editing ?? null}
-        onSaved={() => {
-          setDialog(null);
+        onSaved={() => setDialog(null)}
+        onChanged={() => {
           void load();
+          onChanged?.();
         }}
       />
 
