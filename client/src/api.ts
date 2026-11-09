@@ -253,6 +253,13 @@ export const setChecked = async (itemId: string, checked: boolean): Promise<ApiR
     });
   };
 
+  export const movePackingListItem = async (listId: string, packingListItemId: string, toListId: string): Promise<ApiResponse> => {
+    return authenticatedApiCall(`/packing-lists/${listId}/items/${packingListItemId}/move`, {
+      method: 'POST',
+      body: JSON.stringify({ toListId }),
+    });
+  };
+
   export const updatePackingList = async (listId: string, updates: any): Promise<ApiResponse> => {
     return authenticatedApiCall(`/packing-lists/${listId}`, {
       method: 'PUT',

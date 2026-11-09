@@ -212,3 +212,50 @@ export interface FlightLegPayload {
   flightNumber?: string;
   checkPriceUrl?: string;
 }
+
+export interface TripDestination {
+  id: string;
+  tripId: string;
+  name: string;
+  color: string | null;
+  position: number;
+  packingListId: string;
+  memberIds: string[];
+}
+
+/** `trip_destination` on GET /packing-lists/:id */
+export interface ListTripContext {
+  tripId: string;
+  tripName: string;
+  destinations: TripDestination[];
+}
+
+/** `trip_destination` on each list from GET /families/:familyId/packing-lists */
+export interface ListTripSummary {
+  tripId: string;
+  tripName: string;
+  destinationId: string;
+  destinationName: string;
+  position: number;
+  destinationCount: number;
+}
+
+export interface DestinationWritePayload {
+  name?: string;
+  memberIds?: string[];
+  itemGroupIds?: string[];
+  packingListId?: string;
+  color?: string;
+  position?: number;
+}
+
+export interface SplitListPayload {
+  sourceListId: string;
+  destinations: { name: string; memberIds: string[] }[];
+  sharedItemsDestinationIndex: number;
+}
+
+export interface SplitResult {
+  destinations: TripDestination[];
+  skippedCount: number;
+}
