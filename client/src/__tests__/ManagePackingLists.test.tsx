@@ -23,6 +23,10 @@ vi.mock('../components/ItemEditDrawer', () => {
   const React = require('react');
   return { default: () => React.createElement('div', null) };
 });
+vi.mock('../components/SplitListDialog', () => {
+  const React = require('react');
+  return { default: (props: any) => (props.opened ? React.createElement('div', null, `split dialog for ${props.listId}`) : null) };
+});
 vi.mock('../contexts/ImpersonationContext', () => ({
   useImpersonation: () => ({ impersonatingFamilyId: impersonatingFamilyIdMock }),
 }));
@@ -187,6 +191,39 @@ if (!hasTestingLibs) {
           color: 'red',
         })
       );
+    });
+  });
+
+  describe('ManagePackingLists trip destinations', () => {
+    const trip = (destinationId: string, destinationName: string, position: number) => ({
+      tripId: 't1', tripName: 'Spring Break', destinationId, destinationName, position, destinationCount: 2,
+    });
+
+    beforeEach(() => {
+      availableListsMock = [
+        { id: 'list1', name: 'Spring – Paris', trip_destination: trip('d1', 'Paris', 0) },
+        { id: 'list2', name: "Spring – Grandma's", trip_destination: trip('d2', "Grandma's", 1) },
+        { id: 'list3', name: 'Ski' },
+      ];
+      refreshListsMock = vi.fn().mockResolvedValue(availableListsMock);
+    });
+
+    it('labels destination lists and marks every destination of the active trip as active', async () => {
+      renderPage();
+      expect(await screen.findByText('Spring Break · Paris')).toBeTruthy();
+      expect(screen.getByText("Spring Break · Grandma's")).toBeTruthy();
+      await waitFor(() => expect(screen.getAllByText('Active')).toHaveLength(2));
+      expect(screen.getAllByRole('button', { name: 'Set as active' })).toHaveLength(1);
+    });
+
+    it('offers Split only for lists that are not part of a trip', async () => {
+      const u = await user.setup();
+      renderPage();
+      await screen.findByText('Spring Break · Paris');
+      const splitButtons = screen.getAllByRole('button', { name: 'Split' });
+      expect(splitButtons).toHaveLength(1);
+      await u.click(splitButtons[0]);
+      expect(screen.getByText('split dialog for list3')).toBeTruthy();
     });
   });
 }

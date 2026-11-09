@@ -23,11 +23,15 @@ import { useActivePackingList } from '../contexts/ActivePackingListContext';
 import { useListEditDrawer } from '../contexts/ListEditDrawerContext';
 import ItemEditDrawer from './ItemEditDrawer';
 import AddItemsDrawer from './AddItemsDrawer';
+import SplitListDialog from './SplitListDialog';
+import { useOnline } from '../utils/useOnline';
 
 export default function ManagePackingLists() {
   const [familyId, setFamilyId] = useState<string | null>(null);
   const [activeFamilyListId, setActiveFamilyListId] = useState<string | null>(null);
   const { impersonatingFamilyId } = useImpersonation();
+  const [splitTarget, setSplitTarget] = useState<{ id: string; name: string } | null>(null);
+  const online = useOnline();
   const [lists, setLists] = useState<any[]>([]);
   // selected removed; edit modal holds the current list being edited in editListId
   // promote UI removed for now; will reintroduce promotion logic later
@@ -352,6 +356,9 @@ export default function ManagePackingLists() {
 
   // apply logic handled by AddItemsDrawer via the onApply prop below
 
+  const activeTripId = lists.find(l => l.id === activeFamilyListId)?.trip_destination?.tripId ?? null;
+  const isActiveRow = (l: any) => l.id === activeFamilyListId || (!!activeTripId && l.trip_destination?.tripId === activeTripId);
+
   return (
     <Card shadow="sm" padding="lg" radius="md" withBorder>
       <Title order={4}>Manage Packing Lists</Title>
@@ -361,9 +368,14 @@ export default function ManagePackingLists() {
         ) : (
           lists.map(l => (
             <Group key={l.id} align="center" style={{ justifyContent: 'space-between' }}>
-              <Text>{l.name}</Text>
+              <Group gap="xs">
+                <Text>{l.name}</Text>
+                {l.trip_destination && (
+                  <Badge color="grape" variant="light">{`${l.trip_destination.tripName} · ${l.trip_destination.destinationName}`}</Badge>
+                )}
+              </Group>
               <Group>
-                {activeFamilyListId === l.id ? (
+                {isActiveRow(l) ? (
                   <Badge color="green" variant="light">Active</Badge>
                 ) : (
                   <Button
@@ -390,6 +402,11 @@ export default function ManagePackingLists() {
                 )}
                 <Button size="xs" onClick={() => openEditFor(l)}>Edit</Button>
                 <Button size="xs" onClick={() => openCopyFor(l)}>Copy</Button>
+                {!l.trip_destination && (
+                  <Button size="xs" variant="light" disabled={!online} onClick={() => setSplitTarget({ id: l.id, name: l.name })}>
+                    {online ? 'Split' : 'Needs a connection'}
+                  </Button>
+                )}
                 <Button size="xs" color="red" onClick={() => doDelete(l.id)}>Delete</Button>
                 {/* Promote One-off button removed; promotion will be implemented later */}
               </Group>
@@ -566,6 +583,14 @@ export default function ManagePackingLists() {
         }}
         showIsOneOffCheckbox={true}
         promoteContext={editTargetItem && !editTargetItem.itemId ? { listId: editListId || '', packingListItemId: editTargetItem.id } : null}
+      />
+      <SplitListDialog
+        opened={!!splitTarget}
+        onClose={() => setSplitTarget(null)}
+        familyId={familyId}
+        listId={splitTarget?.id ?? null}
+        listName={splitTarget?.name ?? ''}
+        onSplit={() => { void reload(); }}
       />
     </Card>
   );
