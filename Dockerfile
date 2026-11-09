@@ -13,6 +13,8 @@ RUN npm ci --no-audit --no-fund
 # `npm --prefix client run build` keeps the intent explicit and lets Node
 # resolve modules from the parent `node_modules`.
 COPY client/ ./client/
+# client/tsconfig.json extends ../tsconfig.json; without it vite's esbuild fails to resolve the config
+COPY tsconfig.json ./
 RUN npm --prefix client ci --no-audit --no-fund && \
 	npm --prefix client run build
 
