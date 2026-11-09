@@ -123,9 +123,11 @@ export class TripDestinationRepository {
 
   async create(input: InsertDestinationInput): Promise<TripDestination> {
     const db = await getDb();
-    const conflict = await this.findConflict(db, input.tripId, input.memberIds);
-    if (conflict) throw conflict;
-    const id = await withTransaction(db, () => this.insertDestinationTx(db, input));
+    const id = await withTransaction(db, async () => {
+      const conflict = await this.findConflict(db, input.tripId, input.memberIds);
+      if (conflict) throw conflict;
+      return this.insertDestinationTx(db, input);
+    });
     return (await this.getById(id))!;
   }
 
@@ -159,11 +161,18 @@ export class TripDestinationRepository {
        FROM trip_destinations WHERE trip_id = ? AND deleted_at IS NULL`,
       [input.tripId]
     );
+    const usedColors = new Set(
+      (await db.all(`SELECT color FROM trip_destinations WHERE trip_id = ? AND deleted_at IS NULL`, [input.tripId])).map(
+        (r: any) => r.color
+      )
+    );
+    const color =
+      DESTINATION_COLORS.find(c => !usedColors.has(c)) ?? DESTINATION_COLORS[stats.count % DESTINATION_COLORS.length];
     const id = uuidv4();
     await db.run(
       `INSERT INTO trip_destinations (id, trip_id, name, color, position, packing_list_id, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [id, input.tripId, input.name, DESTINATION_COLORS[stats.count % DESTINATION_COLORS.length], stats.maxPosition + 1, listId, now, now]
+      [id, input.tripId, input.name, color, stats.maxPosition + 1, listId, now, now]
     );
     await this.ensureParticipantsTx(db, input.tripId, input.memberIds);
     return id;
@@ -177,12 +186,12 @@ export class TripDestinationRepository {
     const db = await getDb();
     const existing = await this.getById(id);
     if (!existing) throw new DestinationValidationError('not_found');
-    if (updates.memberIds) {
-      const conflict = await this.findConflict(db, existing.tripId, updates.memberIds, id);
-      if (conflict) throw conflict;
-      await this.assertFamilyMembers(db, familyId, updates.memberIds);
-    }
     await withTransaction(db, async () => {
+      if (updates.memberIds) {
+        const conflict = await this.findConflict(db, existing.tripId, updates.memberIds, id);
+        if (conflict) throw conflict;
+        await this.assertFamilyMembers(db, familyId, updates.memberIds);
+      }
       const fields: string[] = [];
       const values: unknown[] = [];
       if (typeof updates.name === 'string') { fields.push('name = ?'); values.push(updates.name); }

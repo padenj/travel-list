@@ -76,6 +76,16 @@ describe('TripDestinationRepository', () => {
     expect((await repo.listForTrip(seed.tripId)).map(d => d.name)).toEqual(['Paris', "Grandma's"]);
   });
 
+  it('does not reuse the color of an active destination after a delete', async () => {
+    const a = await createParis();
+    const b = await repo.create({ tripId: seed.tripId, familyId: seed.familyId, name: 'B', memberIds: [seed.ava], listName: 'B' });
+    await repo.softDelete(a.id);
+    const c = await repo.create({ tripId: seed.tripId, familyId: seed.familyId, name: 'C', memberIds: [seed.leo], listName: 'C' });
+    expect(a.color).toBe('blue');
+    expect(b.color).toBe('green');
+    expect(c.color).toBe('blue');
+  });
+
   it('rejects a person who is already in another destination of the trip', async () => {
     const paris = await createParis();
     const attempt = repo.create({
