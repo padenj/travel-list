@@ -35,8 +35,7 @@ export default function GlobalListEditDrawer() {
   const [moving, setMoving] = useState(false);
   const savedMemberIds = useRef<string[]>([]);
   const newestSavedReq = useRef(0);
-  const currentListIdRef = useRef<string | null>(listId ?? null);
-  currentListIdRef.current = listId ?? null;
+  const sessionRef = useRef(0);
   const online = useOnline();
   const isDestination = !!tripId;
   const saveTimer = useRef<number | null>(null);
@@ -53,6 +52,7 @@ export default function GlobalListEditDrawer() {
   const [pendingRemovalTemplateIds, setPendingRemovalTemplateIds] = useState<string[] | null>(null);
 
   useEffect(() => {
+    sessionRef.current++;
     if (!isOpen || !listId) return;
     if (debounceTimer.current) {
       window.clearTimeout(debounceTimer.current);
@@ -181,8 +181,8 @@ export default function GlobalListEditDrawer() {
 
   const putMembers = async (next: string[]): Promise<boolean> => {
     if (!listId) return false;
-    const forListId = listId;
-    const isCurrentList = () => currentListIdRef.current === forListId;
+    const session = sessionRef.current;
+    const isCurrentList = () => sessionRef.current === session;
     const reqId = ++memberReqCounter.current;
     const isLatest = () => memberReqCounter.current === reqId;
     try {
@@ -236,11 +236,11 @@ export default function GlobalListEditDrawer() {
     setConflict(null);
     setSavingMembers(true);
     debounceTimer.current = window.setTimeout(async () => {
-      const forListId = listId;
+      const session = sessionRef.current;
       try {
         await putMembers(next);
       } finally {
-        if (currentListIdRef.current === forListId) setSavingMembers(false);
+        if (sessionRef.current === session) setSavingMembers(false);
       }
     }, 500);
   };
@@ -251,8 +251,8 @@ export default function GlobalListEditDrawer() {
       setConflict(null);
       return;
     }
-    const forListId = listId;
-    const switched = () => currentListIdRef.current !== forListId;
+    const session = sessionRef.current;
+    const switched = () => sessionRef.current !== session;
     setMoving(true);
     // If the list switches mid-Move we still finish the server steps for the original list
     // (so the member is never left in no destination) but touch no UI state.

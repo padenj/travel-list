@@ -291,4 +291,31 @@ describe('GlobalListEditDrawer destination members', () => {
     await act(async () => { put.resolve(ok); });
     await expectUntouchedB();
   });
+  it('a Move in flight across A -> B -> A does not clobber the new A session', async () => {
+    const d = deferred();
+    (api.updatePackingList as any).mockResolvedValueOnce(conflict409).mockResolvedValue(ok);
+    (tripApi.listDestinations as any)
+      .mockResolvedValueOnce([{ id: 'dest-2', name: 'Rome', memberIds: ['m2', 'm3'] }])
+      .mockReturnValueOnce(d.promise);
+    (tripApi.updateDestination as any).mockResolvedValue({});
+    const utils = await setup(['m1']);
+    await tick('Bob');
+    await act(async () => { fireEvent.click(await screen.findByText('Move')); });
+    await switchToB(utils);
+    (api.getPackingList as any).mockResolvedValue({
+      response: { ok: true },
+      data: { name: 'Paris', items: [], template_ids: [], list: { member_ids: ['m1'] }, trip_destination: { tripId: 'trip-1', tripName: 'T', destinations: [] } },
+    });
+    current.listId = 'list-1';
+    await act(async () => { utils.rerender(<GlobalListEditDrawer />); });
+    await waitFor(() => expect(box('Ann').checked).toBe(true));
+    await tick('Ann');
+    expect(box('Ann').checked).toBe(false);
+    await act(async () => { d.resolve([{ id: 'dest-2', name: 'Rome', memberIds: ['m2', 'm3'] }]); });
+    await act(async () => { await new Promise(r => setTimeout(r, 50)); });
+    expect(box('Ann').checked).toBe(false);
+    expect(box('Bob').checked).toBe(false);
+    expect(showNotification).not.toHaveBeenCalled();
+    expect(screen.queryByText('Move')).toBeNull();
+  });
 });
