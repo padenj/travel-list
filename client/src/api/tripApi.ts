@@ -2,7 +2,7 @@ import {
   Trip, TripElement, TripElementConfirmation, FlightAutofillLookupInput, FlightAutofillDetails,
   TripParticipant, Booking, CreateBookingPayload, BookingTransaction, AddBookingTransactionPayload, FlightTravelerSeat,
   FlightLeg, FlightLegPayload,
-  TripDestination, DestinationWritePayload, SplitListPayload, SplitResult,
+  TripDestination, DestinationWritePayload, SplitListPayload, SplitResult, CopyTripPayload, CopyTripResult,
 } from '../types/trip';
 import { getAuthToken } from '../api';
 
@@ -70,9 +70,16 @@ export const tripApi = {
 
   deleteTrip: async (tripId: string): Promise<void> => {
     const response = await fetch(`${API_BASE}/${tripId}`, { method: 'DELETE', headers: authHeaders() });
-    if (!response.ok) {
-      throw new Error(`Failed to delete trip: ${response.status}`);
-    }
+    if (!response.ok) await handleResponse(response);
+  },
+
+  copyTrip: async (tripId: string, payload: CopyTripPayload): Promise<CopyTripResult> => {
+    const response = await fetch(`${API_BASE}/${tripId}/copy`, {
+      method: 'POST',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(payload),
+    });
+    return handleResponse(response);
   },
 
   // Element CRUD

@@ -59,4 +59,30 @@ describe('tripApi destinations', () => {
     await expect(tripApi.deleteDestination('t1', 'd1', { deleteList: true })).resolves.toBeUndefined();
     expect(JSON.parse((fetch as any).mock.calls[0][1].body)).toEqual({ deleteList: true });
   });
+
+  it('posts a trip copy', async () => {
+    stubFetch(201, { trip: { id: 't2' }, destinations: [] });
+    await expect(tripApi.copyTrip('t1', { name: 'Again', includeOneOffs: true }))
+      .resolves.toEqual({ trip: { id: 't2' }, destinations: [] });
+    const [url, init] = (fetch as any).mock.calls[0];
+    expect(url).toBe('/api/trips/t1/copy');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body)).toEqual({ name: 'Again', includeOneOffs: true });
+  });
+
+  it('sends moveFrom and sharedItemsTo when creating a destination', async () => {
+    stubFetch(201, { id: 'd2' });
+    await tripApi.createDestination('t1', { name: 'Rome', memberIds: ['u1'], moveFrom: true, sharedItemsTo: 'new' });
+    expect(JSON.parse((fetch as any).mock.calls[0][1].body)).toEqual({ name: 'Rome', memberIds: ['u1'], moveFrom: true, sharedItemsTo: 'new' });
+  });
+
+  it('surfaces the server error when deleting a trip fails', async () => {
+    stubFetch(404, { error: 'Trip not found' });
+    await expect(tripApi.deleteTrip('t1')).rejects.toThrow('Trip not found');
+  });
+
+  it('deletes a trip without parsing an empty body', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 204, json: () => Promise.reject(new Error('no body')) }));
+    await expect(tripApi.deleteTrip('t1')).resolves.toBeUndefined();
+  });
 });

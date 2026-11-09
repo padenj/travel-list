@@ -34,6 +34,7 @@ export default defineConfig({
       'client/src/__tests__/FlightsSection.test.tsx', // Flights table/cards
       'client/src/__tests__/ElementDialog.test.tsx', // Dialog tabs and swipe
       'client/src/__tests__/tripApi.test.ts', // API error surfacing
+      'client/src/__tests__/destinationErrors.test.ts', // destination error text
       'client/src/__tests__/flightLegs.test.ts', // Leg draft model
       'client/src/__tests__/FlightLegForm.test.tsx', // Single-leg form
       'client/src/__tests__/FlightLegList.test.tsx', // Inline leg editing

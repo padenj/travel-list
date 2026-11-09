@@ -4,8 +4,8 @@ export interface Trip {
   name: string;
   description?: string;
   tripType?: string;
-  startDate: string;
-  endDate: string;
+  startDate?: string | null;
+  endDate?: string | null;
   status?: string;
   createdAt: string;
   updatedAt: string;
@@ -238,6 +238,9 @@ export interface ListTripSummary {
   destinationName: string;
   position: number;
   destinationCount: number;
+  color?: string | null;
+  tripStartDate?: string | null;
+  tripEndDate?: string | null;
 }
 
 export interface DestinationWritePayload {
@@ -247,6 +250,20 @@ export interface DestinationWritePayload {
   packingListId?: string;
   color?: string;
   position?: number;
+  /** Take the chosen people (and their items) out of the trip's other destinations. */
+  moveFrom?: boolean;
+  /** Only used when the trip had one destination: where its whole-family items go. */
+  sharedItemsTo?: 'existing' | 'new';
+}
+
+export interface CopyTripPayload {
+  name: string;
+  includeOneOffs: boolean;
+}
+
+export interface CopyTripResult {
+  trip: Trip;
+  destinations: TripDestination[];
 }
 
 export interface SplitListPayload {

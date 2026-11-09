@@ -16,6 +16,9 @@ export const DESTINATION_ERROR_TEXT: Record<string, string> = {
   not_same_trip: "Shared items can't be moved there.",
   not_found: 'That destination no longer exists. Refresh and try again.',
   'Destination not found': 'That destination no longer exists. Refresh and try again.',
+  would_empty_destination: 'That would leave another destination with no travelers.',
+  last_destination: 'A trip needs at least one destination.',
+  invalid_shared_items_to: 'Choose where the shared items go.',
 };
 
 /** Readable text for an error thrown by tripApi (409 bodies carry the code in `body.error`). */
