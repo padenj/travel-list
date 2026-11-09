@@ -103,6 +103,27 @@ describe('PersonView', () => {
     expect(screen.getByRole('region', { name: 'Mom · Paris' })).toBeTruthy();
   });
 
+  it('scrolls the newly selected chip into view after a swipe', () => {
+    const scrollIntoView = vi.fn();
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = scrollIntoView;
+    try {
+      renderWithMantine(<PersonView groups={groups()} isTrip currentUserId="dad" {...handlers()} />);
+      expect(scrollIntoView).not.toHaveBeenCalled();
+      const area = screen.getByTestId('person-view');
+      fireEvent.touchStart(area, { touches: [{ clientX: 300, clientY: 100 }] });
+      fireEvent.touchEnd(area, { changedTouches: [{ clientX: 120, clientY: 110 }] });
+      fireEvent.touchStart(area, { touches: [{ clientX: 300, clientY: 100 }] });
+      fireEvent.touchEnd(area, { changedTouches: [{ clientX: 120, clientY: 110 }] });
+      const avaChip = within(screen.getByRole('toolbar', { name: 'Travelers' })).getByRole('button', { name: 'Ava 1' });
+      const contexts = scrollIntoView.mock.contexts;
+      expect(contexts[contexts.length - 1]).toBe(avaChip);
+      expect(scrollIntoView).toHaveBeenLastCalledWith({ block: 'nearest', inline: 'nearest' });
+    } finally {
+      Element.prototype.scrollIntoView = original;
+    }
+  });
+
   it('uses plain titles for an ordinary list', () => {
     const [paris] = groups();
     renderWithMantine(<PersonView groups={[paris]} isTrip={false} currentUserId="dad" {...handlers()} />);

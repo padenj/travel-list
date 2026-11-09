@@ -128,6 +128,20 @@ export default function PersonView({
     if (selectedListId && onSelectedGroupChange) onSelectedGroupChange(selectedListId);
   }, [selectedListId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Keep the selected chip visible when a swipe selects someone scrolled out of the chip row.
+  // Not on the first selection, so opening the dashboard doesn't move the page.
+  const selectedUserId = selected?.userId ?? null;
+  const chipRefs = useRef(new Map<string, HTMLButtonElement>());
+  const lastScrolledUserId = useRef(selectedUserId);
+  useEffect(() => {
+    if (lastScrolledUserId.current === selectedUserId) return;
+    const previous = lastScrolledUserId.current;
+    lastScrolledUserId.current = selectedUserId;
+    if (previous === null) return;
+    const chip = selectedUserId ? chipRefs.current.get(selectedUserId) : undefined;
+    chip?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+  }, [selectedUserId]);
+
   const sharedActionsFor = (g: DestinationGroup): RowActions => ({
     onHistory: it => onItemHistory(g.listId, it.id, it.name),
     online,
@@ -217,6 +231,10 @@ export default function PersonView({
             return (
               <Button
                 key={p.userId}
+                ref={el => {
+                  if (el) chipRefs.current.set(p.userId, el);
+                  else chipRefs.current.delete(p.userId);
+                }}
                 radius="xl"
                 size="md"
                 color={g.color || 'blue'}
