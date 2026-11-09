@@ -132,3 +132,45 @@ describe('Person view helpers', () => {
     expect(groupProgress(grandma())).toEqual({ total: 1, done: 0, percent: 0 });
   });
 });
+
+describe('groupItemsByCategory', () => {
+  const it2 = (id: string, name: string, category: any) => ({
+    id, name, checked: false, masterId: id, added_during_packing: false, display_name: null, masterIsOneOff: false,
+    category, members: [], whole_family: false,
+  });
+  const categories = [{ id: 'c2', name: 'Toiletries', position: 2 }, { id: 'c1', name: 'Clothes', position: 1 }];
+
+  it('groups items in category position order, sorted by name, with Uncategorized last', async () => {
+    const { groupItemsByCategory } = await import('../utils/dashboardGroups');
+    const sections = groupItemsByCategory([
+      it2('a', 'Toothbrush', { id: 'c2' }),
+      it2('b', 'Socks', { id: 'c1' }),
+      it2('c', 'Pants', { id: 'c1' }),
+      it2('d', 'Gift', null),
+      it2('e', 'Mystery', { id: 'gone' }),
+    ], categories);
+    expect(sections.map(s => [s.name, s.items.map(i => i.name)])).toEqual([
+      ['Clothes', ['Pants', 'Socks']],
+      ['Toiletries', ['Toothbrush']],
+      ['Uncategorized', ['Gift', 'Mystery']],
+    ]);
+  });
+
+  it('returns nothing for no items', async () => {
+    const { groupItemsByCategory } = await import('../utils/dashboardGroups');
+    expect(groupItemsByCategory([], categories)).toEqual([]);
+  });
+});
+
+describe('addDrawerExclusions', () => {
+  it('excludes every list item for the shared section', async () => {
+    const { addDrawerExclusions } = await import('../utils/dashboardGroups');
+    expect(addDrawerExclusions(paris(), null)).toEqual(['i1', 'i2', 'i3']);
+  });
+
+  it("excludes only the person's own items and shared items for a person", async () => {
+    const { addDrawerExclusions } = await import('../utils/dashboardGroups');
+    // i2 belongs to Mom only, so Dad can still add it.
+    expect(addDrawerExclusions(paris(), 'dad').sort()).toEqual(['i1', 'i3']);
+  });
+});

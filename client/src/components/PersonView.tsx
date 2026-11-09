@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ActionIcon, Button, Checkbox, Group, Menu, Stack, Text, UnstyledButton } from '@mantine/core';
 import { IconDots, IconPlus } from '@tabler/icons-react';
-import { DashboardItem, DestinationGroup, orderPeople, partitionItems, remainingFor } from '../utils/dashboardGroups';
+import { CategoryInfo, DashboardItem, DestinationGroup, groupItemsByCategory, orderPeople, partitionItems, remainingFor } from '../utils/dashboardGroups';
 import { useOnline } from '../utils/useOnline';
 import { getSwipeDirection, isSwipeBlocked } from '../utils/swipe';
 
@@ -15,6 +15,7 @@ export interface PersonViewProps {
   onItemHistory: (listId: string, packingListItemId: string, name: string) => void;
   onMoveSharedItem: (fromListId: string, itemId: string, toListId: string) => void;
   onSelectedGroupChange?: (listId: string) => void;
+  categories?: CategoryInfo[];
 }
 
 interface MoveTarget {
@@ -65,8 +66,29 @@ function ItemRow({ item, notNeeded, actions }: { item: DashboardItem; notNeeded:
   );
 }
 
-function ItemSection({ title, color, items, notNeededIds, onAdd, actions }: {
+function CategorizedRows({ items, categories, notNeededIds, actions }: {
+  items: DashboardItem[];
+  categories: CategoryInfo[];
+  notNeededIds: string[];
+  actions: RowActions;
+}) {
+  const row = (it: DashboardItem) => <ItemRow key={it.id} item={it} notNeeded={notNeededIds.includes(it.id)} actions={actions} />;
+  if (categories.length === 0) return <>{items.map(row)}</>;
+  return (
+    <>
+      {groupItemsByCategory(items, categories).map(section => (
+        <div key={section.key} role="group" aria-label={section.name}>
+          <Text component="h4" size="xs" fw={700} c="dimmed" tt="uppercase" mt={8} mb={2}>{section.name}</Text>
+          {section.items.map(row)}
+        </div>
+      ))}
+    </>
+  );
+}
+
+function ItemSection({ title, color, items, notNeededIds, onAdd, actions, categories }: {
   title: string;
+  categories: CategoryInfo[];
   color: string | null;
   items: DashboardItem[];
   notNeededIds: string[];
@@ -97,21 +119,20 @@ function ItemSection({ title, color, items, notNeededIds, onAdd, actions }: {
         </ActionIcon>
       </Group>
       {items.length === 0 && <Text size="sm" c="dimmed">No items yet</Text>}
-      {todo.map(it => <ItemRow key={it.id} item={it} notNeeded={false} actions={actions} />)}
+      <CategorizedRows items={todo} categories={categories} notNeededIds={notNeededIds} actions={actions} />
       {summary && (
         <UnstyledButton onClick={() => setExpanded(v => !v)} aria-expanded={expanded} style={{ minHeight: 44, width: '100%' }}>
           <Text size="sm" c="dimmed">{`${expanded ? '▾' : '▸'} ${summary}`}</Text>
         </UnstyledButton>
       )}
-      {expanded && [...packed, ...notNeeded].map(it => (
-        <ItemRow key={it.id} item={it} notNeeded={notNeededIds.includes(it.id)} actions={actions} />
-      ))}
+      {expanded && <CategorizedRows items={[...packed, ...notNeeded]} categories={categories} notNeededIds={notNeededIds} actions={actions} />}
     </section>
   );
 }
 
 export default function PersonView({
   groups, isTrip, currentUserId, onCheckItem, onToggleNotNeeded, onOpenAddDrawer, onItemHistory, onMoveSharedItem, onSelectedGroupChange,
+  categories = [],
 }: PersonViewProps) {
   const people = useMemo(() => orderPeople(groups, currentUserId), [groups, currentUserId]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -163,6 +184,7 @@ export default function PersonView({
         notNeededIds={g.notNeededWhole}
         onAdd={() => onOpenAddDrawer(g.listId, null)}
         actions={sharedActionsFor(g)}
+        categories={categories}
       />
     ));
 
@@ -258,6 +280,7 @@ export default function PersonView({
           notNeededIds={group.notNeededByUser[selected.userId] || []}
           onAdd={() => onOpenAddDrawer(group.listId, selected.userId)}
           actions={personalActions}
+          categories={categories}
         />
         <ItemSection
           key={`${group.listId}:shared`}
@@ -267,6 +290,7 @@ export default function PersonView({
           notNeededIds={group.notNeededWhole}
           onAdd={() => onOpenAddDrawer(group.listId, null)}
           actions={sharedActions}
+          categories={categories}
         />
         {renderMemberless()}
       </Stack>

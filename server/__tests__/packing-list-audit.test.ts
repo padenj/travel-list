@@ -180,4 +180,28 @@ describe('Packing list audit log', () => {
     const ids2 = page2.body.items.map((a: any) => a.id);
     expect(ids1.some((id: any) => ids2.includes(id))).toBe(false);
   });
+
+  it('assigns an existing master item to the given members when adding it', async () => {
+    const itemId = uuidv4();
+    await itemRepo.create({ id: itemId, familyId, name: 'Pants', checked: 0, isOneOff: 0, created_at: new Date().toISOString(), updated_at: new Date().toISOString() } as any);
+    const listId = uuidv4();
+    await packingListRepo.create({ id: listId, family_id: familyId, name: 'Trip', created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
+
+    const first = await request(app)
+      .post(`/api/packing-lists/${listId}/items`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ masterItemId: itemId });
+    expect(first.status).toBe(200);
+
+    const again = await request(app)
+      .post(`/api/packing-lists/${listId}/items`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ masterItemId: itemId, memberIds: [adminUserId] });
+    expect(again.status).toBe(200);
+    expect(again.body.item?.id).toBe(first.body.item?.id);
+
+    const db = await getDb();
+    const rows = await db.all('SELECT member_id FROM item_members WHERE item_id = ?', [itemId]);
+    expect(rows.map((r: any) => r.member_id)).toEqual([adminUserId]);
+  });
 });

@@ -127,10 +127,10 @@ export default function AddItemsDrawer({ opened, onClose, familyId, excludedItem
             {loading ? <Loader /> : (
               <div>
                 <div style={{ marginBottom: 8 }}>
-                  <TextInput placeholder="Search items" value={query} onChange={(e) => setQuery(e.currentTarget.value)} size="sm" />
+                  <TextInput placeholder="Search or add a new item" value={query} onChange={(e) => setQuery(e.currentTarget.value)} size="sm" />
                 </div>
                 {/* previously there was an optional toggle to hide items assigned to other categories; that feature was removed */}
-                {allItems.length === 0 ? (
+                {allItems.length === 0 && !query.trim() ? (
                   <Text c="dimmed">No available items</Text>
                 ) : (
                   (() => {

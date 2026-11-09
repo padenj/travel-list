@@ -15,10 +15,12 @@ import { useActivePackingList } from '../contexts/ActivePackingListContext';
 import { useListEditDrawer } from '../contexts/ListEditDrawerContext';
 import { useImpersonation } from '../contexts/ImpersonationContext';
 import {
-  getCurrentUserProfile, getFamily, getItems, getPackingList, togglePackingListItemCheck, addItemToPackingList,
+  getCurrentUserProfile, getFamily, getItems, getPackingList, togglePackingListItemCheck, addItemToPackingList, getCategories,
   setPackingListItemNotNeeded, setPackingListItemNotNeededForMember, updatePackingList, movePackingListItem,
 } from '../api';
-import { applyCheck, buildDestinationGroup, DestinationGroup, isNotNeeded, toggleNotNeededIn } from '../utils/dashboardGroups';
+import {
+  addDrawerExclusions, applyCheck, buildDestinationGroup, CategoryInfo, DestinationGroup, isNotNeeded, toggleNotNeededIn,
+} from '../utils/dashboardGroups';
 import type { ListTripContext, TripDestination } from '../types/trip';
 
 type AddTarget = { listId: string; members?: string[]; whole?: boolean };
@@ -33,6 +35,7 @@ export default function Dashboard(): React.ReactElement {
   const [tripInfo, setTripInfo] = useState<{ id: string; name: string } | null>(null);
   const [listSelectionCount, setListSelectionCount] = useState(0);
   const [familyId, setFamilyId] = useState<string | null>(null);
+  const [categories, setCategories] = useState<CategoryInfo[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [addTarget, setAddTarget] = useState<AddTarget | null>(null);
   const [splitOpen, setSplitOpen] = useState(false);
@@ -256,6 +259,23 @@ export default function Dashboard(): React.ReactElement {
     })();
   }, [activeListId, listSelectionCount]);
 
+  useEffect(() => {
+    if (!familyId) {
+      setCategories([]);
+      return;
+    }
+    let current = true;
+    (async () => {
+      try {
+        const res = await getCategories(familyId);
+        if (current && res?.response?.ok) setCategories(res.data?.categories || []);
+      } catch (err) {
+        // Without categories the person view just shows a flat list.
+      }
+    })();
+    return () => { current = false; };
+  }, [familyId]);
+
   const handleNotesChange = useCallback((event: React.ChangeEvent<HTMLTextAreaElement>) => {
     const nextNotes = event.target.value;
     notesEditingRef.current = true;
@@ -347,15 +367,22 @@ export default function Dashboard(): React.ReactElement {
       showNotification({ title: 'No list selected', message: 'Select a list before adding', color: 'yellow' });
       return;
     }
+    // Adding for a person assigns the item to them, so it shows up in their list.
+    const memberIds = addTarget && !addTarget.whole ? addTarget.members : undefined;
     try {
-      await Promise.all(selectedIds.map(id => addItemToPackingList(listId, id)));
-      setListSelectionCount(prev => prev + 1);
+      const results = await Promise.all(selectedIds.map(id => (memberIds
+        ? addItemToPackingList(listId, id, undefined, undefined, memberIds)
+        : addItemToPackingList(listId, id))));
+      if (results.some(r => !r?.response?.ok)) throw new Error('Server rejected adding items');
     } catch (err) {
       console.error('Failed to add items to packing list', err);
-      showNotification({ title: 'Failed', message: 'Failed to add items to packing list', color: 'red' });
-    } finally {
-      if (!keepOpen) setAddTarget(null);
+      setListSelectionCount(prev => prev + 1);
+      // The drawer reports failures from its Apply button; the keep-open path (new item) only logs.
+      if (keepOpen) showNotification({ title: 'Failed', message: 'Failed to add items to packing list', color: 'red' });
+      throw err;
     }
+    setListSelectionCount(prev => prev + 1);
+    if (!keepOpen) setAddTarget(null);
   }, [addTarget, activeListId]);
 
   const isTrip = !!tripInfo;
@@ -443,6 +470,7 @@ export default function Dashboard(): React.ReactElement {
                   onItemHistory={handleItemNameClick}
                   onMoveSharedItem={handleMoveSharedItem}
                   onSelectedGroupChange={selectNotesGroup}
+                  categories={categories}
                 />
               ) : (
                 <DestinationColumns
@@ -478,7 +506,7 @@ export default function Dashboard(): React.ReactElement {
             opened={!!addTarget}
             onClose={() => setAddTarget(null)}
             familyId={familyId}
-            excludedItemIds={addTargetGroup?.excludedItemIds ?? []}
+            excludedItemIds={addTargetGroup ? addDrawerExclusions(addTargetGroup, addTarget?.whole ? null : addTarget?.members?.[0] ?? null) : []}
             onApply={handleAddItemsApply}
             title="Add Items"
             showIsOneOffCheckbox={true}

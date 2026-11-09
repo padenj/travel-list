@@ -205,3 +205,41 @@ export function groupProgress(group: DestinationGroup): { total: number; done: n
   }
   return { total, done, percent: total === 0 ? 0 : Math.round((done / total) * 100) };
 }
+
+export interface CategoryInfo {
+  id: string;
+  name: string;
+  position?: number;
+}
+
+export interface CategorySection {
+  key: string;
+  name: string;
+  items: DashboardItem[];
+}
+
+const byName = (a: DashboardItem, b: DashboardItem) => (a.display_name || a.name).localeCompare(b.display_name || b.name);
+
+// Same ordering as the Columns view: family category order, then Uncategorized (including unknown categories).
+export function groupItemsByCategory(items: DashboardItem[], categories: CategoryInfo[]): CategorySection[] {
+  const ordered = categories.slice().sort((a, b) =>
+    typeof a.position === 'number' && typeof b.position === 'number' ? a.position - b.position : 0
+  );
+  const known = new Set(ordered.map(c => c.id));
+  const sections: CategorySection[] = [];
+  for (const cat of ordered) {
+    const inCat = items.filter(it => it.category?.id === cat.id);
+    if (inCat.length > 0) sections.push({ key: cat.id, name: cat.name, items: inCat.sort(byName) });
+  }
+  const rest = items.filter(it => !it.category?.id || !known.has(it.category.id));
+  if (rest.length > 0) sections.push({ key: 'uncategorized', name: 'Uncategorized', items: rest.sort(byName) });
+  return sections;
+}
+
+// Master items the add drawer should hide. A list holds one row per master item, so for the shared
+// section everything on the list is already there; a person only already has their own and shared items.
+export function addDrawerExclusions(group: DestinationGroup, userId: string | null): string[] {
+  if (!userId) return group.excludedItemIds;
+  const own = group.userLists.find(l => l.userId === userId)?.items ?? [];
+  return Array.from(new Set([...own, ...group.wholeFamilyItems].map(it => it.masterId).filter((id): id is string => !!id)));
+}

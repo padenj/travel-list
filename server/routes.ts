@@ -959,7 +959,6 @@ router.post('/packing-lists/:id/items', authMiddleware, async (req: Request, res
       // If masterItemId is provided and member assignments are included, assign those members to the master item
       created = await packingListRepo.addItem(id, masterItemId, false);
       if (Array.isArray(memberIds) && memberIds.length > 0) {
-        const itemRepo = new (require('./repositories').ItemRepository)();
         for (const m of memberIds) {
           await itemRepo.assignToMember(masterItemId, m);
         }

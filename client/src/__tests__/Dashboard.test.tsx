@@ -28,13 +28,14 @@ if (!hasTestingLibs) {
 
   vi.mock('../api');
 
-  const { requestOpenEdit, openForList, showNotification, activeListState, columnsProps, personViewState, auditProps } = vi.hoisted(() => ({
+  const { requestOpenEdit, openForList, showNotification, activeListState, columnsProps, personViewState, auditProps, addDrawerProps } = vi.hoisted(() => ({
+    addDrawerProps: { last: null as any },
     requestOpenEdit: vi.fn(),
     openForList: vi.fn(),
     showNotification: vi.fn(),
     activeListState: { id: 'list-1' as string },
     columnsProps: { last: null as any },
-    personViewState: { mode: 'columns' as string, report: null as string | null },
+    personViewState: { mode: 'columns' as string, report: null as string | null, props: null as any },
     auditProps: { last: null as any },
   }));
 
@@ -73,7 +74,10 @@ if (!hasTestingLibs) {
     default: () => null,
   }));
   vi.mock('../components/AddItemsDrawer', () => ({
-    default: () => null,
+    default: (props: any) => {
+      addDrawerProps.last = props;
+      return null;
+    },
   }));
   vi.mock('../components/PackingListAuditPanel', () => ({
     default: (props: any) => {
@@ -87,6 +91,7 @@ if (!hasTestingLibs) {
   vi.mock('../components/PersonView', () => ({
     default: (props: any) => {
       const React = require('react');
+      personViewState.props = props;
       React.useEffect(() => {
         if (personViewState.report) props.onSelectedGroupChange?.(personViewState.report);
       }, []);
@@ -143,6 +148,9 @@ if (!hasTestingLibs) {
       auditProps.last = null;
       personViewState.mode = 'columns';
       personViewState.report = null;
+      personViewState.props = null;
+      addDrawerProps.last = null;
+      (apiModule.getCategories as any).mockResolvedValue({ response: { ok: true }, data: { categories: [] } });
       (apiModule.getCurrentUserProfile as any).mockResolvedValue({
         response: { ok: true },
         data: { user: { id: 'u1' }, family: { id: 'f1', members: [] } },
@@ -500,6 +508,71 @@ if (!hasTestingLibs) {
 
       fireEvent.click(await screen.findByRole('button', { name: 'Edit list' }));
       expect(openForList).toHaveBeenCalledWith('list-2', expect.anything());
+    });
+
+    it('passes the family categories to the person view', async () => {
+      personViewState.mode = 'person';
+      const categories = [{ id: 'c1', name: 'Clothes', position: 1 }];
+      (apiModule.getCategories as any).mockResolvedValue({ response: { ok: true }, data: { categories } });
+      render(
+        <MemoryRouter>
+          <Dashboard />
+        </MemoryRouter>
+      );
+      await waitFor(() => expect(personViewState.props?.categories).toEqual(categories));
+      expect(apiModule.getCategories).toHaveBeenCalledWith('f1');
+    });
+
+    it("offers items other people have when adding for a person, and assigns the added item to them", async () => {
+      (apiModule.getPackingList as any).mockResolvedValue({
+        response: { ok: true },
+        data: {
+          items: [
+            { id: 'p1', item_id: 'i1', members: [{ id: 'u1', name: 'Me' }], whole_family: 0 },
+            { id: 'p2', item_id: 'i2', members: [{ id: 'u2', name: 'You' }], whole_family: 0 },
+            { id: 'p3', item_id: 'i3', members: [], whole_family: 1 },
+          ],
+          checks: [],
+          list: { notes: '' },
+        },
+      });
+      (apiModule.addItemToPackingList as any).mockResolvedValue({ response: { ok: true }, data: {} });
+      render(
+        <MemoryRouter>
+          <Dashboard />
+        </MemoryRouter>
+      );
+      await waitFor(() => expect(columnsProps.last?.groups?.[0]?.userLists).toHaveLength(2));
+
+      rtl.act(() => columnsProps.last.onOpenAddDrawer('list-1', 'u1'));
+      await waitFor(() => expect(addDrawerProps.last.opened).toBe(true));
+      expect([...addDrawerProps.last.excludedItemIds].sort()).toEqual(['i1', 'i3']);
+
+      await rtl.act(() => addDrawerProps.last.onApply(['i2']));
+      expect(apiModule.addItemToPackingList).toHaveBeenCalledWith('list-1', 'i2', undefined, undefined, ['u1']);
+
+      rtl.act(() => columnsProps.last.onOpenAddDrawer('list-1', null));
+      await waitFor(() => expect(addDrawerProps.last.opened).toBe(true));
+      expect(addDrawerProps.last.excludedItemIds).toEqual(['i1', 'i2', 'i3']);
+    });
+
+    it('reports a rejected add to the drawer instead of closing it', async () => {
+      (apiModule.addItemToPackingList as any).mockResolvedValue({ response: { ok: false, status: 500 }, data: { error: 'boom' } });
+      render(
+        <MemoryRouter>
+          <Dashboard />
+        </MemoryRouter>
+      );
+      await waitFor(() => expect(columnsProps.last?.groups).toHaveLength(1));
+      rtl.act(() => columnsProps.last.onOpenAddDrawer('list-1', null));
+      await waitFor(() => expect(addDrawerProps.last.opened).toBe(true));
+
+      let error: unknown = null;
+      await rtl.act(async () => {
+        try { await addDrawerProps.last.onApply(['i2']); } catch (e) { error = e; }
+      });
+      expect(error).toBeTruthy();
+      expect(addDrawerProps.last.opened).toBe(true);
     });
   });
 }

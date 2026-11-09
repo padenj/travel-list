@@ -162,4 +162,33 @@ describe('PersonView', () => {
     expect(screen.queryByText('No travelers on this list yet.')).toBeNull();
     expect(screen.getByRole('checkbox', { name: 'Sunscreen' })).toBeTruthy();
   });
+
+  it('groups items by category in the family category order', () => {
+    const gs = groups();
+    gs[0].userLists[0].items = [
+      { ...item('p1', 'Passport'), category: { id: 'docs' } },
+      { ...item('p5', 'Toothbrush'), category: { id: 'toil' } },
+      { ...item('p6', 'Adapter'), category: { id: 'docs' } },
+      item('p7', 'Gift'),
+    ];
+    const categories = [{ id: 'toil', name: 'Toiletries', position: 2 }, { id: 'docs', name: 'Documents', position: 1 }];
+    renderWithMantine(<PersonView groups={gs} isTrip currentUserId="dad" categories={categories} {...handlers()} />);
+    const section = screen.getByRole('region', { name: 'Dad · Paris' });
+    const headings = within(section).getAllByRole('heading').map(h => h.textContent);
+    expect(headings).toEqual(['Documents', 'Toiletries', 'Uncategorized']);
+    const docs = within(section).getByRole('group', { name: 'Documents' });
+    const adapter = within(docs).getByRole('checkbox', { name: 'Adapter' });
+    const passport = within(docs).getByRole('checkbox', { name: 'Passport' });
+    expect(adapter.compareDocumentPosition(passport) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('groups expanded packed items by category too', async () => {
+    const gs = groups();
+    gs[0].userLists[0].items = [{ ...item('p2', 'Camera', true), category: { id: 'tech' } }];
+    renderWithMantine(<PersonView groups={gs} isTrip currentUserId="dad" categories={[{ id: 'tech', name: 'Tech' }]} {...handlers()} />);
+    const section = screen.getByRole('region', { name: 'Dad · Paris' });
+    expect(within(section).queryByRole('heading', { name: 'Tech' })).toBeNull();
+    await userEvent.click(within(section).getByText('▸ 1 packed'));
+    expect(within(within(section).getByRole('group', { name: 'Tech' })).getByRole('checkbox', { name: 'Camera' })).toBeTruthy();
+  });
 });
