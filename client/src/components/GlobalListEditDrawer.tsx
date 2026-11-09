@@ -235,7 +235,7 @@ export default function GlobalListEditDrawer() {
       if (other) {
         await tripApi.updateDestination(tripId, other.id, { memberIds: other.memberIds.filter(id => id !== conflict.memberId) });
       }
-      await putMembers(conflict.pending);
+      if (await putMembers(conflict.pending)) setSelectedMemberIds(conflict.pending);
     } catch (err) {
       console.error('Failed to move member', err);
       showNotification({ title: 'Failed', message: 'Could not move that person', color: 'red' });
