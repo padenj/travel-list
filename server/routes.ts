@@ -17,7 +17,9 @@ import { v4 as uuidv4 } from 'uuid';
 import { withTransaction } from './utils/transaction';
 import { tripRouter } from './routes/tripRoutes';
 import { TripDestinationRepository, DestinationConflictError, DestinationValidationError } from './repositories/tripDestinationRepository';
-import { moveSharedItem, MoveValidationError } from './services/tripSplitService';
+import { moveSharedItem, MoveValidationError, notify } from './services/tripSplitService';
+import { createShellTripForListTx, renameDestinationTx, deleteDestinationTx } from './services/tripListService';
+import { TripRepository } from './repositories/tripRepository';
 import { tripFileRouter } from './routes/tripFileRoutes';
 
 // Extend Request type to include user
@@ -41,6 +43,7 @@ const templateRepo = new TemplateRepository();
 import { PackingListRepository } from './repositories';
 const packingListRepo = new PackingListRepository();
 const tripDestinationRepo = new TripDestinationRepository();
+const tripRepo = new TripRepository();
 import { addClient, removeClient, broadcastEvent, getClients, sseLog } from './sse';
 
 async function snapshotPackingListItemsForAudit(packingListId: string): Promise<Map<string, { name: string; appliesToScope: AppliesToScope }>> {
@@ -745,6 +748,9 @@ router.post('/families/:familyId/packing-lists', authMiddleware, familyAccessMid
       const after = await snapshotPackingListItemsForAudit(newList.id);
       await auditPackingListDiff({ packingListId: newList.id, actorUserId: req.user?.id ?? null, before, after, source: 'create_list_with_template' });
     }
+    // Every list belongs to a trip; a new list starts as the only destination of its own trip.
+    const db = await getDb();
+    await withTransaction(db, () => createShellTripForListTx(db, { familyId, listId: newList.id, name: newList.name }));
     return res.json({ list: newList });
   } catch (error) {
     console.error('Error creating packing list:', error);
@@ -884,6 +890,19 @@ router.put('/packing-lists/:id', authMiddleware, async (req: Request, res: Respo
       delete updates.removeItemsForRemovedTemplates;
     }
     // Persist memberIds if provided
+    if (Object.prototype.hasOwnProperty.call(updates, 'name')) {
+      const destination = await tripDestinationRepo.findByPackingListId(id);
+      if (destination) {
+        if (typeof updates.name !== 'string' || !updates.name.trim()) {
+          return res.status(400).json({ error: 'Name is required' });
+        }
+        const db = await getDb();
+        const changed = await withTransaction(db, () => renameDestinationTx(db, destination.id, updates.name.trim()));
+        notify([id, ...changed], 'destination');
+        // The stored list name is the label, already written above.
+        delete updates.name;
+      }
+    }
     if (Array.isArray(updates.memberIds)) {
       const destination = await tripDestinationRepo.findByPackingListId(id);
       if (destination) {
@@ -916,25 +935,26 @@ router.put('/packing-lists/:id', authMiddleware, async (req: Request, res: Respo
   }
 });
 
-// Delete (soft-delete) packing list
+// Delete (soft-delete) packing list. A list is a destination: deleting the last one deletes its trip.
 router.delete('/packing-lists/:id', authMiddleware, async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
     const existing = await packingListRepo.findById(id);
     if (!existing) return res.status(404).json({ error: 'Packing list not found' });
     if (req.user?.role !== 'SystemAdmin' && req.user?.familyId !== existing.family_id) return res.status(403).json({ error: 'Forbidden' });
-    const db = await getDb();
-    const destination = await db.get(
-      `SELECT id, trip_id AS tripId FROM trip_destinations WHERE packing_list_id = ? AND deleted_at IS NULL`,
-      [id]
-    );
+    const destination = await tripDestinationRepo.findByPackingListId(id);
     if (destination) {
-      await withTransaction(db, async () => {
-        const now = new Date().toISOString();
-        await db.run(`UPDATE packing_lists SET deleted_at = ? WHERE id = ?`, [now, id]);
-        await db.run(`UPDATE trip_destinations SET deleted_at = ?, updated_at = ? WHERE id = ?`, [now, now, destination.id]);
-        await db.run(`DELETE FROM trip_packing_lists WHERE trip_id = ? AND packing_list_id = ?`, [destination.tripId, id]);
-      });
+      const siblings = await tripDestinationRepo.listForTrip(destination.tripId);
+      if (siblings.length <= 1) {
+        await tripRepo.deleteTrip(destination.tripId);
+        notify([id], 'destination');
+      } else {
+        const db = await getDb();
+        await withTransaction(db, () =>
+          deleteDestinationTx(db, { destination, familyId: existing.family_id, deleteList: true })
+        );
+        notify([id, ...siblings.map(d => d.packingListId)], 'destination');
+      }
     } else {
       await packingListRepo.softDelete(id);
     }

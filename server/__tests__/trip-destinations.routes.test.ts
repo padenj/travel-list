@@ -444,6 +444,51 @@ describe('trip destination routes', () => {
     });
   });
 
+  it('gives a new list its own dateless trip', async () => {
+    const created = await request(app).post(`/api/families/${seed.familyId}/packing-lists`).set('Authorization', auth)
+      .send({ name: 'Camping', memberIds: [seed.dad, seed.ava] });
+    expect(created.status).toBe(200);
+    const lists = await request(app).get(`/api/families/${seed.familyId}/packing-lists`).set('Authorization', auth);
+    const camping = lists.body.lists.find((l: any) => l.id === created.body.list.id);
+    expect(camping.trip_destination).toMatchObject({ tripName: 'Camping', destinationName: 'Camping', position: 0, destinationCount: 1 });
+    const trip = await new TripRepository().getTripById(camping.trip_destination.tripId);
+    expect(trip).toMatchObject({ startDate: null, endDate: null, status: 'planning' });
+    const destinations = await request(app).get(`/api/trips/${trip!.id}/destinations`).set('Authorization', auth);
+    expect(destinations.body[0].memberIds.sort()).toEqual([seed.dad, seed.ava].sort());
+  });
+
+  it("deletes the whole trip when its only destination's list is deleted", async () => {
+    const created = await request(app).post(`/api/families/${seed.familyId}/packing-lists`).set('Authorization', auth)
+      .send({ name: 'Camping' });
+    const lists = await request(app).get(`/api/families/${seed.familyId}/packing-lists`).set('Authorization', auth);
+    const tripId = lists.body.lists.find((l: any) => l.id === created.body.list.id).trip_destination.tripId;
+
+    const del = await request(app).delete(`/api/packing-lists/${created.body.list.id}`).set('Authorization', auth);
+
+    expect(del.status).toBe(200);
+    expect(await new TripRepository().getTripById(tripId)).toBeUndefined();
+    const list = await seed.db.get(`SELECT deleted_at FROM packing_lists WHERE id = ?`, [created.body.list.id]);
+    expect(list.deleted_at).toBeTruthy();
+  });
+
+  it('renaming a destination list through the list route renames the destination', async () => {
+    const { res } = await splitSource();
+    const paris = res.body.destinations[0];
+    const put = await request(app).put(`/api/packing-lists/${paris.packingListId}`).set('Authorization', auth)
+      .send({ name: 'Lyon' });
+    expect(put.status).toBe(200);
+    expect(put.body.list.name).toBe('Spring Break · Lyon');
+    const destinations = await request(app).get(`/api/trips/${seed.tripId}/destinations`).set('Authorization', auth);
+    expect(destinations.body[0].name).toBe('Lyon');
+  });
+
+  it('rejects a blank name for a destination list', async () => {
+    const { res } = await splitSource();
+    const put = await request(app).put(`/api/packing-lists/${res.body.destinations[0].packingListId}`).set('Authorization', auth)
+      .send({ name: '  ' });
+    expect(put.status).toBe(400);
+  });
+
   it('still deletes an ordinary list', async () => {
     const listId = await createList(seed.familyId, 'Plain', [seed.dad]);
     const del = await request(app).delete(`/api/packing-lists/${listId}`).set('Authorization', auth);
