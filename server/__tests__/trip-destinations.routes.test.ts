@@ -6,6 +6,7 @@ import { closeDb } from '../db';
 import { TripRepository } from '../repositories/tripRepository';
 import { generateToken } from '../auth';
 import { seedFamilyTrip, createList, createMasterItem, addToList, listRows } from '../test-utils/destinationFixtures';
+import * as sse from '../sse';
 
 describe('trip destination routes', () => {
   let app: express.Application;
@@ -268,6 +269,84 @@ describe('trip destination routes', () => {
     const lists = await request(app).get(`/api/families/${seed.familyId}/packing-lists`).set('Authorization', auth);
     const remaining = lists.body.lists.find((l: any) => l.id === grandma.packingListId);
     expect(remaining.trip_destination.destinationCount).toBe(1);
+  });
+
+  describe('SSE notifications', () => {
+    const notifiedLists = (spy: ReturnType<typeof vi.spyOn>) =>
+      spy.mock.calls
+        .map(([event]: any[]) => event)
+        .filter((event: any) => event?.type === 'packing_list_changed')
+        .map((event: any) => event.listId as string);
+
+    it('notifies the new list and the trip\'s existing lists on create', async () => {
+      const paris = await request(app).post(`/api/trips/${seed.tripId}/destinations`).set('Authorization', auth)
+        .send({ name: 'Paris', memberIds: [seed.dad] });
+      const spy = vi.spyOn(sse, 'broadcastEvent').mockImplementation(() => undefined as never);
+      try {
+        const rome = await request(app).post(`/api/trips/${seed.tripId}/destinations`).set('Authorization', auth)
+          .send({ name: 'Rome', memberIds: [seed.mom] });
+        expect(rome.status).toBe(201);
+        expect(notifiedLists(spy).sort()).toEqual([paris.body.packingListId, rome.body.packingListId].sort());
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it('does not notify when create fails', async () => {
+      await request(app).post(`/api/trips/${seed.tripId}/destinations`).set('Authorization', auth)
+        .send({ name: 'Paris', memberIds: [seed.dad] });
+      const spy = vi.spyOn(sse, 'broadcastEvent').mockImplementation(() => undefined as never);
+      try {
+        const res = await request(app).post(`/api/trips/${seed.tripId}/destinations`).set('Authorization', auth)
+          .send({ name: 'Rome', memberIds: [seed.dad] });
+        expect(res.status).toBe(409);
+        expect(notifiedLists(spy)).toEqual([]);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it('notifies the destination list on update', async () => {
+      const { res } = await splitSource();
+      const paris = res.body.destinations[0];
+      const spy = vi.spyOn(sse, 'broadcastEvent').mockImplementation(() => undefined as never);
+      try {
+        const updated = await request(app).put(`/api/trips/${seed.tripId}/destinations/${paris.id}`).set('Authorization', auth)
+          .send({ name: 'Lyon' });
+        expect(updated.status).toBe(200);
+        expect(notifiedLists(spy)).toEqual([paris.packingListId]);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it('notifies the deleted list and the remaining lists once on delete, even after moving items', async () => {
+      const { res } = await splitSource();
+      const [paris, grandma] = res.body.destinations;
+      await addToList(grandma.packingListId, await createMasterItem(seed.familyId, 'Car seat', { wholeFamily: true }));
+      const spy = vi.spyOn(sse, 'broadcastEvent').mockImplementation(() => undefined as never);
+      try {
+        const deleted = await request(app).delete(`/api/trips/${seed.tripId}/destinations/${grandma.id}`).set('Authorization', auth)
+          .send({ moveSharedItemsTo: paris.id });
+        expect(deleted.status).toBe(204);
+        expect(notifiedLists(spy).sort()).toEqual([paris.packingListId, grandma.packingListId].sort());
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it('notifies on delete of an empty destination', async () => {
+      const { res } = await splitSource();
+      const [paris, grandma] = res.body.destinations;
+      const spy = vi.spyOn(sse, 'broadcastEvent').mockImplementation(() => undefined as never);
+      try {
+        const deleted = await request(app).delete(`/api/trips/${seed.tripId}/destinations/${grandma.id}`).set('Authorization', auth).send({});
+        expect(deleted.status).toBe(204);
+        expect(notifiedLists(spy).sort()).toEqual([paris.packingListId, grandma.packingListId].sort());
+      } finally {
+        spy.mockRestore();
+      }
+    });
   });
 
   it('still deletes an ordinary list', async () => {

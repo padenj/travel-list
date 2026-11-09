@@ -27,8 +27,8 @@ export class MoveValidationError extends Error {}
 
 const destinationRepo = new TripDestinationRepository();
 
-export function notify(listIds: string[], change: 'split' | 'move') {
-  for (const listId of listIds) {
+export function notify(listIds: string[], change: 'split' | 'move' | 'destination') {
+  for (const listId of new Set(listIds)) {
     try {
       broadcastEvent({ type: 'packing_list_changed', listId, data: { change } });
     } catch {

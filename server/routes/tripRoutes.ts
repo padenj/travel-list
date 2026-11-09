@@ -689,6 +689,8 @@ tripRouter.post('/:tripId/destinations', authMiddleware, tripAccessMiddleware, a
         await packingListRepository.reconcilePackingListAgainstTemplate(destination.packingListId, groupId);
       }
     }
+    const tripLists = (await tripDestinationRepository.listForTrip(req.trip!.id)).map(d => d.packingListId);
+    notify([destination.packingListId, ...tripLists], 'destination');
     return res.status(201).json(destination);
   } catch (error) {
     return sendDestinationError(res, error, 'Failed to create destination');
@@ -709,6 +711,7 @@ tripRouter.put('/:tripId/destinations/:destinationId', authMiddleware, tripAcces
       position: typeof position === 'number' ? position : undefined,
       memberIds,
     });
+    notify([existing.packingListId], 'destination');
     return res.json(updated);
   } catch (error) {
     return sendDestinationError(res, error, 'Failed to update destination');
@@ -731,7 +734,6 @@ tripRouter.delete('/:tripId/destinations/:destinationId', authMiddleware, tripAc
       if (!target || target.tripId !== existing.tripId || target.id === existing.id) {
         return res.status(400).json({ error: 'invalid_target_destination' });
       }
-      await validateSameTripDifferentDestinations(existing.packingListId, target.packingListId);
     }
     const moved = await withTransaction(db, async () => {
       const movedCount = target ? await moveAllSharedItemsTx(db, existing.packingListId, target.packingListId) : 0;
@@ -743,7 +745,8 @@ tripRouter.delete('/:tripId/destinations/:destinationId', authMiddleware, tripAc
       }
       return movedCount;
     });
-    if (target && moved > 0) notify([existing.packingListId, target.packingListId], 'move');
+    const remainingLists = (await tripDestinationRepository.listForTrip(existing.tripId)).map(d => d.packingListId);
+    notify([existing.packingListId, ...remainingLists], moved > 0 ? 'move' : 'destination');
     return res.status(204).send();
   } catch (error) {
     return sendDestinationError(res, error, 'Failed to delete destination');
