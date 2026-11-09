@@ -215,28 +215,39 @@ async function countUnownedRowsTx(db: Database, listId: string, assigned: Set<st
 
 /**
  * Old clients call `POST /trips` (no memberIds) and then split into the fresh trip. That create
- * auto-fills a single first destination with every family member on an empty list, which would
- * otherwise collide with the split's own member assignment. If the trip still has exactly one live
- * destination and its list has no items, it's that untouched placeholder: retire it (soft-delete the
- * destination and its list, drop the trip_packing_lists link) so the split's destinations are all that
- * remain. Caller owns the transaction, so a later failure rolls this back along with everything else.
+ * auto-fills a single first destination with every family member on an empty list, which can
+ * collide with the split's own member assignment. Only treat the conflicting destination as that
+ * untouched placeholder — and retire it (soft-delete the destination and its list, drop the
+ * trip_packing_lists link) — when it is the trip's *only* live destination, its list has no items,
+ * and it isn't the split's own source list (which must keep producing the normal conflict error).
+ * A real destination (renamed, or created with explicit members but no items yet) that happens to
+ * be the sole live destination and genuinely conflicts is left alone and reported as a 409.
+ * Caller owns the transaction, so a later failure rolls this back along with everything else.
  */
-async function retirePlaceholderDestinationTx(db: Database, tripId: string): Promise<void> {
+async function retirePlaceholderDestinationIfSoleEmptyTx(
+  db: Database,
+  tripId: string,
+  conflictingDestinationId: string,
+  sourceListId: string
+): Promise<boolean> {
   const destinations = (await db.all(
     `SELECT id, packing_list_id AS listId FROM trip_destinations WHERE trip_id = ? AND deleted_at IS NULL`,
     [tripId]
   )) as { id: string; listId: string }[];
-  if (destinations.length !== 1) return;
+  if (destinations.length !== 1) return false;
   const [destination] = destinations;
+  if (destination.id !== conflictingDestinationId) return false;
+  if (destination.listId === sourceListId) return false;
   const { count } = await db.get(
     `SELECT COUNT(*) AS count FROM packing_list_items WHERE packing_list_id = ?`,
     [destination.listId]
   );
-  if (count > 0) return;
+  if (count > 0) return false;
   const now = new Date().toISOString();
   await db.run(`UPDATE trip_destinations SET deleted_at = ?, updated_at = ? WHERE id = ?`, [now, now, destination.id]);
   await db.run(`UPDATE packing_lists SET deleted_at = ? WHERE id = ?`, [now, destination.listId]);
   await db.run(`DELETE FROM trip_packing_lists WHERE trip_id = ? AND packing_list_id = ?`, [tripId, destination.listId]);
+  return true;
 }
 
 export async function splitListIntoTrip(input: SplitInput): Promise<SplitResult> {
@@ -245,8 +256,14 @@ export async function splitListIntoTrip(input: SplitInput): Promise<SplitResult>
 
   const listIds: string[] = [];
   const skippedCount = await withTransaction(db, async () => {
-    await retirePlaceholderDestinationTx(db, input.tripId);
-    const conflict = await destinationRepo.findConflict(db, input.tripId, input.destinations.flatMap(d => d.memberIds));
+    const allMemberIds = input.destinations.flatMap(d => d.memberIds);
+    let conflict = await destinationRepo.findConflict(db, input.tripId, allMemberIds);
+    if (conflict) {
+      const retired = await retirePlaceholderDestinationIfSoleEmptyTx(db, input.tripId, conflict.destinationId, input.sourceListId);
+      if (retired) {
+        conflict = await destinationRepo.findConflict(db, input.tripId, allMemberIds);
+      }
+    }
     if (conflict) throw conflict;
     const sourceMembers = (await db.all(
       `SELECT member_id FROM packing_list_members WHERE packing_list_id = ?`,

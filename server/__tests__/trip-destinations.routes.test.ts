@@ -679,5 +679,36 @@ describe('trip destination routes', () => {
       );
       expect(link.n).toBe(1);
     });
+
+    it('does not retire a real single destination (explicit members, no items) that does not conflict with the split', async () => {
+      const created = await request(app).post('/api/trips').set('Authorization', auth)
+        .send({ name: 'Family Trip', memberIds: [seed.dad, seed.mom] });
+      expect(created.status).toBe(201);
+      const tripId = created.body.id as string;
+
+      const before = await request(app).get(`/api/trips/${tripId}/destinations`).set('Authorization', auth);
+      expect(before.body).toHaveLength(1);
+      const dadMomDestination = before.body[0];
+
+      const source = await createList(seed.familyId, 'Spring list', [seed.ava, seed.leo]);
+      const res = await request(app).post(`/api/trips/${tripId}/split`).set('Authorization', auth).send({
+        sourceListId: source,
+        destinations: [
+          { name: 'Paris', memberIds: [seed.ava] },
+          { name: "Grandma's", memberIds: [seed.leo] },
+        ],
+        sharedItemsDestinationIndex: 0,
+      });
+
+      expect(res.status).toBe(201);
+
+      const after = await request(app).get(`/api/trips/${tripId}/destinations`).set('Authorization', auth);
+      expect(after.body).toHaveLength(3);
+      const dadMomAfter = after.body.find((d: any) => d.id === dadMomDestination.id);
+      expect(dadMomAfter).toBeTruthy();
+
+      const stillLive = await seed.db.get(`SELECT deleted_at FROM trip_destinations WHERE id = ?`, [dadMomDestination.id]);
+      expect(stillLive.deleted_at).toBeNull();
+    });
   });
 });
