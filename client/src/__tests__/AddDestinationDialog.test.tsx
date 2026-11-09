@@ -56,7 +56,7 @@ describe('AddDestinationDialog', () => {
     });
   });
 
-  it('moves a traveler out of another destination after confirming', async () => {
+  it('moves a traveler out of another destination in one request after confirming', async () => {
     const confirm = vi.fn(() => true);
     vi.stubGlobal('confirm', confirm);
     (tripApi.listDestinations as any).mockResolvedValue([grandma]);
@@ -70,8 +70,8 @@ describe('AddDestinationDialog', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(onSaved).toHaveBeenCalled());
-    expect(tripApi.updateDestination).toHaveBeenCalledWith('t1', 'd1', { memberIds: ['leo'] });
-    expect(tripApi.createDestination).toHaveBeenCalledWith('t1', expect.objectContaining({ memberIds: ['ava'] }));
+    expect(tripApi.updateDestination).not.toHaveBeenCalled();
+    expect(tripApi.createDestination).toHaveBeenCalledWith('t1', expect.objectContaining({ memberIds: ['ava'], moveFrom: true }));
   });
 
   it('keeps the traveler where they are when the move is not confirmed', async () => {
@@ -115,10 +115,10 @@ describe('AddDestinationDialog', () => {
     expect(tripApi.updateDestination).toHaveBeenCalledWith('t1', 'd1', { name: 'Nana', memberIds: ['ava'] });
   });
 
-  it('asks to move a traveler the server says is already elsewhere, then retries', async () => {
+  it('asks to move a traveler the server says is already elsewhere, then retries with moveFrom', async () => {
     const stale = [{ ...grandma, memberIds: ['leo'] }];
     const fresh = [{ ...grandma, memberIds: ['ava', 'leo'] }];
-    (tripApi.listDestinations as any).mockResolvedValue(fresh);
+    (tripApi.listDestinations as any).mockResolvedValueOnce(stale).mockResolvedValue(fresh);
     (tripApi.createDestination as any).mockRejectedValueOnce(conflict('ava', 'd1')).mockResolvedValueOnce({});
     const onSaved = vi.fn();
     renderWithMantine(
@@ -130,11 +130,13 @@ describe('AddDestinationDialog', () => {
 
     expect(await screen.findByText("Ava is already in Grandma's on this trip. Move them here?")).toBeTruthy();
     expect(onSaved).not.toHaveBeenCalled();
+    expect(tripApi.createDestination).toHaveBeenCalledWith('t1', expect.not.objectContaining({ moveFrom: true }));
     await userEvent.click(screen.getByRole('button', { name: 'Move' }));
 
     await waitFor(() => expect(onSaved).toHaveBeenCalled());
-    expect(tripApi.updateDestination).toHaveBeenCalledWith('t1', 'd1', { memberIds: ['leo'] });
+    expect(tripApi.updateDestination).not.toHaveBeenCalled();
     expect(tripApi.createDestination).toHaveBeenCalledTimes(2);
+    expect(tripApi.createDestination).toHaveBeenLastCalledWith('t1', expect.objectContaining({ memberIds: ['ava'], moveFrom: true }));
   });
 
   it('explains when the conflicting traveler is the only one at the other destination', async () => {
@@ -194,7 +196,7 @@ describe('AddDestinationDialog', () => {
     expect(await screen.findByRole('button', { name: 'Save' })).toBeTruthy();
   });
 
-  it('uses freshly fetched destinations, not the stale prop, for moves', async () => {
+  it('uses freshly fetched destinations, not the stale prop, to decide on moveFrom', async () => {
     const beach = { ...grandma, id: 'd2', name: 'Beach', memberIds: ['leo', 'dad'] };
     (tripApi.listDestinations as any).mockResolvedValue([{ ...grandma, memberIds: ['ava'] }, beach]);
     vi.stubGlobal('confirm', vi.fn(() => true));
@@ -207,9 +209,10 @@ describe('AddDestinationDialog', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(onSaved).toHaveBeenCalled());
-    expect(tripApi.updateDestination).toHaveBeenCalledTimes(1);
-    expect(tripApi.updateDestination).toHaveBeenCalledWith('t1', 'd2', { memberIds: ['leo'] });
-    expect(tripApi.updateDestination).not.toHaveBeenCalledWith('t1', 'd1', expect.anything());
+    expect(tripApi.updateDestination).not.toHaveBeenCalled();
+    expect(tripApi.createDestination).toHaveBeenCalledWith('t1', {
+      name: 'Paris', memberIds: ['dad'], itemGroupIds: [], packingListId: undefined, moveFrom: true,
+    });
   });
 
   it('does not send memberIds when only the name changed', async () => {
@@ -227,7 +230,7 @@ describe('AddDestinationDialog', () => {
     expect(tripApi.updateDestination).toHaveBeenCalledWith('t1', 'd1', { name: 'Nana' });
   });
 
-  it('restores moved travelers and calls onChanged when the final create fails', async () => {
+  it('changes nothing on the client and reports the error when the create fails', async () => {
     (tripApi.listDestinations as any).mockResolvedValue([grandma]);
     (tripApi.createDestination as any).mockRejectedValueOnce(new Error('boom'));
     vi.stubGlobal('confirm', vi.fn(() => true));
@@ -240,26 +243,97 @@ describe('AddDestinationDialog', () => {
     await userEvent.click(screen.getByRole('checkbox', { name: "Ava (at Grandma's)" }));
     await userEvent.click(screen.getByRole('button', { name: 'Save' }));
 
-    await waitFor(() => expect(onChanged).toHaveBeenCalled());
-    expect(tripApi.updateDestination).toHaveBeenNthCalledWith(1, 't1', 'd1', { memberIds: ['leo'] });
-    expect(tripApi.updateDestination).toHaveBeenNthCalledWith(2, 't1', 'd1', { memberIds: ['ava', 'leo'] });
+    await waitFor(() => expect(showNotification).toHaveBeenCalledWith(expect.objectContaining({
+      message: "Couldn't save the destination. Please try again.",
+    })));
+    expect(tripApi.updateDestination).not.toHaveBeenCalled();
     expect(onSaved).not.toHaveBeenCalled();
+    expect(onChanged).not.toHaveBeenCalled();
   });
 
-  it('shows a generic message when a preliminary move hits a 409', async () => {
-    (tripApi.listDestinations as any).mockResolvedValue([grandma]);
-    (tripApi.updateDestination as any).mockRejectedValueOnce(conflict('leo', 'd9'));
+  it('sends moveFrom when editing pulls a traveler from another destination', async () => {
+    const paris = { id: 'd2', tripId: 't1', name: 'Paris', color: 'blue', position: 1, packingListId: 'l2', memberIds: ['dad'] };
+    (tripApi.listDestinations as any).mockResolvedValue([grandma, paris]);
     vi.stubGlobal('confirm', vi.fn(() => true));
+    const onSaved = vi.fn();
     renderWithMantine(
-      <AddDestinationDialog opened onClose={vi.fn()} trip={trip} destinations={[grandma]} familyMembers={familyMembers} editing={null} onSaved={vi.fn()} />
+      <AddDestinationDialog opened onClose={vi.fn()} trip={trip} destinations={[grandma, paris]} familyMembers={familyMembers} editing={paris} onSaved={onSaved} />
     );
-    await userEvent.type(screen.getByLabelText(/Destination name/), 'Paris');
     await userEvent.click(screen.getByRole('checkbox', { name: "Ava (at Grandma's)" }));
     await userEvent.click(screen.getByRole('button', { name: 'Save' }));
 
-    await waitFor(() => expect(showNotification).toHaveBeenCalledWith(expect.objectContaining({ message: 'The trip changed, please try again.' })));
-    expect(screen.queryByRole('button', { name: 'Move' })).toBeNull();
-    expect(tripApi.createDestination).not.toHaveBeenCalled();
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(tripApi.updateDestination).toHaveBeenCalledTimes(1);
+    expect(tripApi.updateDestination).toHaveBeenCalledWith('t1', 'd2', { name: 'Paris', memberIds: ['dad', 'ava'], moveFrom: true });
+  });
+
+  it('keeps shared items in the existing destination by default when the trip has one destination', async () => {
+    (tripApi.listDestinations as any).mockResolvedValue([grandma]);
+    const onSaved = vi.fn();
+    renderWithMantine(
+      <AddDestinationDialog opened onClose={vi.fn()} trip={trip} destinations={[grandma]} familyMembers={familyMembers} editing={null} onSaved={onSaved} />
+    );
+    await userEvent.type(screen.getByLabelText(/Destination name/), 'Paris');
+    expect((screen.getByRole('radio', { name: "Keep shared items in Grandma's" }) as HTMLInputElement).checked).toBe(true);
+    expect(screen.getByRole('radio', { name: 'Move to Paris' })).toBeTruthy();
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Dad' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(tripApi.createDestination).toHaveBeenCalledWith('t1', {
+      name: 'Paris', memberIds: ['dad'], itemGroupIds: [], packingListId: undefined, sharedItemsTo: 'existing',
+    });
+  });
+
+  it('moves shared items to the new destination when chosen', async () => {
+    (tripApi.listDestinations as any).mockResolvedValue([grandma]);
+    const onSaved = vi.fn();
+    renderWithMantine(
+      <AddDestinationDialog opened onClose={vi.fn()} trip={trip} destinations={[grandma]} familyMembers={familyMembers} editing={null} onSaved={onSaved} />
+    );
+    expect(screen.getByRole('radio', { name: 'Move to the new destination' })).toBeTruthy();
+    await userEvent.type(screen.getByLabelText(/Destination name/), 'Paris');
+    await userEvent.click(screen.getByRole('radio', { name: 'Move to Paris' }));
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Dad' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(tripApi.createDestination).toHaveBeenCalledWith('t1', expect.objectContaining({ sharedItemsTo: 'new' }));
+  });
+
+  it('does not ask about shared items when editing or when the trip has several destinations', async () => {
+    const beach = { ...grandma, id: 'd2', name: 'Beach', memberIds: ['dad'] };
+    const { unmount } = renderWithMantine(
+      <AddDestinationDialog opened onClose={vi.fn()} trip={trip} destinations={[grandma, beach]} familyMembers={familyMembers} editing={null} onSaved={vi.fn()} />
+    );
+    expect(screen.queryByRole('radio')).toBeNull();
+    unmount();
+    renderWithMantine(
+      <AddDestinationDialog opened onClose={vi.fn()} trip={trip} destinations={[grandma]} familyMembers={familyMembers} editing={grandma} onSaved={vi.fn()} />
+    );
+    expect(screen.queryByRole('radio')).toBeNull();
+  });
+
+  it('offers lists that are the only destination of another trip as existing lists', async () => {
+    (getFamilyPackingLists as any).mockResolvedValue({
+      response: { ok: true },
+      data: {
+        lists: [
+          { id: 'solo', name: 'Camping', trip_destination: { tripId: 't7', destinationCount: 1 } },
+          { id: 'multi', name: 'Easter · Rome', trip_destination: { tripId: 't8', destinationCount: 2 } },
+          { id: 'mine', name: "Spring Break · Grandma's", trip_destination: { tripId: 't1', destinationCount: 1 } },
+          { id: 'legacy', name: 'Old list', trip_destination: null },
+        ],
+      },
+    });
+    renderWithMantine(
+      <AddDestinationDialog opened onClose={vi.fn()} trip={trip} destinations={[]} familyMembers={familyMembers} editing={null} onSaved={vi.fn()} />
+    );
+    await userEvent.click(await screen.findByRole('textbox', { name: 'Use an existing list (optional)' }));
+    expect(await screen.findByRole('option', { name: 'Camping' })).toBeTruthy();
+    expect(screen.getByRole('option', { name: 'Old list' })).toBeTruthy();
+    expect(screen.queryByRole('option', { name: 'Easter · Rome' })).toBeNull();
+    expect(screen.queryByRole('option', { name: "Spring Break · Grandma's" })).toBeNull();
   });
 
   it('opens the "use an existing list" dropdown above a 3110 modal', async () => {

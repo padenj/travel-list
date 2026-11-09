@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Button, Chip, Group, Loader, Modal, Select, Stack, Text, TextInput } from '@mantine/core';
+import { Button, Chip, Group, Loader, Modal, Radio, Select, Stack, Text, TextInput } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import { showNotification } from '@mantine/notifications';
 import { getFamilyPackingLists, getItemGroups } from '../api';
@@ -7,7 +7,7 @@ import { tripApi, ApiConflictError } from '../api/tripApi';
 import { useOnline } from '../utils/useOnline';
 import { describeMemberConflict, destinationErrorText } from '../utils/destinationErrors';
 import MemberConflictAlert from './MemberConflictAlert';
-import type { Trip, TripDestination } from '../types/trip';
+import type { DestinationWritePayload, Trip, TripDestination } from '../types/trip';
 
 export interface AddDestinationDialogProps {
   opened: boolean;
@@ -43,6 +43,7 @@ export default function AddDestinationDialog({ opened, onClose, trip, destinatio
   const [saving, setSaving] = useState(false);
   const [conflict, setConflict] = useState<MoveConflict | null>(null);
   const [conflictLoading, setConflictLoading] = useState(false);
+  const [sharedItemsTo, setSharedItemsTo] = useState<'existing' | 'new'>('existing');
 
   useEffect(() => {
     if (!opened) return;
@@ -52,6 +53,7 @@ export default function AddDestinationDialog({ opened, onClose, trip, destinatio
     setExistingListId(null);
     setConflict(null);
     setConflictLoading(false);
+    setSharedItemsTo('existing');
     if (editing) return;
     let cancelled = false;
     (async () => {
@@ -59,7 +61,10 @@ export default function AddDestinationDialog({ opened, onClose, trip, destinatio
         const [groupsRes, listsRes] = await Promise.all([getItemGroups(trip.familyId), getFamilyPackingLists(trip.familyId)]);
         if (cancelled) return;
         setItemGroups(groupsRes.response.ok ? groupsRes.data.itemGroups || [] : []);
-        setFreeLists(listsRes.response.ok ? (listsRes.data.lists || []).filter((l: any) => !l.trip_destination) : []);
+        // A list can join this trip if it has no trip or is the only destination of another trip.
+        const adoptable = (l: any) =>
+          !l.trip_destination || (l.trip_destination.destinationCount === 1 && l.trip_destination.tripId !== trip.id);
+        setFreeLists(listsRes.response.ok ? (listsRes.data.lists || []).filter(adoptable) : []);
       } catch {
         // optional extras; the dialog still works without them
       }
@@ -67,7 +72,7 @@ export default function AddDestinationDialog({ opened, onClose, trip, destinatio
     return () => {
       cancelled = true;
     };
-  }, [opened, editing, trip.familyId]);
+  }, [opened, editing, trip.familyId, trip.id]);
 
   const ownerOf = (memberId: string) => destinations.find(d => d.id !== editing?.id && d.memberIds.includes(memberId));
   const memberName = (m: any) => m.name || m.username;
@@ -82,55 +87,45 @@ export default function AddDestinationDialog({ opened, onClose, trip, destinatio
     setMemberIds(ids => [...ids, member.id]);
   };
 
-  const save = async () => {
+  const save = async (forceMove = false) => {
     setSaving(true);
     setConflict(null);
-    const moved: { id: string; originalMemberIds: string[] }[] = [];
-    let phase: 'prepare' | 'final' = 'prepare';
-    let wrote = false;
     try {
       const current = await tripApi.listDestinations(trip.id);
       const others = current.filter(d => d.id !== editing?.id);
-      // Fail before changing anything if a move would leave another destination empty.
+      // Fail before sending anything if a move would leave another destination empty.
       const emptied = others.find(d => d.memberIds.length > 0 && d.memberIds.every(id => memberIds.includes(id)));
       if (emptied) {
         showNotification({ title: 'Cannot move everyone', message: `${emptied.name} needs at least one traveler`, color: 'red' });
         return;
       }
-      for (const owner of others) {
-        if (!owner.memberIds.some(id => memberIds.includes(id))) continue;
-        await tripApi.updateDestination(trip.id, owner.id, { memberIds: owner.memberIds.filter(id => !memberIds.includes(id)) });
-        moved.push({ id: owner.id, originalMemberIds: owner.memberIds });
-        wrote = true;
-      }
-      phase = 'final';
+      // The server moves these people, and their items, in the same transaction.
+      const moveFrom = forceMove || others.some(d => d.memberIds.some(id => memberIds.includes(id)));
+      const move = moveFrom ? { moveFrom: true } : {};
       if (editing) {
         const unchanged = memberIds.length === editing.memberIds.length && memberIds.every(id => editing.memberIds.includes(id));
-        await tripApi.updateDestination(trip.id, editing.id, unchanged ? { name: name.trim() } : { name: name.trim(), memberIds });
+        await tripApi.updateDestination(trip.id, editing.id, unchanged ? { name: name.trim() } : { name: name.trim(), memberIds, ...move });
       } else {
-        await tripApi.createDestination(trip.id, { name: name.trim(), memberIds, itemGroupIds, packingListId: existingListId || undefined });
+        const payload: DestinationWritePayload = {
+          name: name.trim(),
+          memberIds,
+          itemGroupIds,
+          packingListId: existingListId || undefined,
+          ...move,
+        };
+        if (current.length === 1) payload.sharedItemsTo = sharedItemsTo;
+        await tripApi.createDestination(trip.id, payload);
       }
-      wrote = true;
       onSaved();
       onChanged?.();
     } catch (err) {
-      for (const move of [...moved].reverse()) {
-        try {
-          await tripApi.updateDestination(trip.id, move.id, { memberIds: move.originalMemberIds });
-        } catch {
-          // best effort; the parent reload shows the real state
-        }
-      }
-      if (wrote) onChanged?.();
-      if (phase === 'final' && err instanceof ApiConflictError && err.body?.error === 'member_in_other_destination') {
-        // Someone else moved this person since the trip page loaded.
+      if (err instanceof ApiConflictError && err.body?.error === 'member_in_other_destination') {
+        // Someone else moved this person since the dialog loaded.
         const { memberId, destinationId } = err.body;
         setConflictLoading(true);
         const info = await describeMemberConflict(trip.id, memberId, destinationId);
         setConflictLoading(false);
         setConflict({ memberId, destinationId, ...info });
-      } else if (phase === 'prepare' && err instanceof ApiConflictError && err.body?.error === 'member_in_other_destination') {
-        showNotification({ title: 'Could not save destination', message: 'The trip changed, please try again.', color: 'red' });
       } else {
         showNotification({ title: 'Could not save destination', message: destinationErrorText(err, FALLBACK_ERROR), color: 'red' });
       }
@@ -139,28 +134,9 @@ export default function AddDestinationDialog({ opened, onClose, trip, destinatio
     }
   };
 
-  const moveAndRetry = async () => {
+  const moveAndRetry = () => {
     if (!conflict) return;
-    setSaving(true);
-    try {
-      const source = (await tripApi.listDestinations(trip.id)).find(d => d.id === conflict.destinationId);
-      if (!source) throw new Error('not_found');
-      const remaining = source.memberIds.filter(id => id !== conflict.memberId);
-      if (remaining.length === 0) {
-        setConflict({ ...conflict, destinationName: source.name, onlyMember: true });
-        setSaving(false);
-        return;
-      }
-      await tripApi.updateDestination(trip.id, source.id, { memberIds: remaining });
-      onChanged?.();
-    } catch (err) {
-      setConflict(null);
-      showNotification({ title: 'Could not move traveler', message: destinationErrorText(err, FALLBACK_ERROR), color: 'red' });
-      setSaving(false);
-      return;
-    }
-    setConflict(null);
-    await save();
+    void save(true);
   };
 
   return (
@@ -206,6 +182,18 @@ export default function AddDestinationDialog({ opened, onClose, trip, destinatio
             comboboxProps={{ zIndex: zIndex ? zIndex + 10 : undefined }}
           />
         )}
+        {!editing && destinations.length === 1 && (
+          <Radio.Group
+            label="Shared items (for the whole family)"
+            value={sharedItemsTo}
+            onChange={value => setSharedItemsTo(value === 'new' ? 'new' : 'existing')}
+          >
+            <Stack gap="xs" mt="xs">
+              <Radio value="existing" label={`Keep shared items in ${destinations[0].name}`} />
+              <Radio value="new" label={`Move to ${name.trim() || 'the new destination'}`} />
+            </Stack>
+          </Radio.Group>
+        )}
         {conflictLoading && <Loader size="sm" aria-label="Checking destinations" />}
         {conflict && (
           <MemberConflictAlert
@@ -220,7 +208,7 @@ export default function AddDestinationDialog({ opened, onClose, trip, destinatio
         )}
         <Group justify="flex-end">
           <Button variant="default" onClick={onClose}>Cancel</Button>
-          <Button onClick={save} loading={saving} disabled={!online || !name.trim() || memberIds.length === 0 || !!conflict}>
+          <Button onClick={() => { void save(); }} loading={saving} disabled={!online || !name.trim() || memberIds.length === 0 || !!conflict}>
             {online ? 'Save' : 'Needs a connection'}
           </Button>
         </Group>

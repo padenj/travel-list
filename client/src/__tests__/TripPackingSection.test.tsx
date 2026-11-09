@@ -117,14 +117,15 @@ describe('TripPackingSection', () => {
 
   it('deletes an empty destination and reloads', async () => {
     vi.stubGlobal('confirm', vi.fn(() => true));
-    (tripApi.listDestinations as any).mockResolvedValueOnce([paris]).mockResolvedValueOnce([]);
+    (tripApi.listDestinations as any).mockResolvedValueOnce([paris, grandma]).mockResolvedValueOnce([grandma]);
     (tripApi.deleteDestination as any).mockResolvedValue(undefined);
     renderSection();
     await openMenu('Paris');
     await userEvent.click(await screen.findByRole('menuitem', { name: 'Delete' }));
 
     expect(tripApi.deleteDestination).toHaveBeenCalledWith('t1', 'd1', {});
-    expect(await screen.findByRole('button', { name: 'Set up packing' })).toBeTruthy();
+    await waitFor(() => expect(screen.queryByText('Paris')).toBeNull());
+    expect(screen.getByText("Grandma's")).toBeTruthy();
   });
 
   it('offers to move shared items or delete the list when the destination has items', async () => {
@@ -147,16 +148,24 @@ describe('TripPackingSection', () => {
 
   it('does not delete when the confirm is cancelled', async () => {
     vi.stubGlobal('confirm', vi.fn(() => false));
-    (tripApi.listDestinations as any).mockResolvedValue([paris]);
+    (tripApi.listDestinations as any).mockResolvedValue([paris, grandma]);
     renderSection();
     await openMenu('Paris');
     await userEvent.click(await screen.findByRole('menuitem', { name: 'Delete' }));
     expect(tripApi.deleteDestination).not.toHaveBeenCalled();
   });
 
+  it('hides Delete on the last destination', async () => {
+    (tripApi.listDestinations as any).mockResolvedValue([paris]);
+    renderSection();
+    await openMenu('Paris');
+    expect(await screen.findByRole('menuitem', { name: 'Rename' })).toBeTruthy();
+    expect(screen.queryByRole('menuitem', { name: 'Delete' })).toBeNull();
+  });
+
   it('shows a readable error when deleting fails', async () => {
     vi.stubGlobal('confirm', vi.fn(() => true));
-    (tripApi.listDestinations as any).mockResolvedValue([paris]);
+    (tripApi.listDestinations as any).mockResolvedValue([paris, grandma]);
     (tripApi.deleteDestination as any).mockRejectedValueOnce(new Error('Destination not found'));
     renderSection();
     await openMenu('Paris');
@@ -167,7 +176,7 @@ describe('TripPackingSection', () => {
   });
 
   it('disables destination changes while offline but still opens lists', async () => {
-    (tripApi.listDestinations as any).mockResolvedValue([paris]);
+    (tripApi.listDestinations as any).mockResolvedValue([paris, grandma]);
     renderSection();
     await screen.findByText('Paris');
     act(() => { window.dispatchEvent(new Event('offline')); });

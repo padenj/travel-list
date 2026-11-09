@@ -146,15 +146,17 @@ export default function TripPackingSection({ trip, onChanged, onOpenList, zIndex
                   {!online && <Menu.Label>{OFFLINE_LABEL}</Menu.Label>}
                   <Menu.Item disabled={!online} onClick={() => setDialog({ editing: destination })}>Rename</Menu.Item>
                   <Menu.Item disabled={!online} onClick={() => setDialog({ editing: destination })}>Change members</Menu.Item>
-                  <Menu.Item
-                    color="red"
-                    disabled={!online}
-                    onClick={() => {
-                      if (window.confirm(`Delete ${destination.name}?`)) void deleteDestination(destination);
-                    }}
-                  >
-                    Delete
-                  </Menu.Item>
+                  {destinations.length > 1 && (
+                    <Menu.Item
+                      color="red"
+                      disabled={!online}
+                      onClick={() => {
+                        if (window.confirm(`Delete ${destination.name}?`)) void deleteDestination(destination);
+                      }}
+                    >
+                      Delete
+                    </Menu.Item>
+                  )}
                 </Menu.Dropdown>
               </Menu>
             </Group>
