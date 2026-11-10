@@ -14,7 +14,12 @@ import { UserRepository, FamilyRepository, CategoryRepository, ItemRepository, u
 import { ERROR_CODES, USER_ROLES, HTTP_STATUS } from './constants';
 import { User, LoginRequest, ChangePasswordRequest } from './server-types';
 import { v4 as uuidv4 } from 'uuid';
+import { withTransaction } from './utils/transaction';
 import { tripRouter } from './routes/tripRoutes';
+import { TripDestinationRepository, DestinationConflictError, DestinationValidationError } from './repositories/tripDestinationRepository';
+import { moveSharedItem, MoveValidationError, notify } from './services/tripSplitService';
+import { createShellTripForListTx, deleteDestinationTx, updateDestination } from './services/tripListService';
+import { TripRepository } from './repositories/tripRepository';
 import { tripFileRouter } from './routes/tripFileRoutes';
 
 // Extend Request type to include user
@@ -37,6 +42,8 @@ import { seedTemplatesForFamily } from './seed-templates';
 const templateRepo = new TemplateRepository();
 import { PackingListRepository } from './repositories';
 const packingListRepo = new PackingListRepository();
+const tripDestinationRepo = new TripDestinationRepository();
+const tripRepo = new TripRepository();
 import { addClient, removeClient, broadcastEvent, getClients, sseLog } from './sse';
 
 async function snapshotPackingListItemsForAudit(packingListId: string): Promise<Map<string, { name: string; appliesToScope: AppliesToScope }>> {
@@ -700,12 +707,13 @@ router.get('/families/:familyId/packing-lists', authMiddleware, familyAccessMidd
   const { familyId } = req.params;
   try {
     const lists = await packingListRepo.findAll(familyId);
+    const summaries = await tripDestinationRepo.getListSummariesForFamily(familyId);
     // Attach member_ids for each list to keep responses lightweight
     const listsWithMembers = [] as any[];
     for (const l of lists) {
       const memberIds = await packingListRepo.getMemberIdsForPackingList(l.id);
       const { notes: _notes, ...listSummary } = l as any;
-      listsWithMembers.push({ ...listSummary, member_ids: memberIds });
+      listsWithMembers.push({ ...listSummary, member_ids: memberIds, trip_destination: summaries.get(l.id) ?? null });
     }
     return res.json({ lists: listsWithMembers });
   } catch (error) {
@@ -720,26 +728,46 @@ router.post('/families/:familyId/packing-lists', authMiddleware, familyAccessMid
   const { name, templateId, includeTemplateAssignments = true, memberIds } = req.body;
   if (!name || name.trim() === '') return res.status(400).json({ error: 'Name is required' });
   try {
-    const newList = await packingListRepo.create({ id: uuidv4(), family_id: familyId, name: name.trim(), created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
-    // Persist member selection: if not provided, default to all current family members
+    // Resolve and validate memberIds against the family BEFORE creating anything, so a bad
+    // memberId never leaves behind a list with no trip.
+    let resolvedMemberIds: string[];
     if (!Array.isArray(memberIds) || memberIds.length === 0) {
-      // fetch current family members
       const familyMembers = await userRepo.findByFamilyId(familyId);
-      const ids = familyMembers.map(m => m.id);
-      await packingListRepo.setMemberIdsForPackingList(newList.id, ids);
-      newList.member_ids = ids;
+      resolvedMemberIds = familyMembers.map(m => m.id);
     } else {
-      await packingListRepo.setMemberIdsForPackingList(newList.id, memberIds);
-      newList.member_ids = memberIds;
+      const db0 = await getDb();
+      const placeholders = memberIds.map(() => '?').join(',');
+      const rows: any[] = await db0.all(
+        `SELECT id FROM users WHERE id IN (${placeholders}) AND familyId = ? AND deleted_at IS NULL`,
+        [...memberIds, familyId]
+      );
+      const foundIds = new Set(rows.map(r => r.id));
+      const invalid = memberIds.filter((m: string) => !foundIds.has(m));
+      if (invalid.length > 0) {
+        return res.status(400).json({ error: 'One or more memberIds are invalid for this family' });
+      }
+      resolvedMemberIds = memberIds;
     }
-    if (templateId) {
-      const before = await snapshotPackingListItemsForAudit(newList.id);
-      // record assignment and reconcile immediately for newly created list
-      await packingListRepo.setTemplatesForPackingList(newList.id, [templateId]);
-      await packingListRepo.reconcilePackingListAgainstTemplate(newList.id, templateId);
-      const after = await snapshotPackingListItemsForAudit(newList.id);
-      await auditPackingListDiff({ packingListId: newList.id, actorUserId: req.user?.id ?? null, before, after, source: 'create_list_with_template' });
-    }
+
+    // List insert + member write + template reconciliation + shell trip are one transaction:
+    // if any later step fails the list never persists without a trip.
+    const db = await getDb();
+    const newList = await withTransaction(db, async () => {
+      const created = await packingListRepo.create({ id: uuidv4(), family_id: familyId, name: name.trim(), created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
+      await packingListRepo.setMemberIdsForPackingList(created.id, resolvedMemberIds);
+      created.member_ids = resolvedMemberIds;
+      if (templateId) {
+        const before = await snapshotPackingListItemsForAudit(created.id);
+        // record assignment and reconcile immediately for newly created list
+        await packingListRepo.setTemplatesForPackingList(created.id, [templateId]);
+        await packingListRepo.reconcilePackingListAgainstTemplate(created.id, templateId);
+        const after = await snapshotPackingListItemsForAudit(created.id);
+        await auditPackingListDiff({ packingListId: created.id, actorUserId: req.user?.id ?? null, before, after, source: 'create_list_with_template' });
+      }
+      // Every list belongs to a trip; a new list starts as the only destination of its own trip.
+      await createShellTripForListTx(db, { familyId, listId: created.id, name: created.name });
+      return created;
+    });
     return res.json({ list: newList });
   } catch (error) {
     console.error('Error creating packing list:', error);
@@ -769,7 +797,8 @@ router.get('/packing-lists/:id', authMiddleware, async (req: Request, res: Respo
   const memberIds = await packingListRepo.getMemberIdsForPackingList(id);
   (list as any).member_ids = memberIds;
   const listWithNotes = { ...(list as any), notes: typeof (list as any).notes === 'string' ? (list as any).notes : null };
-  return res.json({ list: listWithNotes, items: sanitizedItems, checks, not_needed_rows: notNeededRows, template_ids: templateIds });
+  const tripDestination = await tripDestinationRepo.getTripContextForList(id);
+  return res.json({ list: listWithNotes, items: sanitizedItems, checks, not_needed_rows: notNeededRows, template_ids: templateIds, trip_destination: tripDestination });
   } catch (error) {
     console.error('Error fetching packing list:', error);
     return res.status(500).json({ error: 'Failed to fetch packing list' });
@@ -877,15 +906,45 @@ router.put('/packing-lists/:id', authMiddleware, async (req: Request, res: Respo
       delete updates.templateIds;
       delete updates.removeItemsForRemovedTemplates;
     }
-    // Persist memberIds if provided
-    if (Array.isArray(updates.memberIds)) {
-      try {
-        await packingListRepo.setMemberIdsForPackingList(id, updates.memberIds);
-      } catch (e) {
-        return res.status(400).json({ error: 'Invalid memberIds for this packing list' });
+    // Persist name/memberIds if provided. For a destination list both are applied atomically
+    // (members validated/written before the rename commits) and we notify only after success,
+    // so a 409/400 on the member update never leaves a stray rename applied.
+    const hasNameUpdate = Object.prototype.hasOwnProperty.call(updates, 'name');
+    const hasMemberIdsUpdate = Array.isArray(updates.memberIds);
+    if (hasNameUpdate || hasMemberIdsUpdate) {
+      const destination = await tripDestinationRepo.findByPackingListId(id);
+      if (destination) {
+        if (hasNameUpdate && (typeof updates.name !== 'string' || !updates.name.trim())) {
+          return res.status(400).json({ error: 'Name is required' });
+        }
+        try {
+          const changed = await updateDestination({
+            destinationId: destination.id,
+            familyId: existing.family_id,
+            name: hasNameUpdate ? updates.name.trim() : undefined,
+            memberIds: hasMemberIdsUpdate ? updates.memberIds : undefined,
+          });
+          notify([id, ...changed], 'destination');
+        } catch (e) {
+          if (e instanceof DestinationConflictError) {
+            return res.status(409).json({ error: 'member_in_other_destination', memberId: e.memberId, destinationId: e.destinationId });
+          }
+          if (e instanceof DestinationValidationError) {
+            return res.status(400).json({ error: 'Invalid memberIds for this packing list' });
+          }
+          throw e;
+        }
+        // The stored list name is the label, already written by updateDestination.
+        delete updates.name;
+        delete updates.memberIds;
+      } else if (hasMemberIdsUpdate) {
+        try {
+          await packingListRepo.setMemberIdsForPackingList(id, updates.memberIds);
+        } catch (e) {
+          return res.status(400).json({ error: 'Invalid memberIds for this packing list' });
+        }
+        delete updates.memberIds;
       }
-      // reflect member_ids on returned list
-      delete updates.memberIds;
     }
     const updated = await packingListRepo.update(id, updates);
     return res.json({ list: updated });
@@ -895,14 +954,29 @@ router.put('/packing-lists/:id', authMiddleware, async (req: Request, res: Respo
   }
 });
 
-// Delete (soft-delete) packing list
+// Delete (soft-delete) packing list. A list is a destination: deleting the last one deletes its trip.
 router.delete('/packing-lists/:id', authMiddleware, async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
     const existing = await packingListRepo.findById(id);
     if (!existing) return res.status(404).json({ error: 'Packing list not found' });
     if (req.user?.role !== 'SystemAdmin' && req.user?.familyId !== existing.family_id) return res.status(403).json({ error: 'Forbidden' });
-    await packingListRepo.softDelete(id);
+    const destination = await tripDestinationRepo.findByPackingListId(id);
+    if (destination) {
+      const siblings = await tripDestinationRepo.listForTrip(destination.tripId);
+      if (siblings.length <= 1) {
+        await tripRepo.deleteTrip(destination.tripId);
+        notify([id], 'destination');
+      } else {
+        const db = await getDb();
+        await withTransaction(db, () =>
+          deleteDestinationTx(db, { destination, familyId: existing.family_id, deleteList: true })
+        );
+        notify([id, ...siblings.map(d => d.packingListId)], 'destination');
+      }
+    } else {
+      await packingListRepo.softDelete(id);
+    }
     return res.json({ message: 'Packing list deleted' });
   } catch (error) {
     console.error('Error deleting packing list:', error);
@@ -924,7 +998,6 @@ router.post('/packing-lists/:id/items', authMiddleware, async (req: Request, res
       // If masterItemId is provided and member assignments are included, assign those members to the master item
       created = await packingListRepo.addItem(id, masterItemId, false);
       if (Array.isArray(memberIds) && memberIds.length > 0) {
-        const itemRepo = new (require('./repositories').ItemRepository)();
         for (const m of memberIds) {
           await itemRepo.assignToMember(masterItemId, m);
         }
@@ -1117,6 +1190,26 @@ router.patch('/packing-lists/:listId/items/:itemId/not-needed', authMiddleware, 
   } catch (error) {
     console.error('Error updating not_needed:', error);
     return res.status(500).json({ error: 'Failed to update not_needed' });
+  }
+});
+
+// Move a shared (whole-family) item to another destination of the same trip
+router.post('/packing-lists/:listId/items/:pliId/move', authMiddleware, async (req: Request, res: Response) => {
+  const { listId, pliId } = req.params;
+  const { toListId } = req.body || {};
+  if (typeof toListId !== 'string' || !toListId) return res.status(400).json({ error: 'toListId is required' });
+  try {
+    const list = await packingListRepo.findById(listId);
+    if (!list) return res.status(404).json({ error: 'Packing list not found' });
+    if (req.user?.role !== 'SystemAdmin' && req.user?.familyId !== list.family_id) return res.status(403).json({ error: 'Forbidden' });
+    const item = await moveSharedItem({ fromListId: listId, pliId, toListId });
+    return res.json({ item });
+  } catch (error) {
+    if (error instanceof MoveValidationError) {
+      return res.status(error.message === 'item_not_found' ? 404 : 400).json({ error: error.message });
+    }
+    console.error('Error moving packing list item:', error);
+    return res.status(500).json({ error: 'Failed to move item' });
   }
 });
 
@@ -1757,25 +1850,18 @@ router.put('/families/:familyId/members/order', authMiddleware, async (req: Requ
     const db = await (await import('./db')).getDb();
     try {
       console.log('🔄 Starting transaction');
-      await db.run('BEGIN TRANSACTION');
-      for (let idx = 0; idx < memberIds.length; idx++) {
-        const id = memberIds[idx];
-        // position lower means earlier/left-most
-        console.log(`🔄 Updating member ${id} to position ${idx}`);
-        const result = await db.run(`UPDATE users SET position = ?, updated_at = ? WHERE id = ?`, [idx, new Date().toISOString(), id]);
-        console.log(`🔄 Update result for ${id}:`, result);
-      }
-      console.log('🔄 Committing transaction');
-      await db.run('COMMIT');
+      await withTransaction(db, async () => {
+        for (let idx = 0; idx < memberIds.length; idx++) {
+          const id = memberIds[idx];
+          // position lower means earlier/left-most
+          console.log(`🔄 Updating member ${id} to position ${idx}`);
+          const result = await db.run(`UPDATE users SET position = ?, updated_at = ? WHERE id = ?`, [idx, new Date().toISOString(), id]);
+          console.log(`🔄 Update result for ${id}:`, result);
+        }
+      });
       console.log('✅ Transaction committed successfully');
     } catch (e) {
-      console.error('❌ Transaction error:', e);
-      try { 
-        console.log('🔄 Rolling back transaction');
-        await db.run('ROLLBACK'); 
-      } catch (er) {
-        console.error('❌ Rollback error:', er);
-      }
+      console.error('❌ Transaction error (rolled back):', e);
       throw e;
     }
 

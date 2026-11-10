@@ -2,6 +2,7 @@ import {
   Trip, TripElement, TripElementConfirmation, FlightAutofillLookupInput, FlightAutofillDetails,
   TripParticipant, Booking, CreateBookingPayload, BookingTransaction, AddBookingTransactionPayload, FlightTravelerSeat,
   FlightLeg, FlightLegPayload,
+  TripDestination, DestinationWritePayload, SplitListPayload, SplitResult, CopyTripPayload, CopyTripResult,
 } from '../types/trip';
 import { getAuthToken } from '../api';
 
@@ -20,10 +21,19 @@ function authHeaders(extra: Record<string, string> = {}): Record<string, string>
   };
 }
 
+export class ApiConflictError extends Error {
+  constructor(message: string, public body: any) {
+    super(message);
+    this.name = 'ApiConflictError';
+  }
+}
+
 async function handleResponse(response: Response) {
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
-    throw new Error(body?.error || `API Error: ${response.status}`);
+    const message = body?.error || `API Error: ${response.status}`;
+    if (response.status === 409) throw new ApiConflictError(message, body);
+    throw new Error(message);
   }
   return response.json();
 }
@@ -60,9 +70,16 @@ export const tripApi = {
 
   deleteTrip: async (tripId: string): Promise<void> => {
     const response = await fetch(`${API_BASE}/${tripId}`, { method: 'DELETE', headers: authHeaders() });
-    if (!response.ok) {
-      throw new Error(`Failed to delete trip: ${response.status}`);
-    }
+    if (!response.ok) await handleResponse(response);
+  },
+
+  copyTrip: async (tripId: string, payload: CopyTripPayload): Promise<CopyTripResult> => {
+    const response = await fetch(`${API_BASE}/${tripId}/copy`, {
+      method: 'POST',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(payload),
+    });
+    return handleResponse(response);
   },
 
   // Element CRUD
@@ -317,5 +334,51 @@ export const tripApi = {
     if (!response.ok) {
       throw new Error(`Failed to remove seat: ${response.status}`);
     }
+  },
+
+  // Destinations (multi-destination packing)
+  listDestinations: async (tripId: string): Promise<TripDestination[]> => {
+    const response = await fetch(`${API_BASE}/${tripId}/destinations`, { headers: authHeaders() });
+    return handleResponse(response);
+  },
+
+  createDestination: async (tripId: string, payload: DestinationWritePayload): Promise<TripDestination> => {
+    const response = await fetch(`${API_BASE}/${tripId}/destinations`, {
+      method: 'POST',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(payload),
+    });
+    return handleResponse(response);
+  },
+
+  updateDestination: async (tripId: string, destinationId: string, payload: DestinationWritePayload): Promise<TripDestination> => {
+    const response = await fetch(`${API_BASE}/${tripId}/destinations/${destinationId}`, {
+      method: 'PUT',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(payload),
+    });
+    return handleResponse(response);
+  },
+
+  deleteDestination: async (
+    tripId: string,
+    destinationId: string,
+    options: { moveSharedItemsTo?: string; deleteList?: boolean } = {}
+  ): Promise<void> => {
+    const response = await fetch(`${API_BASE}/${tripId}/destinations/${destinationId}`, {
+      method: 'DELETE',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(options),
+    });
+    if (!response.ok) await handleResponse(response);
+  },
+
+  splitList: async (tripId: string, payload: SplitListPayload): Promise<SplitResult> => {
+    const response = await fetch(`${API_BASE}/${tripId}/split`, {
+      method: 'POST',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(payload),
+    });
+    return handleResponse(response);
   },
 };

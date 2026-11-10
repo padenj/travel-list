@@ -21,18 +21,24 @@ if (!hasTestingLibs) {
   const userEvent = require('@testing-library/user-event');
   const React = require('react');
   const { MemoryRouter } = require('react-router-dom');
-  const { render, screen, cleanup, fireEvent, waitFor } = rtl;
+  const { render, screen, cleanup, fireEvent, waitFor, act } = rtl;
   const userEventLib = (userEvent && userEvent.default) || userEvent;
 
   const { describe, it, expect, beforeEach, beforeAll, afterEach, vi } = { describe: _describe, it: _it, expect: _expect, beforeEach: _beforeEach, beforeAll: _beforeAll, afterEach: _afterEach, vi: _vi };
 
   vi.mock('../api');
 
-  const { requestOpenEdit, openForList, showNotification, activeListState } = vi.hoisted(() => ({
+  const { requestOpenEdit, openForList, showNotification, activeListState, columnsProps, personViewState, auditProps, addDrawerProps, drawerProps, pickerProps } = vi.hoisted(() => ({
+    pickerProps: { last: null as any },
+    addDrawerProps: { last: null as any },
+    drawerProps: { last: null as any },
     requestOpenEdit: vi.fn(),
     openForList: vi.fn(),
     showNotification: vi.fn(),
     activeListState: { id: 'list-1' as string },
+    columnsProps: { last: null as any },
+    personViewState: { mode: 'columns' as string, report: null as string | null, props: null as any },
+    auditProps: { last: null as any },
   }));
 
   vi.mock('@mantine/notifications', () => ({ showNotification }));
@@ -70,13 +76,62 @@ if (!hasTestingLibs) {
     default: () => null,
   }));
   vi.mock('../components/AddItemsDrawer', () => ({
-    default: () => null,
+    default: (props: any) => {
+      addDrawerProps.last = props;
+      return null;
+    },
   }));
   vi.mock('../components/PackingListAuditPanel', () => ({
-    default: () => null,
+    default: (props: any) => {
+      auditProps.last = props;
+      return null;
+    },
   }));
   vi.mock('../components/PackingListItemAuditModal', () => ({
     default: () => null,
+  }));
+  vi.mock('../components/PersonView', () => ({
+    default: (props: any) => {
+      const React = require('react');
+      personViewState.props = props;
+      React.useEffect(() => {
+        if (personViewState.report) props.onSelectedGroupChange?.(personViewState.report);
+      }, []);
+      return null;
+    },
+  }));
+  vi.mock('../components/DestinationColumns', () => ({
+    default: (props: any) => {
+      columnsProps.last = props;
+      return null;
+    },
+  }));
+  vi.mock('../components/DashboardViewToggle', () => ({
+    default: () => null,
+    useDashboardViewMode: () => [personViewState.mode, () => {}],
+  }));
+  vi.mock('../components/ShowPackedToggle', () => ({
+    default: ({ value, onChange }: any) => {
+      const React = require('react');
+      return React.createElement('button', { onClick: () => onChange(!value) }, `Show packed:${value}`);
+    },
+    useShowPacked: () => {
+      const React = require('react');
+      return React.useState(false);
+    },
+  }));
+  vi.mock('../components/NotesDestinationPicker', () => ({
+    default: (props: any) => {
+      pickerProps.last = props;
+      return null;
+    },
+  }));
+  vi.mock('../components/ManageDestinationsDrawer', () => ({
+    default: (props: any) => {
+      const React = require('react');
+      drawerProps.last = props;
+      return props.opened ? React.createElement('div', null, `destinations drawer for ${props.tripId}`) : null;
+    },
   }));
 
   vi.mock('@mantine/core', () => {
@@ -112,6 +167,14 @@ if (!hasTestingLibs) {
       vi.clearAllMocks();
       vi.useRealTimers();
       activeListState.id = 'list-1';
+      columnsProps.last = null;
+      auditProps.last = null;
+      personViewState.mode = 'columns';
+      personViewState.report = null;
+      personViewState.props = null;
+      addDrawerProps.last = null;
+      drawerProps.last = null;
+      (apiModule.getCategories as any).mockResolvedValue({ response: { ok: true }, data: { categories: [] } });
       (apiModule.getCurrentUserProfile as any).mockResolvedValue({
         response: { ok: true },
         data: { user: { id: 'u1' }, family: { id: 'f1', members: [] } },
@@ -132,6 +195,22 @@ if (!hasTestingLibs) {
 
     afterEach(() => {
       cleanup();
+    });
+
+    it('shows the Show packed switch only in Person view and feeds PersonView', async () => {
+      personViewState.mode = 'person';
+      const { unmount } = render(<MemoryRouter><Dashboard /></MemoryRouter>);
+      const user = await userEventLib.setup();
+      const toggle = await screen.findByRole('button', { name: 'Show packed:false' });
+      expect(personViewState.props.showPacked).toBe(false);
+      await user.click(toggle);
+      expect(personViewState.props.showPacked).toBe(true);
+      unmount();
+      cleanup();
+      personViewState.mode = 'columns';
+      render(<MemoryRouter><Dashboard /></MemoryRouter>);
+      await screen.findByRole('button', { name: 'Edit list' });
+      expect(screen.queryByText(/Show packed:/)).toBeNull();
     });
 
     it('opens list editor with the active list name', async () => {
@@ -327,6 +406,284 @@ if (!hasTestingLibs) {
       await Promise.resolve();
 
       expect((textarea as HTMLTextAreaElement).value).toBe('second-save');
+    });
+    const tripContext = {
+      tripId: 't1',
+      tripName: 'Spring Break',
+      destinations: [
+        { id: 'd1', tripId: 't1', name: 'Paris', color: 'blue', position: 0, packingListId: 'list-1', memberIds: [] },
+        { id: 'd2', tripId: 't1', name: "Grandma's", color: 'green', position: 1, packingListId: 'list-2', memberIds: [] },
+      ],
+    };
+
+    it('loads every destination of the trip as a group', async () => {
+      (apiModule.getPackingList as any).mockImplementation(() => Promise.resolve({
+        response: { ok: true },
+        data: { items: [], checks: [], list: { notes: '' }, trip_destination: tripContext },
+      }));
+
+      render(
+        <MemoryRouter>
+          <Dashboard />
+        </MemoryRouter>
+      );
+
+      await waitFor(() => expect(columnsProps.last?.groups.map((g: any) => g.name)).toEqual(['Paris', "Grandma's"]));
+      expect(apiModule.getPackingList).toHaveBeenCalledWith('list-2');
+      expect(columnsProps.last.isTrip).toBe(true);
+      expect(screen.getByText('Spring Break · 2 destinations')).toBeTruthy();
+    });
+
+    it('refreshes when another destination of the trip changes', async () => {
+      (apiModule.getPackingList as any).mockImplementation(() => Promise.resolve({
+        response: { ok: true },
+        data: { items: [], checks: [], list: { notes: '' }, trip_destination: tripContext },
+      }));
+      render(
+        <MemoryRouter>
+          <Dashboard />
+        </MemoryRouter>
+      );
+      await waitFor(() => expect(columnsProps.last?.groups).toHaveLength(2));
+      const before = (apiModule.getPackingList as any).mock.calls.length;
+
+      window.dispatchEvent(new CustomEvent('server-event', { detail: { type: 'packing_list_changed', listId: 'list-2', data: {} } }));
+
+      await waitFor(() => expect((apiModule.getPackingList as any).mock.calls.length).toBeGreaterThan(before));
+    });
+
+    it('opens the destinations drawer for the active trip and refreshes when it closes', async () => {
+      (apiModule.getPackingList as any).mockImplementation(() => Promise.resolve({
+        response: { ok: true },
+        data: { items: [], checks: [], list: { notes: '' }, trip_destination: tripContext },
+      }));
+      render(
+        <MemoryRouter>
+          <Dashboard />
+        </MemoryRouter>
+      );
+      fireEvent.click(await screen.findByRole('button', { name: 'Destinations' }));
+      expect(screen.getByText('destinations drawer for t1')).toBeTruthy();
+      expect(screen.queryByRole('button', { name: 'Split by destination' })).toBeNull();
+
+      const before = (apiModule.getPackingList as any).mock.calls.length;
+      rtl.act(() => drawerProps.last.onClose());
+      await waitFor(() => expect((apiModule.getPackingList as any).mock.calls.length).toBeGreaterThan(before));
+      expect(screen.queryByText('destinations drawer for t1')).toBeNull();
+    });
+
+    it('shows a one-destination trip like a single list', async () => {
+      const single = { tripId: 't2', tripName: 'Beach', destinations: [tripContext.destinations[0]] };
+      (apiModule.getPackingList as any).mockImplementation(() => Promise.resolve({
+        response: { ok: true },
+        data: { items: [], checks: [], list: { notes: '' }, trip_destination: single },
+      }));
+      render(
+        <MemoryRouter>
+          <Dashboard />
+        </MemoryRouter>
+      );
+      await waitFor(() => expect(columnsProps.last?.groups).toHaveLength(1));
+      expect(columnsProps.last.isTrip).toBe(false);
+      expect(screen.queryByText('Beach · 1 destination')).toBeNull();
+      expect(await screen.findByRole('button', { name: 'Destinations' })).toBeTruthy();
+    });
+
+    it('has no Destinations button for a list without a trip', async () => {
+      render(
+        <MemoryRouter>
+          <Dashboard />
+        </MemoryRouter>
+      );
+      await waitFor(() => expect(columnsProps.last?.groups).toHaveLength(1));
+      expect(screen.queryByRole('button', { name: 'Destinations' })).toBeNull();
+    });
+
+    it('loads the whole trip in destination order when a later destination list is active', async () => {
+      activeListState.id = 'list-2';
+      (apiModule.getPackingList as any).mockImplementation(() => Promise.resolve({
+        response: { ok: true },
+        data: { items: [], checks: [], list: { notes: '' }, trip_destination: tripContext },
+      }));
+      render(
+        <MemoryRouter>
+          <Dashboard />
+        </MemoryRouter>
+      );
+      await waitFor(() => expect(columnsProps.last?.groups.map((g: any) => g.listId)).toEqual(['list-1', 'list-2']));
+      expect(apiModule.getPackingList).toHaveBeenCalledWith('list-1');
+    });
+
+    it('sends checks to the list of the destination they belong to', async () => {
+      (apiModule.getPackingList as any).mockImplementation((listId: string) => Promise.resolve({
+        response: { ok: true },
+        data: {
+          items: [{ id: `pli-${listId}`, item_id: null, display_name: 'Tent', whole_family: true, members: [] }],
+          checks: [],
+          list: { notes: '' },
+          trip_destination: tripContext,
+        },
+      }));
+      (apiModule.togglePackingListItemCheck as any).mockResolvedValue({ response: { ok: true }, data: {} });
+      render(
+        <MemoryRouter>
+          <Dashboard />
+        </MemoryRouter>
+      );
+      await waitFor(() => expect(columnsProps.last?.groups).toHaveLength(2));
+
+      columnsProps.last.onCheckItem('list-2', null, 'pli-list-2', true);
+
+      await waitFor(() => expect(apiModule.togglePackingListItemCheck).toHaveBeenCalledWith('list-2', 'pli-list-2', null, true));
+      await waitFor(() => {
+        const [paris, grandmas] = columnsProps.last.groups;
+        expect(grandmas.wholeFamilyItems[0].checked).toBe(true);
+        expect(paris.wholeFamilyItems[0].checked).toBe(false);
+      });
+    });
+
+    it('disables Destinations while offline', async () => {
+      (apiModule.getPackingList as any).mockImplementation(() => Promise.resolve({
+        response: { ok: true },
+        data: { items: [], checks: [], list: { notes: '' }, trip_destination: tripContext },
+      }));
+      Object.defineProperty(navigator, 'onLine', { configurable: true, get: () => false });
+      try {
+        render(
+          <MemoryRouter>
+            <Dashboard />
+          </MemoryRouter>
+        );
+        const button = await screen.findByRole('button', { name: 'Needs a connection' });
+        expect((button as HTMLButtonElement).disabled).toBe(true);
+        expect(screen.queryByRole('button', { name: 'Destinations' })).toBeNull();
+      } finally {
+        delete (navigator as any).onLine;
+      }
+    });
+
+    it('keeps notes and audit on the person view destination when the active list changes within the trip', async () => {
+      personViewState.mode = 'person';
+      personViewState.report = 'list-2';
+      activeListState.id = 'list-2';
+      (apiModule.getPackingList as any).mockImplementation(() => Promise.resolve({
+        response: { ok: true },
+        data: { items: [], checks: [], list: { notes: '' }, trip_destination: tripContext },
+      }));
+      const view = render(
+        <MemoryRouter>
+          <Dashboard />
+        </MemoryRouter>
+      );
+      await waitFor(() => expect(auditProps.last?.packingListId).toBe('list-2'));
+
+      activeListState.id = 'list-1';
+      view.rerender(
+        <MemoryRouter>
+          <Dashboard />
+        </MemoryRouter>
+      );
+      await waitFor(() => expect(apiModule.getPackingList).toHaveBeenCalled());
+      await Promise.resolve();
+      expect(auditProps.last.packingListId).toBe('list-2');
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Edit list' }));
+      expect(openForList).toHaveBeenCalledWith('list-2', expect.anything());
+    });
+
+    it('Edit list in Person view opens the selected person\'s destination list', async () => {
+      personViewState.mode = 'person';
+      personViewState.report = 'list-2';
+      (apiModule.getPackingList as any).mockImplementation(() => Promise.resolve({
+        response: { ok: true },
+        data: { items: [], checks: [], list: { notes: '' }, trip_destination: tripContext },
+      }));
+      render(<MemoryRouter><Dashboard /></MemoryRouter>);
+      await waitFor(() => expect(personViewState.props?.groups?.length).toBe(2));
+      fireEvent.click(screen.getByRole('button', { name: 'Edit list' }));
+      expect(requestOpenEdit).toHaveBeenCalledWith('list-2');
+      expect(openForList).toHaveBeenCalledWith('list-2', 'Winter Trip');
+    });
+
+    it('Edit list in Columns view opens the active list even after picking another destination for notes', async () => {
+      personViewState.mode = 'columns';
+      pickerProps.last = null;
+      (apiModule.getPackingList as any).mockImplementation(() => Promise.resolve({
+        response: { ok: true },
+        data: { items: [], checks: [], list: { notes: '' }, trip_destination: tripContext },
+      }));
+      render(<MemoryRouter><Dashboard /></MemoryRouter>);
+      await waitFor(() => expect(pickerProps.last).not.toBeNull());
+      act(() => { pickerProps.last.onChange('list-2'); });
+      await waitFor(() => expect(auditProps.last?.packingListId).toBe('list-2'));
+      fireEvent.click(screen.getByRole('button', { name: 'Edit list' }));
+      expect(requestOpenEdit).toHaveBeenCalledWith('list-1');
+      expect(openForList).toHaveBeenCalledWith('list-1', 'Summer Trip');
+    });
+
+    it('passes the family categories to the person view', async () => {
+      personViewState.mode = 'person';
+      const categories = [{ id: 'c1', name: 'Clothes', position: 1 }];
+      (apiModule.getCategories as any).mockResolvedValue({ response: { ok: true }, data: { categories } });
+      render(
+        <MemoryRouter>
+          <Dashboard />
+        </MemoryRouter>
+      );
+      await waitFor(() => expect(personViewState.props?.categories).toEqual(categories));
+      expect(apiModule.getCategories).toHaveBeenCalledWith('f1');
+    });
+
+    it("offers items other people have when adding for a person, and assigns the added item to them", async () => {
+      (apiModule.getPackingList as any).mockResolvedValue({
+        response: { ok: true },
+        data: {
+          items: [
+            { id: 'p1', item_id: 'i1', members: [{ id: 'u1', name: 'Me' }], whole_family: 0 },
+            { id: 'p2', item_id: 'i2', members: [{ id: 'u2', name: 'You' }], whole_family: 0 },
+            { id: 'p3', item_id: 'i3', members: [], whole_family: 1 },
+          ],
+          checks: [],
+          list: { notes: '' },
+        },
+      });
+      (apiModule.addItemToPackingList as any).mockResolvedValue({ response: { ok: true }, data: {} });
+      render(
+        <MemoryRouter>
+          <Dashboard />
+        </MemoryRouter>
+      );
+      await waitFor(() => expect(columnsProps.last?.groups?.[0]?.userLists).toHaveLength(2));
+
+      rtl.act(() => columnsProps.last.onOpenAddDrawer('list-1', 'u1'));
+      await waitFor(() => expect(addDrawerProps.last.opened).toBe(true));
+      expect([...addDrawerProps.last.excludedItemIds].sort()).toEqual(['i1', 'i3']);
+
+      await rtl.act(() => addDrawerProps.last.onApply(['i2']));
+      expect(apiModule.addItemToPackingList).toHaveBeenCalledWith('list-1', 'i2', undefined, undefined, ['u1']);
+
+      rtl.act(() => columnsProps.last.onOpenAddDrawer('list-1', null));
+      await waitFor(() => expect(addDrawerProps.last.opened).toBe(true));
+      expect(addDrawerProps.last.excludedItemIds).toEqual(['i1', 'i2', 'i3']);
+    });
+
+    it('reports a rejected add to the drawer instead of closing it', async () => {
+      (apiModule.addItemToPackingList as any).mockResolvedValue({ response: { ok: false, status: 500 }, data: { error: 'boom' } });
+      render(
+        <MemoryRouter>
+          <Dashboard />
+        </MemoryRouter>
+      );
+      await waitFor(() => expect(columnsProps.last?.groups).toHaveLength(1));
+      rtl.act(() => columnsProps.last.onOpenAddDrawer('list-1', null));
+      await waitFor(() => expect(addDrawerProps.last.opened).toBe(true));
+
+      let error: unknown = null;
+      await rtl.act(async () => {
+        try { await addDrawerProps.last.onApply(['i2']); } catch (e) { error = e; }
+      });
+      expect(error).toBeTruthy();
+      expect(addDrawerProps.last.opened).toBe(true);
     });
   });
 }

@@ -4,8 +4,8 @@ export interface Trip {
   name: string;
   description?: string;
   tripType?: string;
-  startDate: string;
-  endDate: string;
+  startDate?: string | null;
+  endDate?: string | null;
   status?: string;
   createdAt: string;
   updatedAt: string;
@@ -211,4 +211,68 @@ export interface FlightLegPayload {
   airline?: string;
   flightNumber?: string;
   checkPriceUrl?: string;
+}
+
+export interface TripDestination {
+  id: string;
+  tripId: string;
+  name: string;
+  color: string | null;
+  position: number;
+  packingListId: string;
+  memberIds: string[];
+}
+
+/** `trip_destination` on GET /packing-lists/:id */
+export interface ListTripContext {
+  tripId: string;
+  tripName: string;
+  destinations: TripDestination[];
+}
+
+/** `trip_destination` on each list from GET /families/:familyId/packing-lists */
+export interface ListTripSummary {
+  tripId: string;
+  tripName: string;
+  destinationId: string;
+  destinationName: string;
+  position: number;
+  destinationCount: number;
+  color?: string | null;
+  tripStartDate?: string | null;
+  tripEndDate?: string | null;
+}
+
+export interface DestinationWritePayload {
+  name?: string;
+  memberIds?: string[];
+  itemGroupIds?: string[];
+  packingListId?: string;
+  color?: string;
+  position?: number;
+  /** Take the chosen people (and their items) out of the trip's other destinations. */
+  moveFrom?: boolean;
+  /** Only used when the trip had one destination: where its whole-family items go. */
+  sharedItemsTo?: 'existing' | 'new';
+}
+
+export interface CopyTripPayload {
+  name: string;
+  includeOneOffs: boolean;
+}
+
+export interface CopyTripResult {
+  trip: Trip;
+  destinations: TripDestination[];
+}
+
+export interface SplitListPayload {
+  sourceListId: string;
+  destinations: { name: string; memberIds: string[] }[];
+  sharedItemsDestinationIndex: number;
+}
+
+export interface SplitResult {
+  destinations: TripDestination[];
+  skippedCount: number;
 }

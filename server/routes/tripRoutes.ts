@@ -9,6 +9,24 @@ import { FlightTravelerSeatRepository } from '../repositories/flightTravelerSeat
 import { authMiddleware } from '../middleware';
 import { tripAccessMiddleware } from '../middleware/tripAccessMiddleware';
 import { lookupFlightStatsAutofill } from '../services/flightStatsLookupService';
+import { getDb } from '../db';
+import { PackingListRepository } from '../repositories';
+import {
+  TripDestinationRepository,
+  DestinationConflictError,
+  DestinationValidationError,
+} from '../repositories/tripDestinationRepository';
+import { splitListIntoTrip, notify } from '../services/tripSplitService';
+import {
+  createDestination,
+  updateDestination,
+  deleteDestinationTx,
+  LastDestinationError,
+  createTripWithFirstDestination,
+  applyTripRenameTx,
+  copyTrip,
+} from '../services/tripListService';
+import { withTransaction } from '../utils/transaction';
 
 export const tripRouter = Router();
 
@@ -20,6 +38,22 @@ const bookingRepository = new BookingRepository();
 const bookingTransactionRepository = new BookingTransactionRepository();
 const flightTravelerSeatRepository = new FlightTravelerSeatRepository();
 
+const tripDestinationRepository = new TripDestinationRepository();
+const packingListRepository = new PackingListRepository();
+
+function sendDestinationError(res: Response, error: unknown, fallback: string) {
+  if (error instanceof DestinationConflictError) {
+    return res.status(409).json({ error: 'member_in_other_destination', memberId: error.memberId, destinationId: error.destinationId });
+  }
+  if (error instanceof LastDestinationError) {
+    return res.status(409).json({ error: 'last_destination' });
+  }
+  if (error instanceof DestinationValidationError) {
+    return res.status(error.message === 'not_found' ? 404 : 400).json({ error: error.message });
+  }
+  return res.status(500).json({ error: fallback });
+}
+
 // List trips for authenticated user's family
 tripRouter.get('/', authMiddleware, async (req: Request, res: Response) => {
   try {
@@ -30,23 +64,33 @@ tripRouter.get('/', authMiddleware, async (req: Request, res: Response) => {
   }
 });
 
-// Create trip
+// Create trip (dates optional); it starts with one destination named after it
 tripRouter.post('/', authMiddleware, async (req: Request, res: Response) => {
   try {
-    const { name, description, tripType, startDate, endDate, status } = req.body;
-    if (!name || !startDate || !endDate) {
-      return res.status(400).json({ error: 'Missing required fields: name, startDate, endDate' });
+    const { name, description, tripType, startDate, endDate, status, memberIds } = req.body || {};
+    if (typeof name !== 'string' || !name.trim()) {
+      return res.status(400).json({ error: 'Missing required field: name' });
     }
-    const trip = await tripRepository.createTrip((req as any).user.familyId, {
-      name,
+    const familyId = (req as any).user.familyId;
+    let members: string[] = Array.isArray(memberIds) ? memberIds : [];
+    if (members.length === 0) {
+      const db = await getDb();
+      members = ((await db.all(`SELECT id FROM users WHERE familyId = ? AND deleted_at IS NULL`, [familyId])) as { id: string }[])
+        .map(u => u.id);
+    }
+    const { tripId } = await createTripWithFirstDestination({
+      familyId,
+      name: name.trim(),
       description,
       tripType,
       startDate,
       endDate,
       status,
+      memberIds: members,
     });
-    res.status(201).json(trip);
+    res.status(201).json(await tripRepository.getTripById(tripId));
   } catch (error) {
+    if (error instanceof DestinationValidationError) return res.status(400).json({ error: error.message });
     res.status(500).json({ error: 'Failed to create trip' });
   }
 });
@@ -64,23 +108,58 @@ tripRouter.get('/:tripId', authMiddleware, tripAccessMiddleware, async (req: Req
   }
 });
 
-// Update trip
+// Update trip; a new name flows to destinations that carried the old one and to every list label
 tripRouter.put('/:tripId', authMiddleware, tripAccessMiddleware, async (req: Request, res: Response) => {
+  const body = req.body || {};
+  if ('name' in body && (typeof body.name !== 'string' || !body.name.trim())) {
+    return res.status(400).json({ error: 'name must be a non-empty string' });
+  }
   try {
-    const trip = await tripRepository.updateTrip(req.trip!.id, req.body);
-    res.json(trip);
+    const db = await getDb();
+    const oldName = req.trip!.name;
+    const updates = 'name' in body ? { ...body, name: body.name.trim() } : body;
+    const changed = await withTransaction(db, async () => {
+      await tripRepository.updateTrip(req.trip!.id, updates);
+      return 'name' in updates && updates.name !== oldName
+        ? applyTripRenameTx(db, req.trip!.id, oldName, updates.name)
+        : [];
+    });
+    notify(changed, 'destination');
+    res.json(await tripRepository.getTripById(req.trip!.id));
   } catch (error) {
     res.status(500).json({ error: 'Failed to update trip' });
   }
 });
 
-// Delete trip
+// Delete trip with its destinations and lists
 tripRouter.delete('/:tripId', authMiddleware, tripAccessMiddleware, async (req: Request, res: Response) => {
   try {
+    const lists = (await tripDestinationRepository.listForTrip(req.trip!.id)).map(d => d.packingListId);
     await tripRepository.deleteTrip(req.trip!.id);
+    notify(lists, 'destination');
     res.status(204).send();
   } catch (error) {
     res.status(500).json({ error: 'Failed to delete trip' });
+  }
+});
+
+// Copy a trip's destinations and lists into a new dateless trip
+tripRouter.post('/:tripId/copy', authMiddleware, tripAccessMiddleware, async (req: Request, res: Response) => {
+  const { name, includeOneOffs } = req.body || {};
+  if (typeof name !== 'string' || !name.trim()) return res.status(400).json({ error: 'name is required' });
+  try {
+    const tripId = await copyTrip({
+      sourceTripId: req.trip!.id,
+      familyId: req.trip!.family_id,
+      name: name.trim(),
+      includeOneOffs: includeOneOffs === true,
+    });
+    return res.status(201).json({
+      trip: await tripRepository.getTripById(tripId),
+      destinations: await tripDestinationRepository.listForTrip(tripId),
+    });
+  } catch (error) {
+    return sendDestinationError(res, error, 'Failed to copy trip');
   }
 });
 
@@ -625,5 +704,134 @@ tripRouter.delete('/:tripId/legs/:legId/seats/:participantId', authMiddleware, t
     res.status(204).send();
   } catch (error) {
     res.status(500).json({ error: 'Failed to remove seat' });
+  }
+});
+
+// Destinations: one packing list per group of travelers
+tripRouter.get('/:tripId/destinations', authMiddleware, tripAccessMiddleware, async (req: Request, res: Response) => {
+  try {
+    res.json(await tripDestinationRepository.listForTrip(req.trip!.id));
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch destinations' });
+  }
+});
+
+tripRouter.post('/:tripId/destinations', authMiddleware, tripAccessMiddleware, async (req: Request, res: Response) => {
+  const { name, memberIds, itemGroupIds, packingListId, moveFrom, sharedItemsTo } = req.body || {};
+  if (typeof name !== 'string' || !name.trim()) return res.status(400).json({ error: 'name is required' });
+  if (!Array.isArray(memberIds) || memberIds.length === 0) return res.status(400).json({ error: 'memberIds is required' });
+  if (sharedItemsTo !== undefined && sharedItemsTo !== 'existing' && sharedItemsTo !== 'new') {
+    return res.status(400).json({ error: 'invalid_shared_items_to' });
+  }
+  const groupIds: string[] = Array.isArray(itemGroupIds) ? itemGroupIds : [];
+  try {
+    if (groupIds.length > 0) {
+      const db = await getDb();
+      const placeholders = groupIds.map(() => '?').join(',');
+      const found = await db.all(
+        `SELECT id FROM templates WHERE family_id = ? AND deleted_at IS NULL AND id IN (${placeholders})`,
+        [req.trip!.family_id, ...groupIds]
+      );
+      if (found.length !== new Set(groupIds).size) return res.status(400).json({ error: 'invalid_item_groups' });
+    }
+    const { destinationId, touchedListIds } = await createDestination({
+      tripId: req.trip!.id,
+      familyId: req.trip!.family_id,
+      name: name.trim(),
+      memberIds,
+      packingListId: typeof packingListId === 'string' && packingListId ? packingListId : undefined,
+      moveFrom: moveFrom === true,
+      sharedItemsTo,
+    });
+    const destination = (await tripDestinationRepository.getById(destinationId))!;
+    if (groupIds.length > 0) {
+      const current = await packingListRepository.getTemplatesForPackingList(destination.packingListId);
+      await packingListRepository.setTemplatesForPackingList(destination.packingListId, Array.from(new Set([...current, ...groupIds])));
+      for (const groupId of groupIds) {
+        await packingListRepository.reconcilePackingListAgainstTemplate(destination.packingListId, groupId);
+      }
+    }
+    const tripLists = (await tripDestinationRepository.listForTrip(req.trip!.id)).map(d => d.packingListId);
+    notify([...touchedListIds, ...tripLists], moveFrom === true ? 'move' : 'destination');
+    return res.status(201).json(destination);
+  } catch (error) {
+    return sendDestinationError(res, error, 'Failed to create destination');
+  }
+});
+
+tripRouter.put('/:tripId/destinations/:destinationId', authMiddleware, tripAccessMiddleware, async (req: Request, res: Response) => {
+  try {
+    const existing = await tripDestinationRepository.getById(req.params.destinationId);
+    if (!existing || existing.tripId !== req.trip!.id) return res.status(404).json({ error: 'Destination not found' });
+    const { name, color, position, memberIds, moveFrom } = req.body || {};
+    if (memberIds !== undefined && (!Array.isArray(memberIds) || memberIds.length === 0)) {
+      return res.status(400).json({ error: 'memberIds must be a non-empty array' });
+    }
+    const touched = await updateDestination({
+      destinationId: existing.id,
+      familyId: req.trip!.family_id,
+      name: typeof name === 'string' && name.trim() ? name.trim() : undefined,
+      color: typeof color === 'string' ? color : undefined,
+      position: typeof position === 'number' ? position : undefined,
+      memberIds,
+      moveFrom: moveFrom === true,
+    });
+    notify(touched, moveFrom === true ? 'move' : 'destination');
+    return res.json(await tripDestinationRepository.getById(existing.id));
+  } catch (error) {
+    return sendDestinationError(res, error, 'Failed to update destination');
+  }
+});
+
+tripRouter.delete('/:tripId/destinations/:destinationId', authMiddleware, tripAccessMiddleware, async (req: Request, res: Response) => {
+  try {
+    const existing = await tripDestinationRepository.getById(req.params.destinationId);
+    if (!existing || existing.tripId !== req.trip!.id) return res.status(404).json({ error: 'Destination not found' });
+    const { moveSharedItemsTo, deleteList } = req.body || {};
+    const siblings = await tripDestinationRepository.listForTrip(existing.tripId);
+    if (siblings.length <= 1) return res.status(409).json({ error: 'last_destination' });
+    const db = await getDb();
+    const { count } = await db.get(`SELECT COUNT(*) AS count FROM packing_list_items WHERE packing_list_id = ?`, [existing.packingListId]);
+    if (count > 0 && !moveSharedItemsTo && !deleteList) {
+      return res.status(409).json({ error: 'destination_has_items', itemCount: count });
+    }
+    let target: Awaited<ReturnType<typeof tripDestinationRepository.getById>> | null = null;
+    if (moveSharedItemsTo) {
+      target = await tripDestinationRepository.getById(moveSharedItemsTo);
+      if (!target || target.tripId !== existing.tripId || target.id === existing.id) {
+        return res.status(400).json({ error: 'invalid_target_destination' });
+      }
+    }
+    const moved = await withTransaction(db, () =>
+      deleteDestinationTx(db, {
+        destination: existing,
+        familyId: req.trip!.family_id,
+        moveSharedItemsToListId: target ? target.packingListId : null,
+        deleteList: deleteList === true,
+      })
+    );
+    const remainingLists = (await tripDestinationRepository.listForTrip(existing.tripId)).map(d => d.packingListId);
+    notify([existing.packingListId, ...remainingLists], moved > 0 ? 'move' : 'destination');
+    return res.status(204).send();
+  } catch (error) {
+    return sendDestinationError(res, error, 'Failed to delete destination');
+  }
+});
+
+tripRouter.post('/:tripId/split', authMiddleware, tripAccessMiddleware, async (req: Request, res: Response) => {
+  const { sourceListId, destinations, sharedItemsDestinationIndex } = req.body || {};
+  if (typeof sourceListId !== 'string' || !sourceListId) return res.status(400).json({ error: 'sourceListId is required' });
+  try {
+    const result = await splitListIntoTrip({
+      tripId: req.trip!.id,
+      tripName: req.trip!.name,
+      familyId: req.trip!.family_id,
+      sourceListId,
+      destinations,
+      sharedItemsDestinationIndex: Number(sharedItemsDestinationIndex ?? 0),
+    });
+    return res.status(201).json(result);
+  } catch (error) {
+    return sendDestinationError(res, error, 'Failed to split list');
   }
 });

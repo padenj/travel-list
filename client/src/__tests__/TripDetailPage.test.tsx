@@ -21,6 +21,14 @@ vi.mock('../api/tripApi', () => ({
 vi.mock('../components/TripParticipantsPanel', () => ({
   TripParticipantsPanel: () => <div>participants panel</div>,
 }));
+vi.mock('../components/TripPackingSection', () => ({
+  default: ({ onChanged }: { onChanged?: () => void }) => (
+    <div>
+      packing section
+      <button type="button" onClick={() => onChanged?.()}>mock packing changed</button>
+    </div>
+  ),
+}));
 vi.mock('../components/BookingCard', () => ({
   BookingCard: ({ elementId, bookings, onBookingsChanged }: { elementId: string; bookings: any[]; onBookingsChanged: () => void }) => (
     <div>
@@ -281,6 +289,17 @@ describe('TripDetailPage', () => {
     api.listBookings.mockResolvedValue([booking, { ...booking, id: 'b2' }]);
     await user.click(within(dialog).getByRole('button', { name: 'mock bookings changed' }));
     expect(await within(dialog).findByText('2 trip bookings')).toBeTruthy();
+  });
+
+  it('refetches participants when the packing section reports a change', async () => {
+    const user = userEvent.setup();
+    api.listParticipants.mockResolvedValue([{ id: 'p1', displayName: 'Taylor' }]);
+    renderPage();
+    await screen.findByText('packing section');
+    const before = api.listParticipants.mock.calls.length;
+    api.listParticipants.mockResolvedValue([{ id: 'p1', displayName: 'Taylor' }, { id: 'p2', displayName: 'Sam' }]);
+    await user.click(screen.getByRole('button', { name: 'mock packing changed' }));
+    await waitFor(() => expect(api.listParticipants.mock.calls.length).toBeGreaterThan(before));
   });
 
   it('edits a leg inline through syncLegs only and keeps the dialog open', async () => {

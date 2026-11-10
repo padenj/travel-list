@@ -1,4 +1,5 @@
 import { getDb } from './db';
+import { withTransaction } from './utils/transaction';
 import sqlite3 from 'sqlite3';
 import crypto from 'crypto';
 // If a packing_list_item.created_at is within this threshold of its provenance created_at
@@ -167,17 +168,12 @@ export class CategoryRepository {
 // Add helper to update category positions in a batch
 export async function updateCategoryPositions(familyId: string, orderedCategoryIds: string[]): Promise<void> {
   const db = await getDb();
-  try {
-    await db.run('BEGIN TRANSACTION');
+  await withTransaction(db, async () => {
     for (let idx = 0; idx < orderedCategoryIds.length; idx++) {
       const id = orderedCategoryIds[idx];
       await db.run(`UPDATE categories SET position = ?, updated_at = ? WHERE id = ? AND familyId = ?`, [idx, new Date().toISOString(), id, familyId]);
     }
-    await db.run('COMMIT');
-  } catch (err) {
-    try { await db.run('ROLLBACK'); } catch (e) {}
-    throw err;
-  }
+  });
 }
 
 async function getItemGroupNamesByItemIds(itemIds: string[]): Promise<Record<string, string[]>> {
@@ -253,8 +249,7 @@ export class ItemRepository {
   // Remove references to an item from all packing lists (and related checks)
   async removeFromAllPackingLists(item_id: string): Promise<void> {
     const db = await getDb();
-    try {
-      await db.run('BEGIN TRANSACTION');
+    await withTransaction(db, async () => {
       // Find packing list rows referencing this item
       const rows: any[] = await db.all(`SELECT id FROM packing_list_items WHERE item_id = ?`, [item_id]);
       const ids = rows.map(r => r.id).filter(Boolean);
@@ -269,11 +264,7 @@ export class ItemRepository {
         // Delete packing list items
         await db.run(`DELETE FROM packing_list_items WHERE id IN (${placeholders})`, ids);
       }
-      await db.run('COMMIT');
-    } catch (err) {
-      try { await db.run('ROLLBACK'); } catch (e) {}
-      throw err;
-    }
+    });
   }
 
   // Assignment methods
@@ -571,8 +562,7 @@ export class ItemRepository {
       }
 
       // Perform replace inside a transaction
-      try {
-        await db.run('BEGIN TRANSACTION');
+      await withTransaction(db, async () => {
         // Delete existing rows
         await db.run(`DELETE FROM packing_list_members WHERE packing_list_id = ?`, [packing_list_id]);
         if (Array.isArray(memberIds) && memberIds.length > 0) {
@@ -580,11 +570,7 @@ export class ItemRepository {
             await db.run(`INSERT OR IGNORE INTO packing_list_members (packing_list_id, member_id) VALUES (?, ?)`, [packing_list_id, m]);
           }
         }
-        await db.run('COMMIT');
-      } catch (err) {
-        try { await db.run('ROLLBACK'); } catch (e) {}
-        throw err;
-      }
+      });
     }
 
     async update(id: string, updates: Partial<PackingList>): Promise<PackingList | undefined> {
@@ -976,8 +962,7 @@ export class ItemRepository {
     // their provenance entries).
     async setTemplatesForPackingList(packing_list_id: string, templateIds: string[], removeItemsForRemovedTemplates: boolean = false): Promise<void> {
       const db = await getDb();
-      try {
-        await db.run('BEGIN TRANSACTION');
+      await withTransaction(db, async () => {
 
         // Determine currently assigned templates
         const existingRows: any[] = await db.all(`SELECT template_id FROM packing_list_templates WHERE packing_list_id = ?`, [packing_list_id]);
@@ -1054,11 +1039,7 @@ export class ItemRepository {
           await db.run(`INSERT OR IGNORE INTO packing_list_templates (packing_list_id, template_id, created_at) VALUES (?, ?, ?)`, [packing_list_id, tid, now]);
         }
 
-        await db.run('COMMIT');
-      } catch (err) {
-        try { await db.run('ROLLBACK'); } catch (e) {}
-        throw err;
-      }
+      });
     }
 
     async getTemplatesForPackingList(packing_list_id: string): Promise<string[]> {
@@ -1222,110 +1203,95 @@ export class ItemRepository {
       const db = await getDb();
 
       // Run the reconcile in a transaction to avoid races between concurrent propagation runs
-      try {
-        await db.run('BEGIN IMMEDIATE');
-      } catch (e) {
-        // If BEGIN fails, continue without transaction but log (best-effort)
-        console.warn('Could not start immediate transaction for reconcile, proceeding without it', { err: e });
-      }
+      await withTransaction(db, async () => {
 
-      // Ensure desired items are present and provenance recorded
-      for (const item of desiredItems) {
-        const existing = await db.get(`SELECT id FROM packing_list_items WHERE packing_list_id = ? AND item_id = ?`, [packing_list_id, item.id]);
-        if (!existing) {
-          const created = await this.addItem(packing_list_id, item.id);
-          try {
-            try {
-              const pliExists = await db.get(`SELECT id, packing_list_id FROM packing_list_items WHERE id = ?`, [created.id]);
-              const tplExists = await db.get(`SELECT id FROM templates WHERE id = ?`, [template_id]);
-              if (!pliExists) console.error('Pre-insert check: packing_list_item missing (reconcile-created)', { packing_list_item_id: created.id });
-              if (!tplExists) console.error('Pre-insert check: template missing (reconcile-created)', { template_id });
-            } catch (chkErr) {
-              console.error('Error during pre-insert checks for provenance (reconcile-created)', { packing_list_item_id: created.id, template_id, err: chkErr });
-            }
-            await db.run(`INSERT OR IGNORE INTO packing_list_item_templates (packing_list_item_id, template_id, created_at) VALUES (?, ?, ?)`, [created.id, template_id, new Date().toISOString()]);
-          } catch (e) {
-            console.error('Failed to record provenance during reconcile (insert)', { packing_list_item_id: created.id, template_id, err: e });
-            // Attempt to recover by ensuring the pli exists and retrying once
-            const recheck = await db.get(`SELECT id FROM packing_list_items WHERE id = ?`, [created.id]);
-            if (!recheck) {
-              try {
-                const recreated = await this.addItem(packing_list_id, item.id);
-                await db.run(`INSERT OR IGNORE INTO packing_list_item_templates (packing_list_item_id, template_id, created_at) VALUES (?, ?, ?)`, [recreated.id, template_id, new Date().toISOString()]);
-              } catch (e2) {
-                console.error('Retry failed recording provenance during reconcile (insert)', { packing_list_item_id: created.id, template_id, err: e2 });
-              }
-            }
-          }
-        } else {
+        // Ensure desired items are present and provenance recorded
+        for (const item of desiredItems) {
+          const existing = await db.get(`SELECT id FROM packing_list_items WHERE packing_list_id = ? AND item_id = ?`, [packing_list_id, item.id]);
+          if (!existing) {
+            const created = await this.addItem(packing_list_id, item.id);
             try {
               try {
-                const pliExists = await db.get(`SELECT id, packing_list_id FROM packing_list_items WHERE id = ?`, [existing.id]);
+                const pliExists = await db.get(`SELECT id, packing_list_id FROM packing_list_items WHERE id = ?`, [created.id]);
                 const tplExists = await db.get(`SELECT id FROM templates WHERE id = ?`, [template_id]);
-                if (!pliExists) console.error('Pre-insert check: packing_list_item missing (reconcile-existing)', { packing_list_item_id: existing.id });
-                if (!tplExists) console.error('Pre-insert check: template missing (reconcile-existing)', { template_id });
+                if (!pliExists) console.error('Pre-insert check: packing_list_item missing (reconcile-created)', { packing_list_item_id: created.id });
+                if (!tplExists) console.error('Pre-insert check: template missing (reconcile-created)', { template_id });
               } catch (chkErr) {
-                console.error('Error during pre-insert checks for provenance (reconcile-existing)', { packing_list_item_id: existing.id, template_id, err: chkErr });
+                console.error('Error during pre-insert checks for provenance (reconcile-created)', { packing_list_item_id: created.id, template_id, err: chkErr });
               }
-              await db.run(`INSERT OR IGNORE INTO packing_list_item_templates (packing_list_item_id, template_id, created_at) VALUES (?, ?, ?)`, [existing.id, template_id, new Date().toISOString()]);
+              await db.run(`INSERT OR IGNORE INTO packing_list_item_templates (packing_list_item_id, template_id, created_at) VALUES (?, ?, ?)`, [created.id, template_id, new Date().toISOString()]);
             } catch (e) {
-              console.error('Failed to ensure provenance during reconcile (insert)', { packing_list_item_id: existing.id, template_id, err: e });
-            // If the existing pli was removed concurrently, recreate and retry
-            const recheck = await db.get(`SELECT id FROM packing_list_items WHERE id = ?`, [existing.id]);
-            if (!recheck) {
+              console.error('Failed to record provenance during reconcile (insert)', { packing_list_item_id: created.id, template_id, err: e });
+              // Attempt to recover by ensuring the pli exists and retrying once
+              const recheck = await db.get(`SELECT id FROM packing_list_items WHERE id = ?`, [created.id]);
+              if (!recheck) {
+                try {
+                  const recreated = await this.addItem(packing_list_id, item.id);
+                  await db.run(`INSERT OR IGNORE INTO packing_list_item_templates (packing_list_item_id, template_id, created_at) VALUES (?, ?, ?)`, [recreated.id, template_id, new Date().toISOString()]);
+                } catch (e2) {
+                  console.error('Retry failed recording provenance during reconcile (insert)', { packing_list_item_id: created.id, template_id, err: e2 });
+                }
+              }
+            }
+          } else {
               try {
-                const recreated = await this.addItem(packing_list_id, item.id);
-                await db.run(`INSERT OR IGNORE INTO packing_list_item_templates (packing_list_item_id, template_id, created_at) VALUES (?, ?, ?)`, [recreated.id, template_id, new Date().toISOString()]);
-              } catch (e2) {
-                console.error('Retry failed ensuring provenance during reconcile (insert)', { packing_list_item_id: existing.id, template_id, err: e2 });
+                try {
+                  const pliExists = await db.get(`SELECT id, packing_list_id FROM packing_list_items WHERE id = ?`, [existing.id]);
+                  const tplExists = await db.get(`SELECT id FROM templates WHERE id = ?`, [template_id]);
+                  if (!pliExists) console.error('Pre-insert check: packing_list_item missing (reconcile-existing)', { packing_list_item_id: existing.id });
+                  if (!tplExists) console.error('Pre-insert check: template missing (reconcile-existing)', { template_id });
+                } catch (chkErr) {
+                  console.error('Error during pre-insert checks for provenance (reconcile-existing)', { packing_list_item_id: existing.id, template_id, err: chkErr });
+                }
+                await db.run(`INSERT OR IGNORE INTO packing_list_item_templates (packing_list_item_id, template_id, created_at) VALUES (?, ?, ?)`, [existing.id, template_id, new Date().toISOString()]);
+              } catch (e) {
+                console.error('Failed to ensure provenance during reconcile (insert)', { packing_list_item_id: existing.id, template_id, err: e });
+              // If the existing pli was removed concurrently, recreate and retry
+              const recheck = await db.get(`SELECT id FROM packing_list_items WHERE id = ?`, [existing.id]);
+              if (!recheck) {
+                try {
+                  const recreated = await this.addItem(packing_list_id, item.id);
+                  await db.run(`INSERT OR IGNORE INTO packing_list_item_templates (packing_list_item_id, template_id, created_at) VALUES (?, ?, ?)`, [recreated.id, template_id, new Date().toISOString()]);
+                } catch (e2) {
+                  console.error('Retry failed ensuring provenance during reconcile (insert)', { packing_list_item_id: existing.id, template_id, err: e2 });
+                }
               }
             }
           }
         }
-      }
 
-      // Remove packing-list-items that are attributed to this template but not present in desiredIds
-      const attributedRows: any[] = await db.all(`SELECT plt.packing_list_item_id, pli.item_id FROM packing_list_item_templates plt JOIN packing_list_items pli ON plt.packing_list_item_id = pli.id WHERE plt.template_id = ? AND pli.packing_list_id = ?`, [template_id, packing_list_id]);
-      for (const r of attributedRows) {
-        if (!desiredIds.has(r.item_id)) {
-          // Remove the provenance entry for this template
-          try {
-            await db.run(`DELETE FROM packing_list_item_templates WHERE packing_list_item_id = ? AND template_id = ?`, [r.packing_list_item_id, template_id]);
-          } catch (e) {
-            console.error('Error deleting provenance row during reconcile', { packing_list_item_id: r.packing_list_item_id, template_id, err: e });
-            throw e;
-          }
-
-          // Check if the packing_list_item still has any provenance from other templates
-          let remaining: any;
-          try {
-            remaining = await db.get(`SELECT 1 FROM packing_list_item_templates WHERE packing_list_item_id = ? LIMIT 1`, [r.packing_list_item_id]);
-          } catch (e) {
-            console.error('Error checking remaining provenance during reconcile', { packing_list_item_id: r.packing_list_item_id, err: e });
-            throw e;
-          }
-          if (!remaining) {
-            // No other templates reference it; safe to remove the packing-list-item
+        // Remove packing-list-items that are attributed to this template but not present in desiredIds
+        const attributedRows: any[] = await db.all(`SELECT plt.packing_list_item_id, pli.item_id FROM packing_list_item_templates plt JOIN packing_list_items pli ON plt.packing_list_item_id = pli.id WHERE plt.template_id = ? AND pli.packing_list_id = ?`, [template_id, packing_list_id]);
+        for (const r of attributedRows) {
+          if (!desiredIds.has(r.item_id)) {
+            // Remove the provenance entry for this template
             try {
-              await this.removeItemByPliId(r.packing_list_item_id, true); // broadcast: true for template reconciliation removals
+              await db.run(`DELETE FROM packing_list_item_templates WHERE packing_list_item_id = ? AND template_id = ?`, [r.packing_list_item_id, template_id]);
             } catch (e) {
-              console.error('Error removing packing list item by pli id during reconcile', { packing_list_item_id: r.packing_list_item_id, err: e });
-              // Don't abort the whole reconciliation on a delete error; log and continue
+              console.error('Error deleting provenance row during reconcile', { packing_list_item_id: r.packing_list_item_id, template_id, err: e });
+              throw e;
+            }
+
+            // Check if the packing_list_item still has any provenance from other templates
+            let remaining: any;
+            try {
+              remaining = await db.get(`SELECT 1 FROM packing_list_item_templates WHERE packing_list_item_id = ? LIMIT 1`, [r.packing_list_item_id]);
+            } catch (e) {
+              console.error('Error checking remaining provenance during reconcile', { packing_list_item_id: r.packing_list_item_id, err: e });
+              throw e;
+            }
+            if (!remaining) {
+              // No other templates reference it; safe to remove the packing-list-item
+              try {
+                await this.removeItemByPliId(r.packing_list_item_id, true); // broadcast: true for template reconciliation removals
+              } catch (e) {
+                console.error('Error removing packing list item by pli id during reconcile', { packing_list_item_id: r.packing_list_item_id, err: e });
+                // Don't abort the whole reconciliation on a delete error; log and continue
+              }
             }
           }
         }
-      }
-
-      try {
-        await db.run('COMMIT');
-      } catch (e) {
-        try {
-          await db.run('ROLLBACK');
-        } catch (rbErr) {
-          console.error('Error rolling back reconcile transaction', { err: rbErr });
-        }
-        throw e;
-      }
+      });
     }
   }
 

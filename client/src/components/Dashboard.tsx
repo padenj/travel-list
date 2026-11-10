@@ -1,55 +1,81 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Container, Group, Stack, Text, Button } from '@mantine/core';
-import { useNavigate, useLocation } from 'react-router-dom';
 import { showNotification } from '@mantine/notifications';
 import ActivePackingListSelector from './ActivePackingListSelector';
-import { IconPlus } from '@tabler/icons-react';
-import { PackingListsSideBySide } from './PackingListsSideBySide';
-import ItemEditDrawer from './ItemEditDrawer';
 import AddItemsDrawer from './AddItemsDrawer';
 import PackingListAuditPanel from './PackingListAuditPanel';
 import PackingListItemAuditModal from './PackingListItemAuditModal';
+import { useOnline } from '../utils/useOnline';
+import PersonView from './PersonView';
+import DestinationColumns from './DestinationColumns';
+import ShowPackedToggle, { useShowPacked } from './ShowPackedToggle';
+import DashboardViewToggle, { useDashboardViewMode } from './DashboardViewToggle';
+import NotesDestinationPicker from './NotesDestinationPicker';
+import ManageDestinationsDrawer from './ManageDestinationsDrawer';
 import { useActivePackingList } from '../contexts/ActivePackingListContext';
 import { useListEditDrawer } from '../contexts/ListEditDrawerContext';
 import { useImpersonation } from '../contexts/ImpersonationContext';
-import { getCurrentUserProfile, getItems, getPackingList, togglePackingListItemCheck, addItemToPackingList, setPackingListItemNotNeeded, setPackingListItemNotNeededForMember, updatePackingList } from '../api';
+import {
+  getCurrentUserProfile, getFamily, getItems, getPackingList, togglePackingListItemCheck, addItemToPackingList, getCategories,
+  setPackingListItemNotNeeded, setPackingListItemNotNeededForMember, updatePackingList, movePackingListItem,
+} from '../api';
+import {
+  addDrawerExclusions, applyCheck, buildDestinationGroup, CategoryInfo, DestinationGroup, isNotNeeded, toggleNotNeededIn,
+} from '../utils/dashboardGroups';
+import type { ListTripContext, TripDestination } from '../types/trip';
+
+type AddTarget = { listId: string; members?: string[]; whole?: boolean };
 
 export default function Dashboard(): React.ReactElement {
-  const { activeListId, requestOpenEdit, availableLists } = useActivePackingList();
+  const { activeListId, requestOpenEdit, availableLists, refreshLists } = useActivePackingList();
   const { openForList } = useListEditDrawer();
-  const [userLists, setUserLists] = useState<any[]>([]);
-  const [wholeFamilyItems, setWholeFamilyItems] = useState<any[]>([]);
-  // local UI state: items marked as 'not needed' (not persisted)
-  const [notNeededByUser, setNotNeededByUser] = useState<Record<string, string[]>>({});
-  const [notNeededWhole, setNotNeededWhole] = useState<string[]>([]);
+  const { impersonatingFamilyId } = useImpersonation();
+  const online = useOnline();
+  const [viewMode, setViewMode] = useDashboardViewMode();
+  const [showPacked, setShowPacked] = useShowPacked();
+  const [groups, setGroups] = useState<DestinationGroup[]>([]);
+  const [tripInfo, setTripInfo] = useState<{ id: string; name: string } | null>(null);
   const [listSelectionCount, setListSelectionCount] = useState(0);
   const [familyId, setFamilyId] = useState<string | null>(null);
-  // familyMembers not needed in dashboard now that one-off drawer was removed
-  const [showItemDrawer, setShowItemDrawer] = useState(false);
-  const [itemDrawerDefaultMember, setItemDrawerDefaultMember] = useState<string | null>(null);
-  const [showAddItemsDrawer, setShowAddItemsDrawer] = useState(false);
-  const [addItemsDrawerInitialMembers, setAddItemsDrawerInitialMembers] = useState<string[] | undefined>(undefined);
-  const [addItemsDrawerInitialWhole, setAddItemsDrawerInitialWhole] = useState<boolean | undefined>(undefined);
-  const [familyMembersState, setFamilyMembersState] = useState<any[]>([]);
+  const [categories, setCategories] = useState<CategoryInfo[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  const [showEditListDrawer, setShowEditListDrawer] = useState(false);
-  const [editListNameState, setEditListNameState] = useState<string>('');
-  const [excludedItemIds, setExcludedItemIds] = useState<string[]>([]);
-  // Track recent local check updates to avoid reacting to our own SSEs
-  const recentLocalChecksRef = React.useRef<Map<string, number>>(new Map());
+  const [addTarget, setAddTarget] = useState<AddTarget | null>(null);
+  const [destinationsOpen, setDestinationsOpen] = useState(false);
   const [auditRefreshKey, setAuditRefreshKey] = useState(0);
+  const [itemAudit, setItemAudit] = useState<{ listId: string; pliId: string; name: string } | null>(null);
   const [itemAuditOpened, setItemAuditOpened] = useState(false);
-  const [itemAuditPliId, setItemAuditPliId] = useState<string | null>(null);
-  const [itemAuditName, setItemAuditName] = useState<string>('');
+  // Which destination the notes editor and audit panel follow; reported by PersonView.
+  const [notesSelection, setNotesSelection] = useState<{ listId: string } | null>(null);
   const [notesExpanded, setNotesExpanded] = useState(false);
   const [notesDraft, setNotesDraft] = useState('');
   const [loadedNotes, setLoadedNotes] = useState('');
-  const activeListIdRef = React.useRef<string | null>(activeListId);
-  const notesSaveTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-  const notesGenerationByListRef = React.useRef<Map<string, number>>(new Map());
-  const notesLatestDispatchedSequenceByListRef = React.useRef<Map<string, number>>(new Map());
-  const notesLoadRequestTokenRef = React.useRef(0);
-  const notesEditingRef = React.useRef(false);
+  // Keep the chosen destination while it is still part of the loaded trip; otherwise follow the active list.
+  const notesListId = notesSelection && groups.some(g => g.listId === notesSelection.listId)
+    ? notesSelection.listId
+    : activeListId;
+
+  // Track recent local check updates to avoid reacting to our own SSEs
+  const recentLocalChecksRef = useRef<Map<string, number>>(new Map());
+  const activeListIdRef = useRef<string | null>(activeListId);
+  const notesListIdRef = useRef<string | null>(notesListId);
+  const groupsRef = useRef<DestinationGroup[]>([]);
+  const loadTokenRef = useRef(0);
+  const notesSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const notesGenerationByListRef = useRef<Map<string, number>>(new Map());
+  const notesLatestDispatchedSequenceByListRef = useRef<Map<string, number>>(new Map());
+  const notesEditingRef = useRef(false);
+
+  useEffect(() => {
+    activeListIdRef.current = activeListId;
+  }, [activeListId]);
+
+  useEffect(() => {
+    notesListIdRef.current = notesListId;
+  }, [notesListId]);
+
+  useEffect(() => {
+    groupsRef.current = groups;
+  }, [groups]);
 
   const getNotesGeneration = useCallback((listId: string) => {
     return notesGenerationByListRef.current.get(listId) ?? 0;
@@ -72,7 +98,8 @@ export default function Dashboard(): React.ReactElement {
         showNotification({ title: 'Save failed', message: 'Could not save trip notes', color: 'yellow' });
         return;
       }
-      if (activeListIdRef.current !== listId) return;
+      setGroups(prev => prev.map(g => (g.listId === listId ? { ...g, notes } : g)));
+      if (notesListIdRef.current !== listId) return;
       if (generation !== getNotesGeneration(listId)) return;
       const latestDispatchedSequenceForList = notesLatestDispatchedSequenceByListRef.current.get(listId) ?? 0;
       if (requestSequence !== latestDispatchedSequenceForList) return;
@@ -84,31 +111,29 @@ export default function Dashboard(): React.ReactElement {
   }, [getNotesGeneration]);
 
   const queueNotesSave = useCallback((nextNotes: string) => {
-    if (!activeListId) return;
-    const generation = getNotesGeneration(activeListId);
+    if (!notesListId) return;
+    const generation = getNotesGeneration(notesListId);
     clearNotesSaveTimer();
     notesSaveTimerRef.current = setTimeout(() => {
       notesSaveTimerRef.current = null;
-      void saveNotes(activeListId, nextNotes, generation);
+      void saveNotes(notesListId, nextNotes, generation);
     }, 500);
-  }, [activeListId, clearNotesSaveTimer, getNotesGeneration, saveNotes]);
-
-  useEffect(() => {
-    activeListIdRef.current = activeListId;
-  }, [activeListId]);
+  }, [notesListId, clearNotesSaveTimer, getNotesGeneration, saveNotes]);
 
   useEffect(() => {
     clearNotesSaveTimer();
     notesEditingRef.current = false;
-    if (activeListId) {
-      const nextGeneration = getNotesGeneration(activeListId) + 1;
-      notesGenerationByListRef.current.set(activeListId, nextGeneration);
-      notesLatestDispatchedSequenceByListRef.current.set(activeListId, 0);
+    if (notesListId) {
+      const nextGeneration = getNotesGeneration(notesListId) + 1;
+      notesGenerationByListRef.current.set(notesListId, nextGeneration);
+      notesLatestDispatchedSequenceByListRef.current.set(notesListId, 0);
     }
     setNotesExpanded(false);
-    setNotesDraft('');
-    setLoadedNotes('');
-  }, [activeListId, clearNotesSaveTimer, getNotesGeneration]);
+    // Switching destinations within a loaded trip shows that destination's notes right away.
+    const known = groupsRef.current.find(g => g.listId === notesListId);
+    setNotesDraft(known?.notes ?? '');
+    setLoadedNotes(known?.notes ?? '');
+  }, [notesListId, clearNotesSaveTimer, getNotesGeneration]);
 
   useEffect(() => {
     return () => {
@@ -123,31 +148,23 @@ export default function Dashboard(): React.ReactElement {
     }
   }, [activeListId]);
 
-  // Listen for server-sent events forwarded by service worker and refresh when current list changes
+  // Refresh when any list of the active trip changes on the server
   useEffect(() => {
     const handler = (ev: any) => {
       try {
         const event = ev.detail || ev;
         if (!event || event.type !== 'packing_list_changed') return;
         if (!activeListId) return;
-        // If this is a check event and we recently issued a local change
-        // for the same packing-list-item, ignore the event to avoid a
-        // spurious refresh that reverts the optimistic UI. Give it a
-        // short grace period (5s) to allow the server state to settle.
-        try {
-          const data = (event && event.data) || {};
-          if (data.change === 'check' && data && data.itemId) {
-            const when = recentLocalChecksRef.current.get(data.itemId);
-            if (when && (Date.now() - when) < 5000) {
-              // skip list refresh for this locally-initiated check, but still
-              // refresh audit views so activity shows up quickly
-              setAuditRefreshKey(prev => prev + 1);
-              return;
-            }
+        const data = event.data || {};
+        if (data.change === 'check' && data.itemId) {
+          const when = recentLocalChecksRef.current.get(data.itemId);
+          if (when && Date.now() - when < 5000) {
+            setAuditRefreshKey(prev => prev + 1);
+            return;
           }
-        } catch (e) {}
-        if (event.listId === activeListId) {
-          console.log('[Dashboard] Received server event for active list, refreshing');
+        }
+        const watched = event.listId === activeListId || groupsRef.current.some(g => g.listId === event.listId);
+        if (watched) {
           setListSelectionCount(prev => prev + 1);
           setAuditRefreshKey(prev => prev + 1);
         }
@@ -157,223 +174,109 @@ export default function Dashboard(): React.ReactElement {
     return () => window.removeEventListener('server-event', handler as EventListener);
   }, [activeListId]);
 
-  const handleItemNameClick = useCallback((packingListItemId: string, itemName: string) => {
-    setItemAuditPliId(packingListItemId);
-    setItemAuditName(itemName || 'Item history');
-    setItemAuditOpened(true);
-  }, []);
-
-  const { impersonatingFamilyId } = useImpersonation();
-
   useEffect(() => {
-    const notesLoadRequestToken = ++notesLoadRequestTokenRef.current;
-    const notesLoadListId = activeListId;
-    
+    const token = ++loadTokenRef.current;
+    const requestedListId = activeListId;
+    const isCurrent = () => token === loadTokenRef.current && activeListIdRef.current === requestedListId;
+    const clear = () => {
+      groupsRef.current = [];
+      setGroups([]);
+      setTripInfo(null);
+      setNotesDraft('');
+      setLoadedNotes('');
+    };
+
     (async () => {
       try {
         // prefer impersonation when present
         let fid = impersonatingFamilyId || null;
-        let membersFromProfile: any[] = [];
+        let familyMembers: any[] = [];
         let profileUserId: string | null = null;
         if (!fid) {
           const profile = await getCurrentUserProfile();
           fid = profile.response.ok && profile.data.family ? profile.data.family.id : null;
-          membersFromProfile = profile.response.ok && profile.data.family ? profile.data.family.members || [] : [];
+          familyMembers = profile.response.ok && profile.data.family ? profile.data.family.members || [] : [];
           profileUserId = profile.response.ok && profile.data.user ? profile.data.user.id : null;
         } else {
-          // If impersonating, fetch the family so we have its members for user columns
           try {
-            const famRes = await import('../api').then(m => m.getFamily(impersonatingFamilyId!));
-            if (famRes.response.ok && famRes.data.family) {
-              membersFromProfile = famRes.data.family.members || [];
-            }
+            const famRes = await getFamily(fid);
+            if (famRes.response.ok && famRes.data.family) familyMembers = famRes.data.family.members || [];
           } catch (e) {
-            membersFromProfile = [];
+            familyMembers = [];
           }
         }
-        if (!fid) {
-          setUserLists([]);
-          setWholeFamilyItems([]);
-          setNotesDraft('');
-          setLoadedNotes('');
+        if (!isCurrent()) return;
+        if (!fid || !requestedListId) {
+          clear();
           return;
         }
-        // If no active list is selected, show a placeholder message rather than auto-loading
-        if (!activeListId) {
-          setUserLists([]);
-          setWholeFamilyItems([]);
-          setNotesDraft('');
-          setLoadedNotes('');
-          return;
-        }
-        
-        // fetch master items for name lookup
-  const itemsRes = await getItems(fid);
-  const items = itemsRes.response.ok ? itemsRes.data.items || [] : [];
-        const listRes = await getPackingList(activeListId);
+
+        const itemsRes = await getItems(fid);
+        const masterItems = itemsRes.response.ok ? itemsRes.data.items || [] : [];
+        const listRes = await getPackingList(requestedListId);
+        if (!isCurrent()) return;
         if (!listRes.response.ok) {
-          setUserLists([]);
-          setWholeFamilyItems([]);
+          clear();
           return;
         }
-  const listItems = listRes.data.items || [];
-        const checks = listRes.data.checks || [];
-  const fetchedNotes = typeof (listRes.data?.list?.notes ?? listRes.data?.notes) === 'string'
-    ? (listRes.data.list?.notes ?? listRes.data.notes)
-    : '';
-  if (notesLoadRequestToken === notesLoadRequestTokenRef.current && notesLoadListId && activeListIdRef.current === notesLoadListId) {
-    setLoadedNotes(fetchedNotes);
-    if (!notesEditingRef.current) {
-      setNotesDraft(fetchedNotes);
-    }
-  }
 
-        // Extract per-list member selection (if present) and apply it to effectiveMembers
-        const listMemberIds: string[] = Array.isArray(listRes.data.list?.member_ids) ? listRes.data.list.member_ids : (Array.isArray(listRes.data.member_ids) ? listRes.data.member_ids : []);
+        // A destination list brings its whole trip: load the sibling lists too.
+        const trip: ListTripContext | null = listRes.data.trip_destination || null;
+        const destinations: TripDestination[] = trip ? trip.destinations : [];
+        const listDataById = new Map<string, any>([[requestedListId, listRes.data]]);
+        const siblings = destinations.filter(d => d.packingListId !== requestedListId);
+        const siblingResults = await Promise.all(siblings.map(d => getPackingList(d.packingListId).catch(() => null)));
+        if (!isCurrent()) return;
+        siblings.forEach((d, i) => {
+          const res = siblingResults[i];
+          if (res && res.response.ok) listDataById.set(d.packingListId, res.data);
+        });
 
-        // If we couldn't obtain members via the profile/family fetch (possible race or missing data
-        // when impersonating), derive a member list from the packing-list rows themselves so
-        // the member columns can still render. This makes the dashboard resilient to cases
-        // where the global impersonation state isn't fully reflected in the profile call.
-        let effectiveMembers = membersFromProfile || [];
-        if ((!effectiveMembers || effectiveMembers.length === 0) && Array.isArray(listItems) && listItems.length > 0) {
-          const found = new Map<string, any>();
-          for (const pli of listItems) {
-            for (const m of (pli.members || [])) {
-              if (m && m.id) found.set(m.id, m);
-            }
-          }
-          effectiveMembers = Array.from(found.values());
+        const build = (listId: string, destination: TripDestination | null) => buildDestinationGroup({
+          listId,
+          listData: listDataById.get(listId),
+          masterItems,
+          familyMembers,
+          currentUserId: profileUserId,
+          destination,
+        });
+        const nextGroups = trip
+          ? destinations.filter(d => listDataById.has(d.packingListId)).map(d => build(d.packingListId, d))
+          : [build(requestedListId, null)];
+
+        groupsRef.current = nextGroups;
+        setGroups(nextGroups);
+        setTripInfo(trip ? { id: trip.tripId, name: trip.tripName } : null);
+        setFamilyId(fid);
+        setCurrentUserId(profileUserId);
+        const notesGroup = nextGroups.find(g => g.listId === notesListIdRef.current);
+        if (notesGroup) {
+          setLoadedNotes(notesGroup.notes);
+          if (!notesEditingRef.current) setNotesDraft(notesGroup.notes);
         }
-
-        // If the list has an explicit per-list member selection, filter effectiveMembers to only those selected.
-        if (Array.isArray(listMemberIds) && listMemberIds.length > 0) {
-          const selectedSet = new Set(listMemberIds);
-          effectiveMembers = (effectiveMembers || []).filter(m => selectedSet.has(m.id));
-        }
-
-        // Debug: log member data and list items when impersonating to trace missing member assignments
-        if (impersonatingFamilyId) {
-          try {
-            console.debug('[Dashboard][Impersonation] membersFromProfile:', membersFromProfile);
-            console.debug('[Dashboard][Impersonation] fetched listItems:', listItems);
-            console.debug('[Dashboard][Impersonation] checks:', checks);
-          } catch (e) { /* ignore */ }
-        }
-
-  const userListsData: any[] = [];
-        for (const member of effectiveMembers) {
-          const memberItems: any[] = [];
-          for (const pli of listItems) {
-            // if master item and assigned to this member (and NOT assigned to whole family)
-            const assignedIds = (pli.members || []).map((m: any) => m.id);
-            if (assignedIds.includes(member.id) && !pli.whole_family) {
-              const master = pli.item_id ? items.find((it: any) => it.id === pli.item_id) : null;
-              // Prefer the master_name returned alongside the packing-list row (covers one-off masters
-              // that are not present in the master items list), then fall back to the master lookup.
-              const name = pli.display_name || pli.master_name || (master ? master.name : '') || 'Item';
-              const checkRow = checks.find((c: any) => c.packing_list_item_id === pli.id && c.member_id === member.id);
-              
-              // Prefer server-provided check state; no local offline backup used
-              const checked = !!checkRow?.checked;
-              
-              // use the packing-list-item id (pli.id) for toggling checks so the API can locate the row
-              memberItems.push({
-                id: pli.id,
-                name,
-                checked,
-                masterId: pli.item_id || null,
-                added_during_packing: !!pli.added_during_packing,
-                display_name: pli.display_name || null,
-                masterIsOneOff: !!pli.master_is_one_off,
-                // include packing-list-specific metadata so parent views can seed edit drawers
-                category: pli.category || null,
-                members: pli.members || [],
-                whole_family: !!pli.whole_family,
-              });
-            }
-          }
-          userListsData.push({ userId: member.id, userName: member.name || member.username, items: memberItems });
-        }
-
-  // members info not stored locally here; add-drawer will load members when opened
-
-        const wholeItems: any[] = [];
-        for (const pli of listItems) {
-          if (pli.whole_family) {
-            const master = pli.item_id ? items.find((it: any) => it.id === pli.item_id) : null;
-            // Use the packing-list row's master_name when available (handles one-off masters),
-            // otherwise fall back to the master lookup or a generic label.
-            const name = pli.display_name || pli.master_name || (master ? master.name : '') || 'Item';
-            // For whole-family items, checks may be stored per-user (member_id) or
-            // as a null-member_id to indicate a family-level check. Prefer the
-            // NULL-member row (canonical whole-family state) when present; if not,
-            // fall back to the current user's per-member row.
-            const nullCheck = checks.find((c: any) => c.packing_list_item_id === pli.id && (c.member_id === null || typeof c.member_id === 'undefined'));
-            const personalCheck = checks.find((c: any) => c.packing_list_item_id === pli.id && c.member_id === currentUserId);
-            const checkRow = nullCheck ?? personalCheck;
-
-            // Prefer server-provided check state; no local offline backup used
-            const checked = !!checkRow?.checked;
-            
-            // use packing-list-item id for whole-family items as well
-            wholeItems.push({
-              id: pli.id,
-              name,
-              checked,
-              masterId: pli.item_id || null,
-              added_during_packing: !!pli.added_during_packing,
-              display_name: pli.display_name || null,
-              masterIsOneOff: !!pli.master_is_one_off,
-              // include metadata for edit seeding
-              category: pli.category || null,
-              members: pli.members || [],
-              whole_family: !!pli.whole_family,
-            });
-          }
-        }
-
-    // Initialize not-needed state from server-side persisted rows so it survives reloads
-    const initialNotNeededWhole = (listItems || []).filter((pli: any) => !!pli.not_needed).map((pli: any) => pli.id);
-    setNotNeededWhole(initialNotNeededWhole);
-    // Use server-provided per-member not-needed rows if available
-    const notNeededRows: any[] = listRes.data.not_needed_rows || [];
-    const initialNotNeededByUser: Record<string, string[]> = {};
-    // Only treat rows with not_needed truthy as currently not-needed. Persisted rows
-    // with not_needed = 0 should not be considered not-needed in the UI.
-    for (const r of notNeededRows) {
-      if (!r || !r.packing_list_item_id) continue;
-      // member_id may be null for whole-family not-needed rows. Only include
-      // per-member rows where not_needed is truthy (1)
-      if (r.member_id && !!r.not_needed) {
-        if (!initialNotNeededByUser[r.member_id]) initialNotNeededByUser[r.member_id] = [];
-        initialNotNeededByUser[r.member_id].push(r.packing_list_item_id);
-      }
-    }
-    setNotNeededByUser(initialNotNeededByUser);
-    setUserLists(userListsData);
-    setWholeFamilyItems(wholeItems);
-    setFamilyId(fid);
-    setFamilyMembersState(effectiveMembers || []);
-    setCurrentUserId(profileUserId);
-    // compute excluded master ids for AddItemsDrawer so it hides items already present
-    const excludedMasterIds: string[] = [];
-    for (const pli of listItems || []) {
-      const mid = pli.item_id || pli.master_id || pli.itemId || pli.masterId;
-      if (mid) excludedMasterIds.push(String(mid));
-    }
-    setExcludedItemIds(excludedMasterIds);
       } catch (err) {
         console.error('Failed to load dashboard packing lists', err);
-        setUserLists([]);
-        setWholeFamilyItems([]);
-        setNotesDraft('');
-        setLoadedNotes('');
-      } finally {
-        // no loading state maintained on dashboard
+        if (isCurrent()) clear();
       }
     })();
   }, [activeListId, listSelectionCount]);
+
+  useEffect(() => {
+    if (!familyId) {
+      setCategories([]);
+      return;
+    }
+    let current = true;
+    (async () => {
+      try {
+        const res = await getCategories(familyId);
+        if (current && res?.response?.ok) setCategories(res.data?.categories || []);
+      } catch (err) {
+        // Without categories the person view just shows a flat list.
+      }
+    })();
+    return () => { current = false; };
+  }, [familyId]);
 
   const handleNotesChange = useCallback((event: React.ChangeEvent<HTMLTextAreaElement>) => {
     const nextNotes = event.target.value;
@@ -384,244 +287,145 @@ export default function Dashboard(): React.ReactElement {
 
   const handleNotesBlur = useCallback(() => {
     notesEditingRef.current = false;
-    if (!activeListId) return;
-    const generation = getNotesGeneration(activeListId);
+    if (!notesListId) return;
+    const generation = getNotesGeneration(notesListId);
     if (notesSaveTimerRef.current) {
       clearNotesSaveTimer();
-      void saveNotes(activeListId, notesDraft, generation);
+      void saveNotes(notesListId, notesDraft, generation);
       return;
     }
     if (notesDraft !== loadedNotes) {
-      void saveNotes(activeListId, notesDraft, generation);
+      void saveNotes(notesListId, notesDraft, generation);
     }
-  }, [activeListId, clearNotesSaveTimer, getNotesGeneration, loadedNotes, notesDraft, saveNotes]);
+  }, [notesListId, clearNotesSaveTimer, getNotesGeneration, loadedNotes, notesDraft, saveNotes]);
 
-  const handleCheckItem = useCallback(async (userId: string | null, itemId: string, checked: boolean) => {
-    if (!activeListId) return;
+  const selectNotesGroup = useCallback((listId: string) => {
+    setNotesSelection({ listId });
+  }, []);
 
-    // optimistic update immediately
-    if (userId) {
-      setUserLists(lists => {
-        const idx = lists.findIndex(l => l.userId === userId);
-        if (idx === -1) return lists;
-        const copy = lists.slice();
-        const list = { ...copy[idx] };
-        list.items = list.items.map((it: any) => it.id === itemId ? { ...it, checked } : it);
-        copy[idx] = list;
-        return copy;
-      });
-    } else {
-      // Update whole-family column item only
-      setWholeFamilyItems(items => {
-        const i = items.findIndex(it => it.id === itemId);
-        if (i === -1) return items;
-        const copy = items.slice();
-        copy[i] = { ...copy[i], checked };
-        return copy;
-      });
-      // Reflect change in each user's column, but update each list in place for minimal re-renders
-      setUserLists(lists => {
-        const copy = lists.map(list => {
-          // Only update rows which contain this item
-          const has = list.items.some((it: any) => it.id === itemId);
-          if (!has) return list;
-          return { ...list, items: list.items.map((it: any) => it.id === itemId ? { ...it, checked } : it) };
-        });
-        return copy;
-      });
-    }
+  const handleItemNameClick = useCallback((listId: string, pliId: string, name: string) => {
+    setItemAudit({ listId, pliId, name: name || 'Item history' });
+    setItemAuditOpened(true);
+  }, []);
 
-    // Try to send to server (record recent local check so SSEs don't immediately
-    // overwrite our optimistic update if they arrive quickly).
+  const handleCheckItem = useCallback(async (listId: string, userId: string | null, itemId: string, checked: boolean) => {
+    setGroups(prev => applyCheck(prev, listId, userId, itemId, checked));
+    recentLocalChecksRef.current.set(itemId, Date.now());
+    setTimeout(() => { recentLocalChecksRef.current.delete(itemId); }, 6000);
     try {
-      try {
-        recentLocalChecksRef.current.set(itemId, Date.now());
-        // Clean up old entries periodically
-        setTimeout(() => { recentLocalChecksRef.current.delete(itemId); }, 6000);
-      } catch (e) {}
-      const result = await togglePackingListItemCheck(activeListId, itemId, userId, checked);
-      if (result.response.ok) {
-        // Server accepted it
-        console.log('[Dashboard] Check synced to server successfully');
-      } else {
-        console.warn('[Dashboard] Server rejected check');
+      const result = await togglePackingListItemCheck(listId, itemId, userId, checked);
+      if (!result.response.ok) {
         showNotification({ title: 'Sync failed', message: 'Server rejected check update', color: 'yellow' });
       }
     } catch (err) {
-      // Network error - notify user (no local backup persists)
-      console.warn('[Dashboard] Failed to sync check (offline?)', err);
       showNotification({ title: 'Offline', message: 'Failed to sync check - please try again when online', color: 'yellow' });
     }
-  }, [activeListId]);
+  }, []);
 
-  const toggleNotNeeded = useCallback(async (userId: string | null, itemId: string) => {
-    if (!activeListId) {
-      showNotification({ title: 'Error', message: 'No active list selected', color: 'red' });
-      return;
-    }
-
-    // compute current state across whole and per-user
-    const currentlyWhole = notNeededWhole.includes(itemId);
-    const currentlyUser = userId ? ((notNeededByUser[userId] || []).includes(itemId)) : false;
-    // new value of not_needed is the inverse of the current value for the target (user or whole)
-    const newValue = userId ? !currentlyUser : !currentlyWhole;
-
-    // capture previous states for revert
-    const prevWhole = notNeededWhole;
-    const prevUserList = notNeededByUser;
-
-    // optimistic updates: only update the relevant state (per-user or whole)
-    if (userId) {
-      setNotNeededByUser(prev => {
-        const copy: Record<string, string[]> = { ...prev };
-        const setForUser = new Set(copy[userId] || []);
-        if (setForUser.has(itemId)) setForUser.delete(itemId);
-        else setForUser.add(itemId);
-        copy[userId] = Array.from(setForUser);
-        return copy;
-      });
-    } else {
-      setNotNeededWhole(prev => prev.includes(itemId) ? prev.filter(id => id !== itemId) : [...prev, itemId]);
-    }
-
+  const toggleNotNeeded = useCallback(async (listId: string, userId: string | null, itemId: string) => {
+    const group = groupsRef.current.find(g => g.listId === listId);
+    if (!group) return;
+    const newValue = !isNotNeeded(group, userId, itemId);
+    const flip = () => setGroups(prev => toggleNotNeededIn(prev, listId, userId, itemId));
+    flip();
     try {
-      console.log('[Dashboard] sending not_needed to server', { listId: activeListId, itemId, notNeeded: newValue, userId });
-      // If toggling for a specific user (member column), call per-member API
-      const result = userId ? await setPackingListItemNotNeededForMember(activeListId, itemId, userId, newValue) : await setPackingListItemNotNeeded(activeListId, itemId, newValue);
-      console.log('[Dashboard] not_needed API result', result && result.response ? { status: result.response.status, ok: result.response.ok } : result);
-      if (result && result.response && result.response.ok) {
-        // refresh the active list to pick up canonical server state (also other clients will get broadcast)
+      const result = userId
+        ? await setPackingListItemNotNeededForMember(listId, itemId, userId, newValue)
+        : await setPackingListItemNotNeeded(listId, itemId, newValue);
+      if (result?.response?.ok) {
         setListSelectionCount(prev => prev + 1);
-        console.log('[Dashboard] not_needed synced to server', { itemId, newValue });
       } else {
-        // revert optimistic changes
-        setNotNeededWhole(prev => prevWhole ? (prev.includes(itemId) ? prev : [...prev, itemId]) : prev.filter(id => id !== itemId));
-        setNotNeededByUser(prevUserList);
-        console.warn('[Dashboard] not_needed API rejected update', result);
+        flip();
         showNotification({ title: 'Sync failed', message: 'Server rejected not-needed update', color: 'yellow' });
       }
     } catch (err) {
-      // revert and notify
-      setNotNeededWhole(prev => prevWhole ? (prev.includes(itemId) ? prev : [...prev, itemId]) : prev.filter(id => id !== itemId));
-      setNotNeededByUser(prevUserList);
-      console.warn('[Dashboard] Failed to sync not_needed (offline?)', err);
+      flip();
       showNotification({ title: 'Offline', message: 'Not-needed update failed - try again when online', color: 'yellow' });
     }
-  }, [activeListId, notNeededWhole, notNeededByUser]);
-
-  const openAddDrawerFor = useCallback((userId: string | null) => {
-    // Open the unified AddItemsDrawer and pre-select the clicked member (or whole-family)
-    if (userId === null) {
-      setAddItemsDrawerInitialMembers(undefined);
-      setAddItemsDrawerInitialWhole(true);
-    } else {
-      setAddItemsDrawerInitialMembers([userId]);
-      setAddItemsDrawerInitialWhole(false);
-    }
-    setShowAddItemsDrawer(true);
   }, []);
 
-  const openAddItemsOneOff = () => {
-    // Preselect all family members by default when opening as one-off
-    setShowAddItemsDrawer(true);
-  };
-
-  const handleItemDrawerSaved = async (payload?: { id?: string; name?: string }) => {
-    // If the drawer created a new master item, add it to the active packing list
+  const handleMoveSharedItem = useCallback(async (fromListId: string, itemId: string, toListId: string) => {
     try {
-      if (!activeListId) return;
-        if (payload?.id) {
-        // Avoid duplicate adds: if the created master item is already present in
-        // the active list (could have been added by server-side template propagation
-        // or another client action), skip calling addItemToPackingList again.
-        const masterId = payload.id;
-        const alreadyInList = (() => {
-          try {
-            // check whole-family items
-            for (const w of wholeFamilyItems || []) {
-              if ((w.masterId && String(w.masterId) === String(masterId)) || (w.item_id && String(w.item_id) === String(masterId)) || (w.master_id && String(w.master_id) === String(masterId))) return true;
-            }
-            // check per-user lists
-            for (const ul of userLists || []) {
-              for (const it of ul.items || []) {
-                if ((it.masterId && String(it.masterId) === String(masterId)) || (it.item_id && String(it.item_id) === String(masterId)) || (it.master_id && String(it.master_id) === String(masterId))) return true;
-              }
-            }
-            return false;
-          } catch (e) { return false; }
-        })();
-        if (!alreadyInList) {
-          try {
-            const result = await addItemToPackingList(activeListId, payload.id);
-            if (result.response.ok) {
-              const createdItem = result.data.item;
-              const assignedMemberId = itemDrawerDefaultMember;
-              if (assignedMemberId && createdItem) {
-                setUserLists(prev => prev.map(ul => ul.userId === assignedMemberId ? { ...ul, items: [{ id: createdItem.id, name: payload.name || createdItem.id, checked: false, masterId: payload.id || null }, ...ul.items] } : ul));
-              }
-            }
-          } catch (err) {
-            showNotification({ title: 'Failed', message: 'Failed to add item to packing list', color: 'red' });
-          }
-        } else {
-          console.debug('[Dashboard] Skipping addItemToPackingList because master already present in list', payload.id);
-        }
+      const result = await movePackingListItem(fromListId, itemId, toListId);
+      if (result.response.ok) {
+        const target = groupsRef.current.find(g => g.listId === toListId);
+        showNotification({ title: 'Moved', message: `Moved to ${target?.name ?? 'the other destination'}`, color: 'green' });
+        setListSelectionCount(prev => prev + 1);
+      } else {
+        showNotification({ title: 'Move failed', message: result.data?.error || 'Server rejected the move', color: 'red' });
       }
     } catch (err) {
-      console.error('Failed to add created item to packing list', err);
-    } finally {
-      setShowItemDrawer(false);
-      setItemDrawerDefaultMember(null);
+      showNotification({ title: 'Move failed', message: 'Moving items needs a connection', color: 'yellow' });
     }
-  };
+  }, []);
+
+  const openAddDrawerFor = useCallback((listId: string, userId: string | null) => {
+    setAddTarget(userId === null ? { listId, whole: true } : { listId, members: [userId], whole: false });
+  }, []);
 
   const handleAddItemsApply = useCallback(async (selectedIds: string[], keepOpen?: boolean) => {
-    if (!activeListId) {
+    const listId = addTarget?.listId ?? activeListId;
+    if (!listId) {
       showNotification({ title: 'No list selected', message: 'Select a list before adding', color: 'yellow' });
       return;
     }
+    // Adding for a person assigns the item to them, so it shows up in their list.
+    const memberIds = addTarget && !addTarget.whole ? addTarget.members : undefined;
     try {
-      await Promise.all(selectedIds.map(id => addItemToPackingList(activeListId, id)));
-      // Refresh the active list view
-      setListSelectionCount(prev => prev + 1);
+      const results = await Promise.all(selectedIds.map(id => (memberIds
+        ? addItemToPackingList(listId, id, undefined, undefined, memberIds)
+        : addItemToPackingList(listId, id))));
+      if (results.some(r => !r?.response?.ok)) throw new Error('Server rejected adding items');
     } catch (err) {
       console.error('Failed to add items to packing list', err);
-      showNotification({ title: 'Failed', message: 'Failed to add items to packing list', color: 'red' });
-    } finally {
-      if (!keepOpen) {
-        setShowAddItemsDrawer(false);
-        setAddItemsDrawerInitialMembers(undefined);
-        setAddItemsDrawerInitialWhole(undefined);
-      }
+      setListSelectionCount(prev => prev + 1);
+      // The drawer reports failures from its Apply button; the keep-open path (new item) only logs.
+      if (keepOpen) showNotification({ title: 'Failed', message: 'Failed to add items to packing list', color: 'red' });
+      throw err;
     }
-  }, [activeListId]);
-  // Family setup wizard removed: families are created via System Administration
-  
+    setListSelectionCount(prev => prev + 1);
+    if (!keepOpen) setAddTarget(null);
+  }, [addTarget, activeListId]);
+
+  // A one-destination trip looks like a single list.
+  const isTrip = groups.length > 1;
+  const refresh = () => setListSelectionCount(prev => prev + 1);
+  const addTargetGroup = groups.find(g => g.listId === addTarget?.listId);
+  const listNameFor = (id: string | null) => (availableLists || []).find((list: any) => list.id === id)?.name;
 
   return (
     <Container size="lg">
-      {/* Global impersonation banner is displayed in Layout; no local banner needed here */}
-      <Group justify="space-between" mb="xl">
-        {/* System Administration button removed per request */}
-      </Group>
-      
-      {/* Active Packing List selector is the top element on the dashboard */}
-
       <div style={{ marginTop: 16 }}>
         <Stack>
-          <Group justify="flex-start" gap="sm">
-            <ActivePackingListSelector onChange={(_id) => { /* optionally notify parent */ }} />
-            <Button size="xs" onClick={() => {
-              if (!activeListId) {
-                showNotification({ title: 'No list selected', message: 'Select a list before editing', color: 'yellow' });
-                return;
-              }
-              const activeListName = (availableLists || []).find((list: any) => list.id === activeListId)?.name;
-              // Request the active-pack list edit (keeps legacy flow) and open the global drawer
-              if (requestOpenEdit) requestOpenEdit(activeListId);
-              openForList(activeListId, activeListName);
-            }}>Edit list</Button>
+          <Group justify="space-between" gap="sm">
+            <Group justify="flex-start" gap="sm">
+              <ActivePackingListSelector />
+              <Button size="xs" onClick={() => {
+                // Person view edits the selected person's destination; Columns view edits the active list.
+                const editListId = viewMode === 'person' ? notesListId : activeListId;
+                if (!editListId) {
+                  showNotification({ title: 'No list selected', message: 'Select a list before editing', color: 'yellow' });
+                  return;
+                }
+                if (requestOpenEdit) requestOpenEdit(editListId);
+                openForList(editListId, listNameFor(editListId));
+              }}>Edit list</Button>
+              {activeListId && tripInfo && (
+                <Button size="xs" variant="light" disabled={!online} onClick={() => setDestinationsOpen(true)}>
+                  {online ? 'Destinations' : 'Needs a connection'}
+                </Button>
+              )}
+            </Group>
+            {activeListId && (
+              <Group gap="sm" wrap="wrap">
+                {viewMode === 'person' && <ShowPackedToggle value={showPacked} onChange={setShowPacked} />}
+                <DashboardViewToggle value={viewMode} onChange={setViewMode} />
+              </Group>
+            )}
           </Group>
+          {tripInfo && isTrip && (
+            <Text size="sm" c="dimmed">{`${tripInfo.name} · ${groups.length} ${groups.length === 1 ? 'destination' : 'destinations'}`}</Text>
+          )}
           {!activeListId ? (
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 200, padding: 24 }}>
               <div style={{ textAlign: 'center' }}>
@@ -629,100 +433,109 @@ export default function Dashboard(): React.ReactElement {
                 <Text c="dimmed" size="sm" style={{ marginTop: 8 }}>No list selected. Use the selector above to choose a packing list.</Text>
               </div>
             </div>
-            ) : (
-              <>
-                <div style={{ border: '1px solid #dee2e6', borderRadius: 8, padding: 12 }}>
-                  <Group justify="space-between" gap="sm">
+          ) : (
+            <>
+              <div style={{ border: '1px solid #dee2e6', borderRadius: 8, padding: 12 }}>
+                <Group justify="space-between" gap="sm">
+                  <Group gap="sm">
                     <Text fw={600}>Trip Notes</Text>
-                    <Button
-                      size="xs"
-                      variant="subtle"
-                      aria-label={notesExpanded ? 'Collapse notes' : 'Expand notes'}
-                      onClick={() => setNotesExpanded(prev => !prev)}
-                    >
-                      {notesExpanded ? 'Collapse' : 'Expand'}
-                    </Button>
+                    {isTrip && viewMode === 'columns' && (
+                      <NotesDestinationPicker groups={groups} value={notesListId} onChange={selectNotesGroup} />
+                    )}
                   </Group>
-                  {notesExpanded ? (
-                    <textarea
-                      aria-label="Trip notes editor"
-                      value={notesDraft}
-                      onChange={handleNotesChange}
-                      onBlur={handleNotesBlur}
-                      rows={6}
-                      style={{ width: '100%', marginTop: 8, resize: 'vertical' }}
-                    />
-                  ) : (
-                    <div style={{ marginTop: 8, whiteSpace: 'pre-wrap' }}>
-                      {notesDraft.trim()
-                        ? notesDraft.split(/\r?\n/).slice(0, 3).join('\n')
-                        : 'Add reminders for future trips…'}
-                    </div>
-                  )}
-                </div>
-                <PackingListsSideBySide
-                  userLists={userLists}
-                  wholeFamilyItems={wholeFamilyItems}
+                  <Button
+                    size="xs"
+                    variant="subtle"
+                    aria-label={notesExpanded ? 'Collapse notes' : 'Expand notes'}
+                    onClick={() => setNotesExpanded(prev => !prev)}
+                  >
+                    {notesExpanded ? 'Collapse' : 'Expand'}
+                  </Button>
+                </Group>
+                {notesExpanded ? (
+                  <textarea
+                    aria-label="Trip notes editor"
+                    value={notesDraft}
+                    onChange={handleNotesChange}
+                    onBlur={handleNotesBlur}
+                    rows={6}
+                    style={{ width: '100%', marginTop: 8, resize: 'vertical' }}
+                  />
+                ) : (
+                  <div style={{ marginTop: 8, whiteSpace: 'pre-wrap' }}>
+                    {notesDraft.trim()
+                      ? notesDraft.split(/\r?\n/).slice(0, 3).join('\n')
+                      : 'Add reminders for future trips…'}
+                  </div>
+                )}
+              </div>
+              {viewMode === 'person' ? (
+                <PersonView
+                  groups={groups}
+                  isTrip={isTrip}
+                  currentUserId={currentUserId}
                   onCheckItem={handleCheckItem}
-                  onItemNameClick={handleItemNameClick}
-                  notNeededByUser={notNeededByUser}
-                  notNeededWhole={notNeededWhole}
                   onToggleNotNeeded={toggleNotNeeded}
                   onOpenAddDrawer={openAddDrawerFor}
-                  showWhole={!!activeListId}
-                  activeListId={activeListId}
-                  familyId={familyId}
-                  onRefresh={() => setListSelectionCount(prev => prev + 1)}
-                  currentUserId={currentUserId}
+                  onItemHistory={handleItemNameClick}
+                  onMoveSharedItem={handleMoveSharedItem}
+                  onSelectedGroupChange={selectNotesGroup}
+                  categories={categories}
+                  showPacked={showPacked}
                 />
-              </>
+              ) : (
+                <DestinationColumns
+                  groups={groups}
+                  isTrip={isTrip}
+                  currentUserId={currentUserId}
+                  familyId={familyId}
+                  onCheckItem={handleCheckItem}
+                  onItemNameClick={handleItemNameClick}
+                  onToggleNotNeeded={toggleNotNeeded}
+                  onOpenAddDrawer={openAddDrawerFor}
+                  onRefresh={refresh}
+                />
+              )}
+            </>
           )}
 
           <PackingListAuditPanel
-            packingListId={activeListId}
+            packingListId={notesListId}
             refreshKey={auditRefreshKey}
-            onItemClick={(pliId, display) => handleItemNameClick(pliId, display)}
+            onItemClick={(pliId, display) => notesListId && handleItemNameClick(notesListId, pliId, display)}
           />
 
           <PackingListItemAuditModal
             opened={itemAuditOpened}
             onClose={() => setItemAuditOpened(false)}
-            packingListId={activeListId}
-            packingListItemId={itemAuditPliId}
-            itemName={itemAuditName}
+            packingListId={itemAudit?.listId ?? null}
+            packingListItemId={itemAudit?.pliId ?? null}
+            itemName={itemAudit?.name ?? ''}
             refreshKey={auditRefreshKey}
           />
-          <ItemEditDrawer
-            opened={showItemDrawer}
-            onClose={() => { setShowItemDrawer(false); setItemDrawerDefaultMember(null); }}
-            masterItemId={null}
-            initialName={undefined}
-            familyId={familyId}
-            defaultAssignedMemberId={itemDrawerDefaultMember}
-            onSaved={handleItemDrawerSaved}
-            showIsOneOffCheckbox={true}
-            promoteContext={activeListId ? { listId: activeListId, packingListItemId: '' } : null}
-          />
           <AddItemsDrawer
-            opened={showAddItemsDrawer}
-            onClose={() => { setShowAddItemsDrawer(false); setAddItemsDrawerInitialMembers(undefined); setAddItemsDrawerInitialWhole(undefined); }}
+            opened={!!addTarget}
+            onClose={() => setAddTarget(null)}
             familyId={familyId}
-            excludedItemIds={excludedItemIds}
+            excludedItemIds={addTargetGroup ? addDrawerExclusions(addTargetGroup, addTarget?.whole ? null : addTarget?.members?.[0] ?? null) : []}
             onApply={handleAddItemsApply}
             title="Add Items"
             showIsOneOffCheckbox={true}
-            initialMembers={addItemsDrawerInitialMembers}
-            initialWhole={addItemsDrawerInitialWhole}
-            promoteContext={activeListId ? { listId: activeListId, packingListItemId: '' } : null}
+            initialMembers={addTarget?.members}
+            initialWhole={addTarget?.whole}
+            promoteContext={addTarget ? { listId: addTarget.listId, packingListItemId: '' } : null}
+          />
+          <ManageDestinationsDrawer
+            opened={destinationsOpen}
+            tripId={tripInfo?.id ?? null}
+            onClose={() => {
+              setDestinationsOpen(false);
+              void refreshLists?.();
+              refresh();
+            }}
           />
         </Stack>
       </div>
-
-      {/* ManagePackingLists moved to the Packing Lists page */}
-
-      {/* FamilySetupWizard removed. Family creation is handled via System Administration. */}
-
-      {/* Impersonation handled by global banner in Layout; dashboard focuses on core content */}
     </Container>
   );
 }

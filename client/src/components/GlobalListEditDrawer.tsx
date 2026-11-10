@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { Drawer, Group, Text, ActionIcon, Button, Tooltip, Checkbox, Modal, Badge, TextInput } from '@mantine/core';
+import { Drawer, Group, Text, ActionIcon, Button, Tooltip, Checkbox, Modal, Badge, TextInput, Tabs, ScrollArea } from '@mantine/core';
 import { IconEdit, IconLayersOff, IconCheck } from '@tabler/icons-react';
 import { useListEditDrawer } from '../contexts/ListEditDrawerContext';
 import { useActivePackingList } from '../contexts/ActivePackingListContext';
@@ -8,6 +8,14 @@ import { showNotification } from '@mantine/notifications';
 import ItemEditDrawer from './ItemEditDrawer';
 import AddItemsDrawer from './AddItemsDrawer';
 import { useImpersonation } from '../contexts/ImpersonationContext';
+import { tripApi } from '../api/tripApi';
+import { useOnline } from '../utils/useOnline';
+import { describeMemberConflict, destinationErrorText } from '../utils/destinationErrors';
+import MemberConflictAlert from './MemberConflictAlert';
+import ManageDestinationsDrawer from './ManageDestinationsDrawer';
+import { destinationListLabel } from '../utils/destinationLabel';
+
+type DestinationTab = { packingListId: string; name: string; color: string; position: number };
 
 export default function GlobalListEditDrawer() {
   const { isOpen, listId, listName, close, renderFn, openForList } = useListEditDrawer();
@@ -26,8 +34,37 @@ export default function GlobalListEditDrawer() {
   const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
   const [savingMembers, setSavingMembers] = useState(false);
   const [membersSaved, setMembersSaved] = useState(false);
+  const [tripId, setTripId] = useState<string | null>(null);
+  const [ownDestination, setOwnDestination] = useState<{ id: string; name: string } | null>(null);
+  const [tripName, setTripName] = useState<string | null>(null);
+  const [destinationTabs, setDestinationTabs] = useState<DestinationTab[]>([]);
+  const [destinationsOpen, setDestinationsOpen] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [conflict, setConflict] = useState<{ listId: string; memberId: string; destinationId: string; destinationName: string; onlyMember: boolean; pending: string[] } | null>(null);
+  const [moving, setMoving] = useState(false);
+  const savedMemberIds = useRef<string[]>([]);
+  const newestSavedReq = useRef(0);
+  const sessionRef = useRef(0);
+  const flushedSaves = useRef(new Map<string, Promise<unknown>>());
+  // Set right before bumping reloadKey from the Destinations drawer's onClose so the next
+  // load-effect run knows a failed reload means "the owning destination (and its list) was
+  // deleted", not an unrelated load failure.
+  const reloadAfterDestinationsCloseRef = useRef(false);
+  const trackSave = <T,>(id: string, p: Promise<T>): Promise<T> => {
+    const prev = flushedSaves.current.get(id);
+    const settled = p.then(() => undefined, () => undefined);
+    const chain: Promise<unknown> = (prev ? Promise.all([prev, settled]) : settled).then(() => {
+      if (flushedSaves.current.get(id) === chain) flushedSaves.current.delete(id);
+    });
+    flushedSaves.current.set(id, chain);
+    return p;
+  };
+  const online = useOnline();
+  const isDestination = !!tripId;
   const saveTimer = useRef<number | null>(null);
   const debounceTimer = useRef<number | null>(null);
+  const pendingSave = useRef<{ listId: string; next: string[] } | null>(null);
+  const memberReqCounter = useRef(0);
   const isEditingNameRef = useRef(false);
 
   const [showAddPane, setShowAddPane] = useState(false);
@@ -39,50 +76,113 @@ export default function GlobalListEditDrawer() {
   const [pendingRemovalTemplateIds, setPendingRemovalTemplateIds] = useState<string[] | null>(null);
 
   useEffect(() => {
-    if (!isOpen || !listId) return;
+    const session = ++sessionRef.current;
+    const stale = () => sessionRef.current !== session;
+    const reloadedAfterDestinationsClose = reloadAfterDestinationsCloseRef.current;
+    reloadAfterDestinationsCloseRef.current = false;
+    setConflict(null);
+    setSelectedMemberIds([]);
+    savedMemberIds.current = [];
+    setTripId(null);
+    setOwnDestination(null);
+    // Keep the tabs (disabled while loading) when switching between sibling destinations.
+    setDestinationTabs(prev => (isOpen && listId && prev.some(d => d.packingListId === listId) ? prev : []));
+    if (debounceTimer.current) {
+      window.clearTimeout(debounceTimer.current);
+      debounceTimer.current = null;
+    }
+    // Flush a pending debounced save for the previous session so the user's click isn't lost;
+    // its result is intentionally ignored.
+    const pending = pendingSave.current;
+    pendingSave.current = null;
+    if (pending) {
+      trackSave(pending.listId, updatePackingList(pending.listId, { memberIds: pending.next })).catch(err => console.error('Failed to flush members', err));
+    }
+    if (!isOpen || !listId) {
+      setDestinationsOpen(false);
+      setLoading(false);
+      return;
+    }
+    newestSavedReq.current = ++memberReqCounter.current;
+    setMoving(false);
+    setSavingMembers(false);
     isEditingNameRef.current = false;
     setIsEditingName(false);
+    setSavingName(false);
     setCurrentName(listName || null);
     setNameDraft(listName || '');
     (async () => {
       setLoading(true);
       try {
+        let flushing = flushedSaves.current.get(listId);
+        while (flushing) {
+          await flushing.catch(() => undefined);
+          if (stale()) return;
+          const next = flushedSaves.current.get(listId);
+          flushing = next === flushing ? undefined : next;
+        }
         const res = await getPackingList(listId);
+        if (stale()) return;
         if (!res.response.ok) {
+          if (reloadedAfterDestinationsClose) {
+            // The destination (and the list it owns) was deleted from the Destinations drawer.
+            // Close the edit drawer the same way its own onClose does, so pending saves still
+            // flush; the session guard above already confirms this reload still matches the
+            // list currently shown.
+            showNotification({ title: 'Deleted', message: 'This list was deleted', color: 'yellow' });
+            close();
+            return;
+          }
           setCurrentName(listName || null);
           if (!isEditingNameRef.current) {
             setNameDraft(listName || '');
             setIsEditingName(false);
           }
+          setDestinationTabs([]);
           setEditItems([]);
           setEditAssignedTemplates([]);
           return;
         }
-        setCurrentName(res.data.name || listName || null);
+        const storedName = res.data.list?.name || res.data.name || listName || null;
+        setCurrentName(storedName);
         if (!isEditingNameRef.current) {
-          setNameDraft(res.data.name || listName || '');
+          setNameDraft(storedName || '');
           setIsEditingName(false);
         }
         setEditItems((res.data.items || []).map((it: any) => ({ ...it, itemId: it.item_id, oneOff: !!it.master_is_one_off, whole_family: !!it.whole_family })));
         setEditAssignedTemplates(Array.isArray(res.data.template_ids) ? res.data.template_ids : []);
         const memberIds = Array.isArray(res.data.list?.member_ids) ? res.data.list.member_ids : (Array.isArray(res.data.member_ids) ? res.data.member_ids : []);
         setSelectedMemberIds(memberIds || []);
+        savedMemberIds.current = memberIds || [];
+        setTripId(res.data.trip_destination?.tripId ?? null);
+        const own = (res.data.trip_destination?.destinations || []).find((d: any) => d.packingListId === listId);
+        setOwnDestination(own ? { id: own.id, name: own.name } : null);
+        setTripName(res.data.trip_destination?.tripName ?? null);
+        setDestinationTabs(
+          (res.data.trip_destination?.destinations || [])
+            .map((d: any) => ({ packingListId: d.packingListId, name: d.name, color: d.color, position: d.position }))
+            .sort((a: DestinationTab, b: DestinationTab) => (a.position ?? 0) - (b.position ?? 0)),
+        );
+        setConflict(null);
 
         try {
           let fid: string | null = impersonatingFamilyId;
           let members: any[] = [];
           if (fid) {
             const familyRes = await getFamily(fid);
+            if (stale()) return;
             if (familyRes.response.ok) {
               members = familyRes.data.family?.members || [];
             }
           } else {
             const profile = await getCurrentUserProfile();
+            if (stale()) return;
             fid = profile.response.ok && profile.data.family ? profile.data.family.id : null;
             members = profile.response.ok && profile.data.family?.members ? profile.data.family.members : [];
           }
           if (fid) {
             const tRes = await getItemGroups(fid);
+            if (stale()) return;
             if (tRes.response.ok) setTemplates(tRes.data.itemGroups || tRes.data.templates || []);
           }
           setFamilyMembers(members);
@@ -91,11 +191,12 @@ export default function GlobalListEditDrawer() {
         }
       } catch (err) {
         console.error('Failed to load list for edit drawer', err);
+        if (!stale()) setDestinationTabs([]);
       } finally {
-        setLoading(false);
+        if (!stale()) setLoading(false);
       }
     })();
-  }, [isOpen, listId, impersonatingFamilyId]);
+  }, [isOpen, listId, impersonatingFamilyId, reloadKey]);
 
   useEffect(() => {
     if (pendingOpenEditId) {
@@ -155,39 +256,120 @@ export default function GlobalListEditDrawer() {
     }
   }
 
+  const putMembers = async (next: string[], session: number): Promise<boolean> => {
+    if (!listId) return false;
+    const isCurrentList = () => sessionRef.current === session;
+    const reqId = ++memberReqCounter.current;
+    const isLatest = () => memberReqCounter.current === reqId;
+    try {
+      const res = await trackSave(listId, updatePackingList(listId, { memberIds: next }));
+      if (!isCurrentList()) return false;
+      if (res.response && res.response.ok) {
+        if (reqId >= newestSavedReq.current) {
+          newestSavedReq.current = reqId;
+          savedMemberIds.current = next;
+        }
+        if (isLatest()) setConflict(null);
+        setMembersSaved(true);
+        if (saveTimer.current) window.clearTimeout(saveTimer.current);
+        saveTimer.current = window.setTimeout(() => setMembersSaved(false), 2500);
+        return true;
+      }
+      if (!isDestination) {
+        showNotification({ title: 'Failed', message: 'Could not save members', color: 'red' });
+        return false;
+      }
+      if (!isLatest()) return false;
+      setSelectedMemberIds(savedMemberIds.current);
+      const status = res.response?.status;
+      if (status === 409 && res.data?.error === 'member_in_other_destination' && tripId) {
+        const { memberId, destinationId } = res.data;
+        const info = await describeMemberConflict(tripId, memberId, destinationId);
+        if (!isCurrentList() || !isLatest()) return false;
+        setConflict({ listId, memberId, destinationId, ...info, pending: next });
+      } else if (status === 400 && isDestination && next.length === 0) {
+        showNotification({ title: 'Failed', message: 'A destination needs at least one person.', color: 'red' });
+      } else {
+        showNotification({ title: 'Failed', message: 'Could not save members', color: 'red' });
+      }
+    } catch (err) {
+      console.error('Failed to save members', err);
+      if (!isCurrentList()) return false;
+      if (isDestination) {
+        if (!isLatest()) return false;
+        setSelectedMemberIds(savedMemberIds.current);
+      }
+      showNotification({ title: 'Failed', message: 'Could not save members', color: 'red' });
+    }
+    return false;
+  };
+
   const saveMemberSelection = (next: string[]) => {
     if (!listId) return;
     if (debounceTimer.current) window.clearTimeout(debounceTimer.current);
+    memberReqCounter.current++;
     setMembersSaved(false);
+    setConflict(null);
     setSavingMembers(true);
+    const session = sessionRef.current;
+    pendingSave.current = { listId, next };
     debounceTimer.current = window.setTimeout(async () => {
+      debounceTimer.current = null;
+      pendingSave.current = null;
       try {
-        const res = await updatePackingList(listId || '', { memberIds: next });
-        if (res.response && res.response.ok) {
-          setMembersSaved(true);
-          if (saveTimer.current) window.clearTimeout(saveTimer.current);
-          saveTimer.current = window.setTimeout(() => setMembersSaved(false), 2500);
-        } else {
-          showNotification({ title: 'Failed', message: 'Could not save members', color: 'red' });
-        }
-      } catch (err) {
-        console.error('Failed to save members', err);
-        showNotification({ title: 'Failed', message: 'Could not save members', color: 'red' });
+        await putMembers(next, session);
       } finally {
-        setSavingMembers(false);
+        if (sessionRef.current === session) setSavingMembers(false);
       }
     }, 500);
   };
 
+  const moveConflictMember = async () => {
+    if (!conflict || !tripId) return;
+    if (conflict.listId !== listId) {
+      setConflict(null);
+      return;
+    }
+    const session = sessionRef.current;
+    const switched = () => sessionRef.current !== session;
+    setMoving(true);
+    // If the list switches mid-Move we still finish the server steps for the original list
+    // (so the member is never left in no destination) but touch no UI state.
+    try {
+      const own = ownDestination;
+      const sequence = (async () => {
+        if (own) {
+          // The server takes the person, and their items, out of the other destination.
+          await tripApi.updateDestination(tripId, own.id, { memberIds: conflict.pending, moveFrom: true });
+        } else {
+          const other = (await tripApi.listDestinations(tripId)).find(d => d.id === conflict.destinationId);
+          if (other) {
+            await tripApi.updateDestination(tripId, other.id, { memberIds: other.memberIds.filter(id => id !== conflict.memberId) });
+          }
+        }
+        return putMembers(conflict.pending, session);
+      })();
+      const saved = await trackSave(conflict.listId, sequence);
+      if (switched()) return;
+      if (saved) setSelectedMemberIds(conflict.pending);
+    } catch (err) {
+      console.error('Failed to move member', err);
+      if (switched()) return;
+      showNotification({ title: 'Failed', message: 'Could not move that person', color: 'red' });
+    } finally {
+      if (!switched()) setMoving(false);
+    }
+  };
+
   const startRenaming = () => {
     isEditingNameRef.current = true;
-    setNameDraft(currentName || listName || '');
+    setNameDraft(ownDestination ? ownDestination.name : (currentName || listName || ''));
     setIsEditingName(true);
   };
 
   const cancelRenaming = () => {
     isEditingNameRef.current = false;
-    setNameDraft(currentName || listName || '');
+    setNameDraft(ownDestination ? ownDestination.name : (currentName || listName || ''));
     setIsEditingName(false);
   };
 
@@ -199,9 +381,31 @@ export default function GlobalListEditDrawer() {
       return;
     }
 
+    const session = sessionRef.current;
+    const stale = () => sessionRef.current !== session;
     setSavingName(true);
     try {
+      if (ownDestination && tripId) {
+        const own = ownDestination;
+        await tripApi.updateDestination(tripId, own.id, { name: trimmed });
+        if (stale()) return;
+        // The stored list name is the trip/destination label, so read it back from the server.
+        const reloaded = await getPackingList(listId);
+        if (stale()) return;
+        const label = (reloaded.response.ok && (reloaded.data.list?.name || reloaded.data.name)) || trimmed;
+        isEditingNameRef.current = false;
+        setOwnDestination({ ...own, name: trimmed });
+        setDestinationTabs(prev => prev.map(d => (d.packingListId === listId ? { ...d, name: trimmed } : d)));
+        setCurrentName(label);
+        setNameDraft(trimmed);
+        setIsEditingName(false);
+        if (refreshLists) await refreshLists();
+        if (stale()) return;
+        showNotification({ title: 'Renamed', message: 'Destination renamed', color: 'green' });
+        return;
+      }
       const res = await updatePackingList(listId, { name: trimmed });
+      if (stale()) return;
       if (res.response.ok) {
         isEditingNameRef.current = false;
         setCurrentName(trimmed);
@@ -214,17 +418,26 @@ export default function GlobalListEditDrawer() {
       }
     } catch (err) {
       console.error('Failed to rename list', err);
-      showNotification({ title: 'Error', message: 'Failed to rename list', color: 'red' });
+      if (stale()) return;
+      showNotification({ title: 'Error', message: destinationErrorText(err, 'Failed to rename list'), color: 'red' });
     } finally {
-      setSavingName(false);
+      if (!stale()) setSavingName(false);
     }
+  };
+
+  const tabsDisabled = loading || moving || savingName;
+  const selectDestinationTab = (value: string | null) => {
+    if (!value || value === listId || tabsDisabled || !openForList) return;
+    const target = destinationTabs.find(d => d.packingListId === value);
+    if (!target) return;
+    openForList(target.packingListId, destinationListLabel(tripName, target.name));
   };
 
   if (renderFn) return <>{isOpen ? renderFn() : null}</>;
 
   return (
     <>
-      <Drawer opened={isOpen} onClose={close} title={`Edit Packing List`} position="right" size={720} padding="md">
+      <Drawer opened={isOpen} onClose={close} title={currentName || 'Edit Packing List'} position="right" size={720} padding="md">
         <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
           <Group style={{ marginBottom: 8, gap: 8 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -248,18 +461,46 @@ export default function GlobalListEditDrawer() {
                   </Button>
                 </>
               ) : (
-                <>
-                  <Text fw={700} style={{ minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{currentName || ''}</Text>
-                  <ActionIcon aria-label="Rename list" onClick={startRenaming} size="md">
-                    <IconEdit size={16} />
-                  </ActionIcon>
-                </>
+                <ActionIcon aria-label="Rename list" onClick={startRenaming} size="md">
+                  <IconEdit size={16} />
+                </ActionIcon>
               )}
             </div>
             <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+              {tripId && (
+                <Button size="xs" variant="light" disabled={!online} onClick={() => setDestinationsOpen(true)}>
+                  {online ? 'Destinations' : 'Needs a connection'}
+                </Button>
+              )}
               <Button size="xs" onClick={() => openAddItemsPane()}>Add Items</Button>
             </div>
           </Group>
+
+          {destinationTabs.length >= 2 && (
+            <ScrollArea type="never" scrollbars="x" mb={8} style={{ flex: '0 0 auto' }}>
+              <Tabs variant="pills" value={listId} onChange={selectDestinationTab} keepMounted={false}>
+                <Tabs.List style={{ flexWrap: 'nowrap' }} aria-label="Destinations">
+                  {destinationTabs.map(d => (
+                    <Tabs.Tab
+                      key={d.packingListId}
+                      value={d.packingListId}
+                      disabled={tabsDisabled}
+                      color={d.color || 'gray'}
+                      style={{ minHeight: 36, whiteSpace: 'nowrap', flex: '0 0 auto' }}
+                      leftSection={(
+                        <span
+                          aria-hidden="true"
+                          style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: d.packingListId === listId ? 'white' : `var(--mantine-color-${d.color || 'gray'}-6)` }}
+                        />
+                      )}
+                    >
+                      {d.name}
+                    </Tabs.Tab>
+                  ))}
+                </Tabs.List>
+              </Tabs>
+            </ScrollArea>
+          )}
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: 16, borderBottom: '1px solid rgba(0,0,0,0.04)', paddingBottom: 12, marginBottom: 12 }}>
             <div>
@@ -330,6 +571,21 @@ export default function GlobalListEditDrawer() {
                   {membersSaved ? <IconCheck size={16} color="green" /> : null}
                 </div>
               </div>
+              {conflict ? (
+                <div style={{ marginBottom: 8 }}>
+                  <MemberConflictAlert
+                    who={familyMembers.find(m => m.id === conflict.memberId)?.name || familyMembers.find(m => m.id === conflict.memberId)?.username || 'This person'}
+                    destinationName={conflict.destinationName}
+                    onlyMember={conflict.onlyMember}
+                    moving={moving}
+                    loading={loading}
+                    offline={!online}
+                    onMove={moveConflictMember}
+                    onDismiss={() => setConflict(null)}
+                  />
+                </div>
+              ) : null}
+              {isDestination && !online ? <Text size="xs" c="dimmed" mb={4}>Needs a connection</Text> : null}
               <div style={{ maxHeight: 260, overflow: 'auto', border: '1px solid rgba(0,0,0,0.04)', borderRadius: 6, padding: 8 }}>
                 {familyMembers.length === 0 ? (
                   <Text c="dimmed" size="sm">No family members</Text>
@@ -340,6 +596,7 @@ export default function GlobalListEditDrawer() {
                       <div key={m.id} style={{ padding: '6px 4px', borderBottom: '1px solid rgba(0,0,0,0.02)' }}>
                         <Checkbox
                           checked={checked}
+                          disabled={(isDestination && !online) || moving || loading}
                           onChange={(e) => {
                             const on = (e.currentTarget as HTMLInputElement).checked;
                             const next = on ? Array.from(new Set([...(selectedMemberIds || []), m.id])) : (selectedMemberIds || []).filter(id => id !== m.id);
@@ -405,6 +662,17 @@ export default function GlobalListEditDrawer() {
 
         </div>
       </Drawer>
+
+      <ManageDestinationsDrawer
+        opened={destinationsOpen}
+        tripId={tripId}
+        onClose={() => {
+          setDestinationsOpen(false);
+          reloadAfterDestinationsCloseRef.current = true;
+          void refreshLists?.();
+          setReloadKey(k => k + 1);
+        }}
+      />
 
       <AddItemsDrawer
         opened={showAddPane}

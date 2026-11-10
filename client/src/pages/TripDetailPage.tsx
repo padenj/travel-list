@@ -6,6 +6,7 @@ import { tripApi } from '../api/tripApi';
 import { buildFlightRows, flightTotals } from '../utils/flightRows';
 import { TripHeader } from '../components/TripHeader';
 import { TripTravelersStrip } from '../components/TripTravelersStrip';
+import TripPackingSection from '../components/TripPackingSection';
 import { FlightsSection } from '../components/FlightsSection';
 import { ElementDialog } from '../components/ElementDialog';
 import { FlightDetailsTab } from '../components/FlightDetailsTab';
@@ -111,6 +112,7 @@ export function TripDetailPage() {
         refreshKey={participantsVersion}
         onParticipantsChanged={setParticipants}
       />
+      <TripPackingSection trip={trip} onChanged={reload} />
 
       {reloadError && (
         <Alert color="red" mt="sm" withCloseButton onClose={() => setReloadError(null)}>{reloadError}</Alert>

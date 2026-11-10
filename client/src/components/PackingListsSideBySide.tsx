@@ -14,6 +14,9 @@ export interface PackingListProps {
   onToggleNotNeeded?: (userId: string | null, itemId: string) => void;
   onOpenAddDrawer?: (userId: string | null) => void;
   showWhole?: boolean;
+  wholeTitle?: string;
+  // when false, columns use natural content height (no viewport measurement); for stacked instances
+  fillViewport?: boolean;
   // active list id and family id are needed to edit/remove one-off packing-list items
   activeListId?: string | null;
   familyId?: string | null;
@@ -83,7 +86,7 @@ const ItemRow: React.FC<{ checked: boolean; onChange: (checked: boolean) => void
 // Fixed column width (px) used for all columns so they render equal widths
 const COLUMN_WIDTH = 203;
 
-export function PackingListsSideBySide({ userLists, wholeFamilyItems, onCheckItem, onItemNameClick, notNeededByUser = {}, notNeededWhole = [], onToggleNotNeeded, onOpenAddDrawer, showWhole = true, activeListId, familyId, onRefresh, currentUserId }: PackingListProps) {
+export function PackingListsSideBySide({ userLists, wholeFamilyItems, onCheckItem, onItemNameClick, notNeededByUser = {}, notNeededWhole = [], onToggleNotNeeded, onOpenAddDrawer, showWhole = true, wholeTitle = 'Whole Family', fillViewport = true, activeListId, familyId, onRefresh, currentUserId }: PackingListProps) {
 
   // Measure available viewport height from the top of this component down to
   // the bottom of the window so columns can fill the visible area without
@@ -139,7 +142,7 @@ export function PackingListsSideBySide({ userLists, wholeFamilyItems, onCheckIte
   // and small safety margin. This is a best-effort approximation.
   const requiredMinHeight = useMemo(() => {
     const titles: string[] = [];
-    if (showWhole) titles.push('Whole Family');
+    if (showWhole) titles.push(wholeTitle);
     for (const l of userLists) titles.push(l.userName);
     let maxW = 0;
     for (const t of titles) {
@@ -150,7 +153,7 @@ export function PackingListsSideBySide({ userLists, wholeFamilyItems, onCheckIte
     // plus small padding. Clamp to a sensible min value.
     const pad = 12;
     return Math.max(28, Math.ceil(maxW + pad));
-  }, [userLists, showWhole]);
+  }, [userLists, showWhole, wholeTitle]);
 
 
   // Load family categories so we can render lists grouped by the configured category order
@@ -191,6 +194,7 @@ export function PackingListsSideBySide({ userLists, wholeFamilyItems, onCheckIte
   };
 
   useEffect(() => {
+    if (!fillViewport) { setAvailableHeight(null); return; }
     let rafId: number | null = null;
     const recalc = () => {
       if (!wrapperRef.current) return;
@@ -216,7 +220,7 @@ export function PackingListsSideBySide({ userLists, wholeFamilyItems, onCheckIte
       window.removeEventListener('scroll', schedule);
       window.removeEventListener('orientationchange', schedule);
     };
-  }, []);
+  }, [fillViewport]);
 
   // Render lists horizontally in a scrollable row. Each column is a simple
   // div (no Card box). Between columns we render a subtle vertical Divider.
@@ -230,7 +234,7 @@ export function PackingListsSideBySide({ userLists, wholeFamilyItems, onCheckIte
     collapsedColumns['whole'] ? (
       <div role="button" tabIndex={0} onClick={() => toggleCollapse('whole')} style={{ width: 28, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>Whole</div>
     ) : (
-      <div style={{ minWidth: COLUMN_WIDTH, width: `${COLUMN_WIDTH}px`, padding: 8 }}>Whole Family</div>
+      <div style={{ minWidth: COLUMN_WIDTH, width: `${COLUMN_WIDTH}px`, padding: 8 }}>{wholeTitle}</div>
     )
   ) : null;
   // Helper that renders a column header and content area. `content` should
@@ -247,7 +251,7 @@ export function PackingListsSideBySide({ userLists, wholeFamilyItems, onCheckIte
       );
     }
     return (
-      <div key={`col-${key}`} style={{ minWidth: COLUMN_WIDTH, width: `${COLUMN_WIDTH}px`, borderLeft: '2px solid #e0e0e0', borderRight: isLast ? '2px solid #e0e0e0' : undefined, height: availableHeight ? `${availableHeight}px` : '60vh', display: 'flex', flexDirection: 'column' }}>
+      <div key={`col-${key}`} style={{ minWidth: COLUMN_WIDTH, width: `${COLUMN_WIDTH}px`, borderLeft: '2px solid #e0e0e0', borderRight: isLast ? '2px solid #e0e0e0' : undefined, height: fillViewport ? (availableHeight ? `${availableHeight}px` : '60vh') : undefined, display: 'flex', flexDirection: 'column' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', paddingLeft: 14, background: '#fafafa', marginBottom: 0, borderTop: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <ActionIcon size="xs" variant="subtle" onClick={() => toggleCollapse(key)} aria-label={`Collapse ${title} column`} title="Collapse">
@@ -553,7 +557,7 @@ export function PackingListsSideBySide({ userLists, wholeFamilyItems, onCheckIte
       {orderedUserLists.length > 0 ? renderColumn(orderedUserLists[0].userId, `${orderedUserLists[0].userName}'s List`, renderUserContent(orderedUserLists[0]), true, () => onOpenAddDrawer && onOpenAddDrawer(orderedUserLists[0].userId)) : null}
 
       {/* Then Whole Family */}
-      {showWhole ? renderColumn('whole', 'Whole Family', wholeContent, true, () => onOpenAddDrawer && onOpenAddDrawer(null)) : null}
+      {showWhole ? renderColumn('whole', wholeTitle, wholeContent, true, () => onOpenAddDrawer && onOpenAddDrawer(null)) : null}
 
       {/* Then remaining users (skip first if already rendered) */}
       {orderedUserLists.slice(1).map((list, i) => renderColumn(list.userId, `${list.userName}'s List`, renderUserContent(list), true, () => onOpenAddDrawer && onOpenAddDrawer(list.userId), i === orderedUserLists.slice(1).length - 1))}

@@ -23,11 +23,19 @@ import { useActivePackingList } from '../contexts/ActivePackingListContext';
 import { useListEditDrawer } from '../contexts/ListEditDrawerContext';
 import ItemEditDrawer from './ItemEditDrawer';
 import AddItemsDrawer from './AddItemsDrawer';
+import ManageDestinationsDrawer from './ManageDestinationsDrawer';
+import { tripApi } from '../api/tripApi';
+import { groupListsByTrip, sortTripGroups, tripGroupLabel, type TripGroup } from '../utils/listOptions';
+import { useOnline } from '../utils/useOnline';
 
 export default function ManagePackingLists() {
   const [familyId, setFamilyId] = useState<string | null>(null);
   const [activeFamilyListId, setActiveFamilyListId] = useState<string | null>(null);
   const { impersonatingFamilyId } = useImpersonation();
+  const [destinationsTripId, setDestinationsTripId] = useState<string | null>(null);
+  const [copySourceTrip, setCopySourceTrip] = useState<{ id: string; name: string } | null>(null);
+  const [familyMembers, setFamilyMembers] = useState<any[]>([]);
+  const online = useOnline();
   const [lists, setLists] = useState<any[]>([]);
   // selected removed; edit modal holds the current list being edited in editListId
   // promote UI removed for now; will reintroduce promotion logic later
@@ -93,6 +101,7 @@ export default function ManagePackingLists() {
           const familyRes = await getFamily(impersonatingFamilyId);
           if (familyRes.response.ok && familyRes.data?.family) {
             setActiveFamilyListId(familyRes.data.family.active_packing_list_id ?? null);
+            setFamilyMembers(familyRes.data.family.members || []);
           } else {
             setActiveFamilyListId(null);
           }
@@ -105,6 +114,7 @@ export default function ManagePackingLists() {
           if (profile.response.ok && profile.data.family) {
             fid = profile.data.family.id;
             setActiveFamilyListId(profile.data.family.active_packing_list_id ?? null);
+            setFamilyMembers(profile.data.family.members || []);
           } else {
             fid = null;
             setActiveFamilyListId(null);
@@ -183,16 +193,49 @@ export default function ManagePackingLists() {
     }
   };
 
-  const doDelete = async (id: string) => {
-    if (!confirm('Delete this packing list?')) return;
-    const res = await deletePackingList(id);
-    if (res.response.ok) {
-      showNotification({ title: 'Deleted', message: 'List deleted', color: 'green' });
+  const setActiveGroup = async (group: TripGroup<any>) => {
+    if (!familyId) return;
+    const listId = group.entries[0].list.id;
+    try {
+      const res = await setActivePackingList(familyId, listId);
+      if (!res.response.ok) {
+        showNotification({ title: 'Error', message: 'Failed to set active list', color: 'red' });
+        return;
+      }
+      setActiveFamilyListId(listId);
+      showNotification({ title: 'Updated', message: 'Active list updated', color: 'green' });
       await reload();
-    } else {
-      showNotification({ title: 'Error', message: 'Failed to delete list', color: 'red' });
+    } catch {
+      showNotification({ title: 'Error', message: 'Failed to set active list', color: 'red' });
     }
   };
+
+  const deleteGroup = async (group: TripGroup<any>) => {
+    const count = group.entries.length;
+    const question = count > 1
+      ? `Delete ${group.tripName} and its ${count} destination lists?`
+      : `Delete ${group.tripName}?`;
+    if (!confirm(question)) return;
+    try {
+      if (group.tripId) {
+        await tripApi.deleteTrip(group.tripId);
+      } else {
+        const res = await deletePackingList(group.entries[0].list.id);
+        if (!res.response.ok) throw new Error('Failed to delete list');
+      }
+      showNotification({ title: 'Deleted', message: `${group.tripName} deleted`, color: 'green' });
+      await reload();
+    } catch {
+      showNotification({ title: 'Error', message: `Failed to delete ${group.tripName}`, color: 'red' });
+    }
+  };
+
+  const memberNamesFor = (list: any): string =>
+    (Array.isArray(list.member_ids) ? list.member_ids : [])
+      .map((id: string) => familyMembers.find(m => m.id === id))
+      .filter(Boolean)
+      .map((m: any) => m.name || m.username)
+      .join(', ');
 
   const { openForList } = useListEditDrawer();
 
@@ -202,7 +245,20 @@ export default function ManagePackingLists() {
     openForList(list.id, list.name);
   };
 
-  const openCopyFor = async (list: any) => {
+  const openCopyFor = async (group: TripGroup<any>) => {
+    if (group.tripId) {
+      setCopySourceTrip({ id: group.tripId, name: group.tripName });
+      setCopySourceList(null);
+      setCopyName(`${group.tripName} (copy)`);
+      setCopyIncludeOneOffs(false);
+      setShowCopyDrawer(true);
+      return;
+    }
+    await openListCopyFor(group.entries[0].list);
+  };
+
+  const openListCopyFor = async (list: any) => {
+    setCopySourceTrip(null);
     setCopySourceList(list);
     setCopyName(`${list.name} (copy)`);
     setCopyIncludeOneOffs(false);
@@ -224,6 +280,28 @@ export default function ManagePackingLists() {
   };
 
   const createCopy = async () => {
+    if (copySourceTrip) {
+      if (!copyName.trim()) {
+        showNotification({ title: 'Error', message: 'Trip name is required', color: 'red' });
+        return;
+      }
+      setCopyLoading(true);
+      try {
+        const result = await tripApi.copyTrip(copySourceTrip.id, { name: copyName.trim(), includeOneOffs: copyIncludeOneOffs });
+        showNotification({ title: 'Created', message: 'Trip copied', color: 'green' });
+        setShowCopyDrawer(false);
+        setCopySourceTrip(null);
+        setCopyName('');
+        await reload();
+        const firstListId = result.destinations[0]?.packingListId;
+        if (firstListId && requestOpenEdit) requestOpenEdit(firstListId);
+      } catch {
+        showNotification({ title: 'Error', message: 'Failed to copy trip', color: 'red' });
+      } finally {
+        setCopyLoading(false);
+      }
+      return;
+    }
     if (!copySourceList) return;
     if (!familyId) {
       showNotification({ title: 'Error', message: 'No family', color: 'red' });
@@ -352,48 +430,77 @@ export default function ManagePackingLists() {
 
   // apply logic handled by AddItemsDrawer via the onApply prop below
 
+  const groups = sortTripGroups(groupListsByTrip(lists));
+  const activeGroupKey = groups.find(g => g.entries.some(e => e.list.id === activeFamilyListId))?.key ?? null;
+
   return (
     <Card shadow="sm" padding="lg" radius="md" withBorder>
       <Title order={4}>Manage Packing Lists</Title>
       <Stack mt="sm">
-          {lists.length === 0 ? (
+        {groups.length === 0 ? (
           <Text c="dimmed">No packing lists yet</Text>
         ) : (
-          lists.map(l => (
-            <Group key={l.id} align="center" style={{ justifyContent: 'space-between' }}>
-              <Text>{l.name}</Text>
-              <Group>
-                {activeFamilyListId === l.id ? (
-                  <Badge color="green" variant="light">Active</Badge>
-                ) : (
-                  <Button
-                    size="xs"
-                    onClick={async () => {
-                      if (!familyId) return;
-                      try {
-                        const res = await setActivePackingList(familyId, l.id);
-                        if (!res.response.ok) {
-                          showNotification({ title: 'Error', message: 'Failed to set active list', color: 'red' });
-                          return;
-                        }
-                        setActiveFamilyListId(l.id);
-                        showNotification({ title: 'Updated', message: 'Active list updated', color: 'green' });
-                        await reload();
-                      } catch {
-                        showNotification({ title: 'Error', message: 'Failed to set active list', color: 'red' });
-                      }
-                    }}
-                    disabled={!familyId}
-                  >
+          groups.map(group => (
+            <Card key={group.key} withBorder padding="sm" radius="md">
+              <Group gap="xs">
+                <Text fw={600} style={{ overflowWrap: 'anywhere' }}>{tripGroupLabel(group)}</Text>
+                {group.key === activeGroupKey && <Badge color="green" variant="light">Active</Badge>}
+              </Group>
+              <Group gap="xs" mt="xs">
+                {group.key !== activeGroupKey && (
+                  <Button size="xs" disabled={!familyId} onClick={() => { void setActiveGroup(group); }}>
                     Set as active
                   </Button>
                 )}
-                <Button size="xs" onClick={() => openEditFor(l)}>Edit</Button>
-                <Button size="xs" onClick={() => openCopyFor(l)}>Copy</Button>
-                <Button size="xs" color="red" onClick={() => doDelete(l.id)}>Delete</Button>
-                {/* Promote One-off button removed; promotion will be implemented later */}
+                {group.entries.length === 1 && (
+                  <Button size="xs" onClick={() => openEditFor(group.entries[0].list)}>Edit</Button>
+                )}
+                {group.tripId && (
+                  <Button size="xs" variant="light" disabled={!online} onClick={() => setDestinationsTripId(group.tripId)}>
+                    {online ? 'Destinations' : 'Needs a connection'}
+                  </Button>
+                )}
+                <Button size="xs" variant="light" disabled={!online} onClick={() => { void openCopyFor(group); }}>
+                  {online ? 'Copy' : 'Needs a connection'}
+                </Button>
+                <Button size="xs" color="red" variant="light" disabled={!online} onClick={() => { void deleteGroup(group); }}>
+                  {online ? 'Delete' : 'Needs a connection'}
+                </Button>
               </Group>
-            </Group>
+              {group.entries.length >= 2 && (
+                <Stack gap={4} mt="xs">
+                  {group.entries.map(entry => (
+                    <Group key={entry.list.id} justify="space-between" wrap="nowrap">
+                      <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
+                        <span
+                          aria-hidden="true"
+                          style={{
+                            width: 10,
+                            height: 10,
+                            borderRadius: '50%',
+                            flexShrink: 0,
+                            background: `var(--mantine-color-${entry.color || 'blue'}-6)`,
+                          }}
+                        />
+                        <div style={{ minWidth: 0 }}>
+                          <Text size="sm" fw={500} style={{ overflowWrap: 'anywhere' }}>{entry.destinationName}</Text>
+                          <Text size="xs" c="dimmed" style={{ overflowWrap: 'anywhere' }}>{memberNamesFor(entry.list) || 'No one yet'}</Text>
+                        </div>
+                      </Group>
+                      <Button
+                        size="xs"
+                        variant="subtle"
+                        aria-label={`Edit ${entry.destinationName}`}
+                        style={{ flexShrink: 0 }}
+                        onClick={() => openEditFor(entry.list)}
+                      >
+                        Edit
+                      </Button>
+                    </Group>
+                  ))}
+                </Stack>
+              )}
+            </Card>
           ))
         )}
       </Stack>
@@ -487,8 +594,8 @@ export default function ManagePackingLists() {
       {/* Copy Drawer */}
       <Drawer
         opened={showCopyDrawer}
-        onClose={() => { setShowCopyDrawer(false); setCopySourceList(null); }}
-        title={`Copy Packing List`}
+        onClose={() => { setShowCopyDrawer(false); setCopySourceList(null); setCopySourceTrip(null); }}
+        title={copySourceTrip ? `Copy ${copySourceTrip.name}` : 'Copy Packing List'}
         position="right"
         size={isMobile ? '80%' : 420}
         padding="md"
@@ -496,8 +603,8 @@ export default function ManagePackingLists() {
       >
         <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
           <div style={{ marginBottom: 8 }}>
-            <Text mb="xs">New list name</Text>
-            <TextInput value={copyName} onChange={(e) => setCopyName(e.currentTarget.value)} placeholder="New list name" />
+            <Text mb="xs">{copySourceTrip ? 'New trip name' : 'New list name'}</Text>
+            <TextInput value={copyName} onChange={(e) => setCopyName(e.currentTarget.value)} placeholder={copySourceTrip ? 'New trip name' : 'New list name'} />
           </div>
           <div style={{ marginBottom: 8 }}>
             <Checkbox label="Include one-off items" checked={copyIncludeOneOffs} onChange={(e) => setCopyIncludeOneOffs(e.currentTarget.checked)} />
@@ -506,7 +613,7 @@ export default function ManagePackingLists() {
 
           <div style={{ marginTop: 'auto', display: 'flex', justifyContent: 'space-between', gap: 8 }}>
             <Button variant="default" onClick={() => setShowCopyDrawer(false)} disabled={copyLoading}>Cancel</Button>
-            <Button onClick={createCopy} loading={copyLoading}>Create New List</Button>
+            <Button onClick={createCopy} loading={copyLoading}>{copySourceTrip ? 'Create new trip' : 'Create New List'}</Button>
           </div>
         </div>
       </Drawer>
@@ -566,6 +673,14 @@ export default function ManagePackingLists() {
         }}
         showIsOneOffCheckbox={true}
         promoteContext={editTargetItem && !editTargetItem.itemId ? { listId: editListId || '', packingListItemId: editTargetItem.id } : null}
+      />
+      <ManageDestinationsDrawer
+        opened={!!destinationsTripId}
+        tripId={destinationsTripId}
+        onClose={() => {
+          setDestinationsTripId(null);
+          void reload();
+        }}
       />
     </Card>
   );

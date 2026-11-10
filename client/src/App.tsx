@@ -1,7 +1,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { BrowserRouter as Router } from 'react-router-dom';
-import { MantineProvider } from '@mantine/core';
+import { MantineProvider, getDefaultZIndex } from '@mantine/core';
 import { ModalsProvider } from '@mantine/modals';
 import { Notifications } from '@mantine/notifications';
 import AppRoutes from './AppRoutes';
@@ -268,7 +268,7 @@ function App(): React.ReactElement {
   return (
     <MantineProvider>
       <ModalsProvider>
-        <Notifications />
+        <Notifications zIndex={getDefaultZIndex('max')} />
         <Router>
           <RefreshProvider>
             <ImpersonationProvider>

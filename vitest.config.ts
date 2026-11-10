@@ -9,9 +9,16 @@ export default defineConfig({
     globals: true,
     setupFiles: ['./tests/setup.ts'],
     include: [
+      'client/src/__tests__/AddDestinationDialog.test.tsx', // Destination create/edit with member moves
+      'client/src/__tests__/TripPackingSection.test.tsx', // Trip page packing cards
+      'client/src/__tests__/ManageDestinationsDrawer.test.tsx', // Destinations drawer
       'client/src/__tests__/GlobalListEditDrawer.test.tsx', // Targeted client regression coverage
+      'client/src/__tests__/GlobalListEditDrawer.destination.test.tsx', // Destination member conflicts in the edit drawer
+      'client/src/__tests__/GlobalListEditDrawer.tabs.test.tsx', // Destination tabs in the edit drawer
       'client/src/__tests__/Dashboard.test.tsx', // Dashboard edit-list regression coverage
       'client/src/__tests__/ActivePackingListContext.test.tsx', // Active packing list context coverage
+      'client/src/__tests__/listOptions.test.ts', // Selector grouping of trip destination lists
+      'client/src/__tests__/destinationLabel.test.ts', // Destination list label helper
       'client/src/__tests__/ManagePackingLists.test.tsx', // Manage packing lists active-list coverage
       'client/src/__tests__/TripsPage.test.tsx', // Trips page create action coverage
       'client/src/__tests__/TripDetailPage.test.tsx', // Trip detail add actions coverage
@@ -28,10 +35,19 @@ export default defineConfig({
       'client/src/__tests__/FlightsSection.test.tsx', // Flights table/cards
       'client/src/__tests__/ElementDialog.test.tsx', // Dialog tabs and swipe
       'client/src/__tests__/tripApi.test.ts', // API error surfacing
+      'client/src/__tests__/destinationErrors.test.ts', // destination error text
       'client/src/__tests__/flightLegs.test.ts', // Leg draft model
       'client/src/__tests__/FlightLegForm.test.tsx', // Single-leg form
       'client/src/__tests__/FlightLegList.test.tsx', // Inline leg editing
       'client/src/__tests__/bookingCoverage.test.ts', // Booking coverage helpers
+      'client/src/__tests__/dashboardGroups.test.ts', // Destination group builder and Person view helpers
+      'client/src/__tests__/DestinationColumns.test.tsx', // Columns view destination bands
+      'client/src/__tests__/useOnline.test.tsx', // Live online/offline hook
+      'client/src/__tests__/PersonView.test.tsx', // Person-first dashboard view
+      'client/src/__tests__/AddItemsDrawer.test.tsx', // Add-items drawer empty-state create flow
+      'client/src/__tests__/DashboardViewToggle.test.tsx',
+      'client/src/__tests__/ShowPackedToggle.test.tsx', // Show packed switch persistence // Person/Columns toggle persistence
+      'client/src/__tests__/PackingListsSideBySide.fillViewport.test.tsx', // fillViewport=false leaves column height natural
       'src/**/*.test.{ts,tsx}',           // Frontend unit tests
       'server/**/*.test.ts',              // Backend unit tests
       'tests/integration/**/*.test.ts',   // Integration tests
