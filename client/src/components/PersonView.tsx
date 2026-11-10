@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ActionIcon, Button, Checkbox, Group, Menu, Stack, Text, UnstyledButton } from '@mantine/core';
+import { ActionIcon, Badge, Button, Checkbox, Group, Menu, Stack, Text, UnstyledButton } from '@mantine/core';
 import { IconDots, IconPlus } from '@tabler/icons-react';
-import { CategoryInfo, DashboardItem, DestinationGroup, groupItemsByCategory, orderPeople, partitionItems, remainingFor } from '../utils/dashboardGroups';
+import { CategoryInfo, DashboardItem, DestinationGroup, groupItemsByCategory, orderPeople, remainingFor } from '../utils/dashboardGroups';
 import { useOnline } from '../utils/useOnline';
 import { getSwipeDirection, isSwipeBlocked } from '../utils/swipe';
 
@@ -32,20 +32,31 @@ interface RowActions {
   online: boolean;
 }
 
-function ItemRow({ item, notNeeded, actions }: { item: DashboardItem; notNeeded: boolean; actions: RowActions }) {
+interface Row {
+  item: DashboardItem;
+  notNeeded: boolean;
+  shared: boolean;
+  actions: RowActions;
+}
+
+function ItemRow({ row }: { row: Row }) {
+  const { item, notNeeded, shared, actions } = row;
   return (
     <Group justify="space-between" wrap="nowrap" gap="xs" style={{ minHeight: 44 }}>
-      <Checkbox
-        size="md"
-        checked={item.checked}
-        onChange={e => actions.onCheck(item.id, e.currentTarget.checked)}
-        label={
-          <span style={{ overflowWrap: 'anywhere', ...(notNeeded ? { textDecoration: 'line-through', color: 'var(--mantine-color-dimmed)' } : {}) }}>
-            {item.name}
-          </span>
-        }
-        style={{ flex: 1, minWidth: 0 }}
-      />
+      <Group wrap="nowrap" gap="xs" style={{ flex: 1, minWidth: 0 }}>
+        <Checkbox
+          size="md"
+          checked={item.checked}
+          onChange={e => actions.onCheck(item.id, e.currentTarget.checked)}
+          label={
+            <span style={{ overflowWrap: 'anywhere', ...(notNeeded ? { textDecoration: 'line-through', color: 'var(--mantine-color-dimmed)' } : {}) }}>
+              {item.name}
+            </span>
+          }
+          style={{ minWidth: 0 }}
+        />
+        {shared && <Badge size="xs" variant="light" color="gray" style={{ flexShrink: 0 }}>shared</Badge>}
+      </Group>
       <Menu position="bottom-end">
         <Menu.Target>
           <ActionIcon variant="subtle" color="gray" size="lg" aria-label={`More actions for ${item.name}`}>
@@ -66,37 +77,33 @@ function ItemRow({ item, notNeeded, actions }: { item: DashboardItem; notNeeded:
   );
 }
 
-function CategorizedRows({ items, categories, notNeededIds, actions }: {
-  items: DashboardItem[];
-  categories: CategoryInfo[];
-  notNeededIds: string[];
-  actions: RowActions;
-}) {
-  const row = (it: DashboardItem) => <ItemRow key={it.id} item={it} notNeeded={notNeededIds.includes(it.id)} actions={actions} />;
-  if (categories.length === 0) return <>{items.map(row)}</>;
+function CategorizedRows({ rows, categories }: { rows: Row[]; categories: CategoryInfo[] }) {
+  const render = (r: Row) => <ItemRow key={`${r.shared ? 's' : 'p'}:${r.item.id}`} row={r} />;
+  if (categories.length === 0) return <>{rows.map(render)}</>;
+  const byItem = new Map(rows.map(r => [r.item, r]));
   return (
     <>
-      {groupItemsByCategory(items, categories).map(section => (
+      {groupItemsByCategory(rows.map(r => r.item), categories).map(section => (
         <div key={section.key} role="group" aria-label={section.name}>
           <Text component="h4" size="xs" fw={700} c="dimmed" tt="uppercase" mt={8} mb={2}>{section.name}</Text>
-          {section.items.map(row)}
+          {section.items.map(it => render(byItem.get(it)!))}
         </div>
       ))}
     </>
   );
 }
 
-function ItemSection({ title, color, items, notNeededIds, onAdd, actions, categories }: {
+function ItemSection({ title, color, rows, onAdd, categories }: {
   title: string;
   categories: CategoryInfo[];
   color: string | null;
-  items: DashboardItem[];
-  notNeededIds: string[];
+  rows: Row[];
   onAdd: () => void;
-  actions: RowActions;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const { todo, packed, notNeeded } = partitionItems(items, notNeededIds);
+  const todo = rows.filter(r => !r.item.checked && !r.notNeeded);
+  const packed = rows.filter(r => r.item.checked && !r.notNeeded);
+  const notNeeded = rows.filter(r => r.notNeeded);
   const summary = [
     packed.length > 0 ? `${packed.length} packed` : null,
     notNeeded.length > 0 ? `${notNeeded.length} not needed` : null,
@@ -118,17 +125,20 @@ function ItemSection({ title, color, items, notNeededIds, onAdd, actions, catego
           <IconPlus size={18} />
         </ActionIcon>
       </Group>
-      {items.length === 0 && <Text size="sm" c="dimmed">No items yet</Text>}
-      <CategorizedRows items={todo} categories={categories} notNeededIds={notNeededIds} actions={actions} />
+      {rows.length === 0 && <Text size="sm" c="dimmed">No items yet</Text>}
+      <CategorizedRows rows={todo} categories={categories} />
       {summary && (
         <UnstyledButton onClick={() => setExpanded(v => !v)} aria-expanded={expanded} style={{ minHeight: 44, width: '100%' }}>
           <Text size="sm" c="dimmed">{`${expanded ? '▾' : '▸'} ${summary}`}</Text>
         </UnstyledButton>
       )}
-      {expanded && <CategorizedRows items={[...packed, ...notNeeded]} categories={categories} notNeededIds={notNeededIds} actions={actions} />}
+      {expanded && <CategorizedRows rows={[...packed, ...notNeeded]} categories={categories} />}
     </section>
   );
 }
+
+const toRows = (items: DashboardItem[], notNeededIds: string[], shared: boolean, actions: RowActions): Row[] =>
+  items.map(item => ({ item, notNeeded: notNeededIds.includes(item.id), shared, actions }));
 
 export default function PersonView({
   groups, isTrip, currentUserId, onCheckItem, onToggleNotNeeded, onOpenAddDrawer, onItemHistory, onMoveSharedItem, onSelectedGroupChange,
@@ -180,10 +190,8 @@ export default function PersonView({
         key={`${g.listId}:shared`}
         title={`${g.name} — shared`}
         color={g.color}
-        items={g.wholeFamilyItems}
-        notNeededIds={g.notNeededWhole}
+        rows={toRows(g.wholeFamilyItems, g.notNeededWhole, false, sharedActionsFor(g))}
         onAdd={() => onOpenAddDrawer(g.listId, null)}
-        actions={sharedActionsFor(g)}
         categories={categories}
       />
     ));
@@ -272,26 +280,38 @@ export default function PersonView({
         </Group>
       </div>
       <Stack gap="md" mt="sm">
-        <ItemSection
-          key={`${selected.userId}:personal`}
-          title={isTrip ? `${selected.userName} · ${group.name}` : selected.userName}
-          color={group.color}
-          items={personalItems}
-          notNeededIds={group.notNeededByUser[selected.userId] || []}
-          onAdd={() => onOpenAddDrawer(group.listId, selected.userId)}
-          actions={personalActions}
-          categories={categories}
-        />
-        <ItemSection
-          key={`${group.listId}:shared`}
-          title={isTrip ? `${group.name} shared` : 'Shared'}
-          color={group.color}
-          items={group.wholeFamilyItems}
-          notNeededIds={group.notNeededWhole}
-          onAdd={() => onOpenAddDrawer(group.listId, null)}
-          actions={sharedActions}
-          categories={categories}
-        />
+        {group.members.length === 1 ? (
+          <ItemSection
+            key={`${selected.userId}:combined`}
+            title={isTrip ? `${selected.userName} · ${group.name}` : selected.userName}
+            color={group.color}
+            rows={[
+              ...toRows(personalItems, group.notNeededByUser[selected.userId] || [], false, personalActions),
+              ...toRows(group.wholeFamilyItems, group.notNeededWhole, true, sharedActions),
+            ]}
+            onAdd={() => onOpenAddDrawer(group.listId, selected.userId)}
+            categories={categories}
+          />
+        ) : (
+          <>
+            <ItemSection
+              key={`${selected.userId}:personal`}
+              title={isTrip ? `${selected.userName} · ${group.name}` : selected.userName}
+              color={group.color}
+              rows={toRows(personalItems, group.notNeededByUser[selected.userId] || [], false, personalActions)}
+              onAdd={() => onOpenAddDrawer(group.listId, selected.userId)}
+              categories={categories}
+            />
+            <ItemSection
+              key={`${group.listId}:shared`}
+              title={isTrip ? `${group.name} shared` : 'Shared'}
+              color={group.color}
+              rows={toRows(group.wholeFamilyItems, group.notNeededWhole, false, sharedActions)}
+              onAdd={() => onOpenAddDrawer(group.listId, null)}
+              categories={categories}
+            />
+          </>
+        )}
         {renderMemberless()}
       </Stack>
     </div>

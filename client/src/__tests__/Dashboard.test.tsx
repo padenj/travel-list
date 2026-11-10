@@ -396,7 +396,7 @@ if (!hasTestingLibs) {
         </MemoryRouter>
       );
 
-      await waitFor(() => expect(columnsProps.last?.groups.map((g: any) => g.name)).toEqual(['Spring Break · Paris', "Spring Break · Grandma's"]));
+      await waitFor(() => expect(columnsProps.last?.groups.map((g: any) => g.name)).toEqual(['Paris', "Grandma's"]));
       expect(apiModule.getPackingList).toHaveBeenCalledWith('list-2');
       expect(columnsProps.last.isTrip).toBe(true);
       expect(screen.getByText('Spring Break · 2 destinations')).toBeTruthy();

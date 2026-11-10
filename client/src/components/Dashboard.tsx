@@ -237,7 +237,6 @@ export default function Dashboard(): React.ReactElement {
           familyMembers,
           currentUserId: profileUserId,
           destination,
-          tripName: trip?.tripName ?? null,
         });
         const nextGroups = trip
           ? destinations.filter(d => listDataById.has(d.packingListId)).map(d => build(d.packingListId, d))

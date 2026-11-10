@@ -191,4 +191,54 @@ describe('PersonView', () => {
     await userEvent.click(within(section).getByText('▸ 1 packed'));
     expect(within(within(section).getByRole('group', { name: 'Tech' })).getByRole('checkbox', { name: 'Camera' })).toBeTruthy();
   });
+
+  describe('single-traveler destination', () => {
+    const solo = (): DestinationGroup[] => {
+      const [paris, grandma] = groups();
+      return [
+        {
+          ...paris, members: [{ id: 'dad', name: 'Dad' }],
+          userLists: [{ userId: 'dad', userName: 'Dad', items: [{ ...item('p1', 'Passport'), category: { id: 'c1', name: 'Docs' } }] }],
+          wholeFamilyItems: [{ ...item('p4', 'Sunscreen'), whole_family: true, category: { id: 'c1', name: 'Docs' } }],
+        },
+        grandma,
+      ];
+    };
+    const cats = [{ id: 'c1', name: 'Docs', position: 0 }];
+
+    it('shows one combined section with a shared badge', async () => {
+      const h = handlers();
+      renderWithMantine(<PersonView groups={solo()} isTrip currentUserId="dad" categories={cats} {...h} />);
+      const section = screen.getByRole('region', { name: 'Dad · Paris' });
+      expect(screen.queryByRole('region', { name: 'Paris shared' })).toBeNull();
+      expect(screen.queryByText(/Spring Break/)).toBeNull();
+      const docs = within(section).getByRole('group', { name: 'Docs' });
+      expect(within(docs).getByRole('checkbox', { name: 'Passport' })).toBeTruthy();
+      expect(within(docs).getByRole('checkbox', { name: 'Sunscreen' })).toBeTruthy();
+      expect(within(section).getAllByText('shared')).toHaveLength(1);
+
+      await userEvent.click(within(docs).getByRole('checkbox', { name: 'Sunscreen' }));
+      expect(h.onCheckItem).toHaveBeenCalledWith('list-paris', null, 'p4', true);
+      await userEvent.click(within(docs).getByRole('checkbox', { name: 'Passport' }));
+      expect(h.onCheckItem).toHaveBeenCalledWith('list-paris', 'dad', 'p1', true);
+
+      await userEvent.click(screen.getByRole('button', { name: 'More actions for Sunscreen' }));
+      await userEvent.click(await screen.findByRole('menuitem', { name: "Move to Grandma's" }));
+      expect(h.onMoveSharedItem).toHaveBeenCalledWith('list-paris', 'p4', 'list-grandma');
+    });
+
+    it('adds for the person', async () => {
+      const h = handlers();
+      renderWithMantine(<PersonView groups={solo()} isTrip currentUserId="dad" {...h} />);
+      await userEvent.click(screen.getByRole('button', { name: 'Add item to Dad · Paris' }));
+      expect(h.onOpenAddDrawer).toHaveBeenCalledWith('list-paris', 'dad');
+    });
+
+    it('uses a plain person title for a single, non-trip list', () => {
+      const [paris] = solo();
+      renderWithMantine(<PersonView groups={[paris]} isTrip={false} currentUserId="dad" {...handlers()} />);
+      expect(screen.getByRole('region', { name: 'Dad' })).toBeTruthy();
+      expect(screen.queryByRole('region', { name: 'Shared' })).toBeNull();
+    });
+  });
 });

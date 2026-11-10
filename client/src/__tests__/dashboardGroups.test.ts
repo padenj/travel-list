@@ -70,12 +70,10 @@ describe('buildDestinationGroup', () => {
     expect(g.members).toHaveLength(3);
   });
 
-  it('labels a destination with its trip name', () => {
+  it('names a destination group with the plain destination name', () => {
     const destination = { id: 'd1', tripId: 't1', name: 'Paris', color: 'blue', position: 0, packingListId: 'list-paris', memberIds: [] };
-    const labelled = buildDestinationGroup({ listId: 'list-paris', listData: parisData, masterItems: master, familyMembers: family, currentUserId: null, destination, tripName: 'Spring Break' });
-    expect(labelled.name).toBe('Spring Break · Paris');
-    const same = buildDestinationGroup({ listId: 'list-paris', listData: parisData, masterItems: master, familyMembers: family, currentUserId: null, destination: { ...destination, name: 'spring break ' }, tripName: 'Spring Break' });
-    expect(same.name).toBe('Spring Break');
+    const g = buildDestinationGroup({ listId: 'list-paris', listData: parisData, masterItems: master, familyMembers: family, currentUserId: null, destination });
+    expect(g.name).toBe('Paris');
   });
 });
 
