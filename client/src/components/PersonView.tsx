@@ -79,7 +79,9 @@ function ItemRow({ row }: { row: Row }) {
 
 function CategorizedRows({ rows, categories }: { rows: Row[]; categories: CategoryInfo[] }) {
   const render = (r: Row) => <ItemRow key={`${r.shared ? 's' : 'p'}:${r.item.id}`} row={r} />;
-  if (categories.length === 0) return <>{rows.map(render)}</>;
+  if (categories.length === 0) {
+    return <>{[...rows].sort((a, b) => a.item.name.localeCompare(b.item.name)).map(render)}</>;
+  }
   const byItem = new Map(rows.map(r => [r.item, r]));
   return (
     <>
