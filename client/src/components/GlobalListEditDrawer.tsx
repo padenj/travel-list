@@ -395,6 +395,7 @@ export default function GlobalListEditDrawer() {
         const label = (reloaded.response.ok && (reloaded.data.list?.name || reloaded.data.name)) || trimmed;
         isEditingNameRef.current = false;
         setOwnDestination({ ...own, name: trimmed });
+        setDestinationTabs(prev => prev.map(d => (d.packingListId === listId ? { ...d, name: trimmed } : d)));
         setCurrentName(label);
         setNameDraft(trimmed);
         setIsEditingName(false);

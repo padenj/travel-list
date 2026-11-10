@@ -170,6 +170,18 @@ describe('GlobalListEditDrawer destination tabs', () => {
     await waitFor(() => expect((screen.getByRole('tab', { name: 'Town' }) as HTMLButtonElement).disabled).toBe(false));
   });
 
+  it('renaming the current destination updates its tab', async () => {
+    (api.getPackingList as any).mockResolvedValue(listResponse(trip(destinations)));
+    (tripApi.updateDestination as any).mockResolvedValue({});
+    await renderDrawer();
+    await waitFor(() => expect((screen.getByRole('tab', { name: 'Beach' }) as HTMLButtonElement).disabled).toBe(false));
+    await act(async () => { fireEvent.click(screen.getByLabelText('Rename list')); });
+    fireEvent.change(screen.getByLabelText('List name'), { target: { value: 'Shore' } });
+    await act(async () => { fireEvent.click(screen.getByLabelText('Save list name')); });
+    expect(await screen.findByRole('tab', { name: 'Shore' })).toBeTruthy();
+    expect(screen.queryByRole('tab', { name: 'Beach' })).toBeNull();
+  });
+
   it('disables the tabs while a member Move is in flight', async () => {
     (api.getPackingList as any).mockResolvedValue(listResponse(trip(destinations)));
     (api.updatePackingList as any).mockResolvedValueOnce({
