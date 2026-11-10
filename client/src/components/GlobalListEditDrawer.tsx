@@ -485,11 +485,12 @@ export default function GlobalListEditDrawer() {
                       key={d.packingListId}
                       value={d.packingListId}
                       disabled={tabsDisabled}
+                      color={d.color || 'gray'}
                       style={{ minHeight: 36, whiteSpace: 'nowrap', flex: '0 0 auto' }}
                       leftSection={(
                         <span
                           aria-hidden="true"
-                          style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: `var(--mantine-color-${d.color || 'gray'}-6)` }}
+                          style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: d.packingListId === listId ? 'white' : `var(--mantine-color-${d.color || 'gray'}-6)` }}
                         />
                       )}
                     >
