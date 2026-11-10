@@ -401,12 +401,14 @@ export default function Dashboard(): React.ReactElement {
             <Group justify="flex-start" gap="sm">
               <ActivePackingListSelector />
               <Button size="xs" onClick={() => {
-                if (!notesListId) {
+                // Person view edits the selected person's destination; Columns view edits the active list.
+                const editListId = viewMode === 'person' ? notesListId : activeListId;
+                if (!editListId) {
                   showNotification({ title: 'No list selected', message: 'Select a list before editing', color: 'yellow' });
                   return;
                 }
-                if (requestOpenEdit) requestOpenEdit(notesListId);
-                openForList(notesListId, listNameFor(notesListId));
+                if (requestOpenEdit) requestOpenEdit(editListId);
+                openForList(editListId, listNameFor(editListId));
               }}>Edit list</Button>
               {activeListId && tripInfo && (
                 <Button size="xs" variant="light" disabled={!online} onClick={() => setDestinationsOpen(true)}>

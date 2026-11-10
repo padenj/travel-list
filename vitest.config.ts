@@ -14,6 +14,7 @@ export default defineConfig({
       'client/src/__tests__/ManageDestinationsDrawer.test.tsx', // Destinations drawer
       'client/src/__tests__/GlobalListEditDrawer.test.tsx', // Targeted client regression coverage
       'client/src/__tests__/GlobalListEditDrawer.destination.test.tsx', // Destination member conflicts in the edit drawer
+      'client/src/__tests__/GlobalListEditDrawer.tabs.test.tsx', // Destination tabs in the edit drawer
       'client/src/__tests__/Dashboard.test.tsx', // Dashboard edit-list regression coverage
       'client/src/__tests__/ActivePackingListContext.test.tsx', // Active packing list context coverage
       'client/src/__tests__/listOptions.test.ts', // Selector grouping of trip destination lists

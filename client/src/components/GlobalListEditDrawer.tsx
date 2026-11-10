@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { Drawer, Group, Text, ActionIcon, Button, Tooltip, Checkbox, Modal, Badge, TextInput } from '@mantine/core';
+import { Drawer, Group, Text, ActionIcon, Button, Tooltip, Checkbox, Modal, Badge, TextInput, Tabs, ScrollArea } from '@mantine/core';
 import { IconEdit, IconLayersOff, IconCheck } from '@tabler/icons-react';
 import { useListEditDrawer } from '../contexts/ListEditDrawerContext';
 import { useActivePackingList } from '../contexts/ActivePackingListContext';
@@ -13,6 +13,9 @@ import { useOnline } from '../utils/useOnline';
 import { describeMemberConflict, destinationErrorText } from '../utils/destinationErrors';
 import MemberConflictAlert from './MemberConflictAlert';
 import ManageDestinationsDrawer from './ManageDestinationsDrawer';
+import { destinationListLabel } from '../utils/destinationLabel';
+
+type DestinationTab = { packingListId: string; name: string; color: string; position: number };
 
 export default function GlobalListEditDrawer() {
   const { isOpen, listId, listName, close, renderFn, openForList } = useListEditDrawer();
@@ -33,6 +36,8 @@ export default function GlobalListEditDrawer() {
   const [membersSaved, setMembersSaved] = useState(false);
   const [tripId, setTripId] = useState<string | null>(null);
   const [ownDestination, setOwnDestination] = useState<{ id: string; name: string } | null>(null);
+  const [tripName, setTripName] = useState<string | null>(null);
+  const [destinationTabs, setDestinationTabs] = useState<DestinationTab[]>([]);
   const [destinationsOpen, setDestinationsOpen] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
   const [conflict, setConflict] = useState<{ listId: string; memberId: string; destinationId: string; destinationName: string; onlyMember: boolean; pending: string[] } | null>(null);
@@ -80,6 +85,8 @@ export default function GlobalListEditDrawer() {
     savedMemberIds.current = [];
     setTripId(null);
     setOwnDestination(null);
+    // Keep the tabs (disabled while loading) when switching between sibling destinations.
+    setDestinationTabs(prev => (isOpen && listId && prev.some(d => d.packingListId === listId) ? prev : []));
     if (debounceTimer.current) {
       window.clearTimeout(debounceTimer.current);
       debounceTimer.current = null;
@@ -131,6 +138,7 @@ export default function GlobalListEditDrawer() {
             setNameDraft(listName || '');
             setIsEditingName(false);
           }
+          setDestinationTabs([]);
           setEditItems([]);
           setEditAssignedTemplates([]);
           return;
@@ -149,6 +157,12 @@ export default function GlobalListEditDrawer() {
         setTripId(res.data.trip_destination?.tripId ?? null);
         const own = (res.data.trip_destination?.destinations || []).find((d: any) => d.packingListId === listId);
         setOwnDestination(own ? { id: own.id, name: own.name } : null);
+        setTripName(res.data.trip_destination?.tripName ?? null);
+        setDestinationTabs(
+          (res.data.trip_destination?.destinations || [])
+            .map((d: any) => ({ packingListId: d.packingListId, name: d.name, color: d.color, position: d.position }))
+            .sort((a: DestinationTab, b: DestinationTab) => (a.position ?? 0) - (b.position ?? 0)),
+        );
         setConflict(null);
 
         try {
@@ -177,6 +191,7 @@ export default function GlobalListEditDrawer() {
         }
       } catch (err) {
         console.error('Failed to load list for edit drawer', err);
+        if (!stale()) setDestinationTabs([]);
       } finally {
         if (!stale()) setLoading(false);
       }
@@ -409,6 +424,14 @@ export default function GlobalListEditDrawer() {
     }
   };
 
+  const tabsDisabled = loading || moving || savingName;
+  const selectDestinationTab = (value: string | null) => {
+    if (!value || value === listId || tabsDisabled || !openForList) return;
+    const target = destinationTabs.find(d => d.packingListId === value);
+    if (!target) return;
+    openForList(target.packingListId, destinationListLabel(tripName, target.name));
+  };
+
   if (renderFn) return <>{isOpen ? renderFn() : null}</>;
 
   return (
@@ -451,6 +474,31 @@ export default function GlobalListEditDrawer() {
               <Button size="xs" onClick={() => openAddItemsPane()}>Add Items</Button>
             </div>
           </Group>
+
+          {destinationTabs.length >= 2 && (
+            <ScrollArea type="never" scrollbars="x" mb={8} style={{ flex: '0 0 auto' }}>
+              <Tabs variant="pills" value={listId} onChange={selectDestinationTab} keepMounted={false}>
+                <Tabs.List style={{ flexWrap: 'nowrap' }} aria-label="Destinations">
+                  {destinationTabs.map(d => (
+                    <Tabs.Tab
+                      key={d.packingListId}
+                      value={d.packingListId}
+                      disabled={tabsDisabled}
+                      style={{ minHeight: 36, whiteSpace: 'nowrap', flex: '0 0 auto' }}
+                      leftSection={(
+                        <span
+                          aria-hidden="true"
+                          style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: `var(--mantine-color-${d.color || 'gray'}-6)` }}
+                        />
+                      )}
+                    >
+                      {d.name}
+                    </Tabs.Tab>
+                  ))}
+                </Tabs.List>
+              </Tabs>
+            </ScrollArea>
+          )}
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: 16, borderBottom: '1px solid rgba(0,0,0,0.04)', paddingBottom: 12, marginBottom: 12 }}>
             <div>

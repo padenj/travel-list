@@ -21,14 +21,15 @@ if (!hasTestingLibs) {
   const userEvent = require('@testing-library/user-event');
   const React = require('react');
   const { MemoryRouter } = require('react-router-dom');
-  const { render, screen, cleanup, fireEvent, waitFor } = rtl;
+  const { render, screen, cleanup, fireEvent, waitFor, act } = rtl;
   const userEventLib = (userEvent && userEvent.default) || userEvent;
 
   const { describe, it, expect, beforeEach, beforeAll, afterEach, vi } = { describe: _describe, it: _it, expect: _expect, beforeEach: _beforeEach, beforeAll: _beforeAll, afterEach: _afterEach, vi: _vi };
 
   vi.mock('../api');
 
-  const { requestOpenEdit, openForList, showNotification, activeListState, columnsProps, personViewState, auditProps, addDrawerProps, drawerProps } = vi.hoisted(() => ({
+  const { requestOpenEdit, openForList, showNotification, activeListState, columnsProps, personViewState, auditProps, addDrawerProps, drawerProps, pickerProps } = vi.hoisted(() => ({
+    pickerProps: { last: null as any },
     addDrawerProps: { last: null as any },
     drawerProps: { last: null as any },
     requestOpenEdit: vi.fn(),
@@ -119,7 +120,12 @@ if (!hasTestingLibs) {
       return React.useState(false);
     },
   }));
-  vi.mock('../components/NotesDestinationPicker', () => ({ default: () => null }));
+  vi.mock('../components/NotesDestinationPicker', () => ({
+    default: (props: any) => {
+      pickerProps.last = props;
+      return null;
+    },
+  }));
   vi.mock('../components/ManageDestinationsDrawer', () => ({
     default: (props: any) => {
       const React = require('react');
@@ -583,6 +589,36 @@ if (!hasTestingLibs) {
 
       fireEvent.click(await screen.findByRole('button', { name: 'Edit list' }));
       expect(openForList).toHaveBeenCalledWith('list-2', expect.anything());
+    });
+
+    it('Edit list in Person view opens the selected person\'s destination list', async () => {
+      personViewState.mode = 'person';
+      personViewState.report = 'list-2';
+      (apiModule.getPackingList as any).mockImplementation(() => Promise.resolve({
+        response: { ok: true },
+        data: { items: [], checks: [], list: { notes: '' }, trip_destination: tripContext },
+      }));
+      render(<MemoryRouter><Dashboard /></MemoryRouter>);
+      await waitFor(() => expect(personViewState.props?.groups?.length).toBe(2));
+      fireEvent.click(screen.getByRole('button', { name: 'Edit list' }));
+      expect(requestOpenEdit).toHaveBeenCalledWith('list-2');
+      expect(openForList).toHaveBeenCalledWith('list-2', 'Winter Trip');
+    });
+
+    it('Edit list in Columns view opens the active list even after picking another destination for notes', async () => {
+      personViewState.mode = 'columns';
+      pickerProps.last = null;
+      (apiModule.getPackingList as any).mockImplementation(() => Promise.resolve({
+        response: { ok: true },
+        data: { items: [], checks: [], list: { notes: '' }, trip_destination: tripContext },
+      }));
+      render(<MemoryRouter><Dashboard /></MemoryRouter>);
+      await waitFor(() => expect(pickerProps.last).not.toBeNull());
+      act(() => { pickerProps.last.onChange('list-2'); });
+      await waitFor(() => expect(auditProps.last?.packingListId).toBe('list-2'));
+      fireEvent.click(screen.getByRole('button', { name: 'Edit list' }));
+      expect(requestOpenEdit).toHaveBeenCalledWith('list-1');
+      expect(openForList).toHaveBeenCalledWith('list-1', 'Summer Trip');
     });
 
     it('passes the family categories to the person view', async () => {
