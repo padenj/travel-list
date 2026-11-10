@@ -38,6 +38,25 @@ const handlers = () => ({
 describe('PersonView', () => {
   afterEach(cleanup);
 
+  it('shows packed and not-needed rows inline in name order when showPacked', () => {
+    const gs = groups();
+    gs[0].userLists[0].items = [item('a', 'Zebra'), item('b', 'Camera', true), item('c', 'Hat'), item('d', 'Boots')];
+    gs[0].notNeededByUser = { dad: ['d'] };
+    renderWithMantine(<PersonView groups={gs} isTrip currentUserId="dad" showPacked {...handlers()} />);
+    const region = screen.getByRole('region', { name: 'Dad · Paris' });
+    const boxes = within(region).getAllByRole('checkbox') as HTMLInputElement[];
+    expect(boxes.map(b => b.labels?.[0]?.textContent ?? b.closest('label')?.textContent)).toEqual(['Boots', 'Camera', 'Hat', 'Zebra']);
+    expect(boxes[1].checked).toBe(true);
+    expect((within(region).getByText('Boots') as HTMLElement).style.textDecoration).toBe('line-through');
+    expect(screen.queryByText(/packed/)).toBeNull();
+  });
+
+  it('keeps the fold-out when showPacked is off', () => {
+    renderWithMantine(<PersonView groups={groups()} isTrip currentUserId="dad" showPacked={false} {...handlers()} />);
+    expect(screen.queryByRole('checkbox', { name: 'Camera' })).toBeNull();
+    expect(screen.getByText('▸ 1 packed')).toBeTruthy();
+  });
+
   it('shows chips with remaining counts, current user first', () => {
     renderWithMantine(<PersonView groups={groups()} isTrip currentUserId="mom" {...handlers()} />);
     const chips = within(screen.getByRole('toolbar', { name: 'Travelers' })).getAllByRole('button');

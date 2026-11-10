@@ -8,6 +8,7 @@ import PackingListItemAuditModal from './PackingListItemAuditModal';
 import { useOnline } from '../utils/useOnline';
 import PersonView from './PersonView';
 import DestinationColumns from './DestinationColumns';
+import ShowPackedToggle, { useShowPacked } from './ShowPackedToggle';
 import DashboardViewToggle, { useDashboardViewMode } from './DashboardViewToggle';
 import NotesDestinationPicker from './NotesDestinationPicker';
 import ManageDestinationsDrawer from './ManageDestinationsDrawer';
@@ -31,6 +32,7 @@ export default function Dashboard(): React.ReactElement {
   const { impersonatingFamilyId } = useImpersonation();
   const online = useOnline();
   const [viewMode, setViewMode] = useDashboardViewMode();
+  const [showPacked, setShowPacked] = useShowPacked();
   const [groups, setGroups] = useState<DestinationGroup[]>([]);
   const [tripInfo, setTripInfo] = useState<{ id: string; name: string } | null>(null);
   const [listSelectionCount, setListSelectionCount] = useState(0);
@@ -412,7 +414,12 @@ export default function Dashboard(): React.ReactElement {
                 </Button>
               )}
             </Group>
-            {activeListId && <DashboardViewToggle value={viewMode} onChange={setViewMode} />}
+            {activeListId && (
+              <Group gap="sm" wrap="wrap">
+                {viewMode === 'person' && <ShowPackedToggle value={showPacked} onChange={setShowPacked} />}
+                <DashboardViewToggle value={viewMode} onChange={setViewMode} />
+              </Group>
+            )}
           </Group>
           {tripInfo && isTrip && (
             <Text size="sm" c="dimmed">{`${tripInfo.name} · ${groups.length} ${groups.length === 1 ? 'destination' : 'destinations'}`}</Text>
@@ -472,6 +479,7 @@ export default function Dashboard(): React.ReactElement {
                   onMoveSharedItem={handleMoveSharedItem}
                   onSelectedGroupChange={selectNotesGroup}
                   categories={categories}
+                  showPacked={showPacked}
                 />
               ) : (
                 <DestinationColumns

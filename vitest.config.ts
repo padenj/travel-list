@@ -44,7 +44,8 @@ export default defineConfig({
       'client/src/__tests__/useOnline.test.tsx', // Live online/offline hook
       'client/src/__tests__/PersonView.test.tsx', // Person-first dashboard view
       'client/src/__tests__/AddItemsDrawer.test.tsx', // Add-items drawer empty-state create flow
-      'client/src/__tests__/DashboardViewToggle.test.tsx', // Person/Columns toggle persistence
+      'client/src/__tests__/DashboardViewToggle.test.tsx',
+      'client/src/__tests__/ShowPackedToggle.test.tsx', // Show packed switch persistence // Person/Columns toggle persistence
       'client/src/__tests__/PackingListsSideBySide.fillViewport.test.tsx', // fillViewport=false leaves column height natural
       'src/**/*.test.{ts,tsx}',           // Frontend unit tests
       'server/**/*.test.ts',              // Backend unit tests

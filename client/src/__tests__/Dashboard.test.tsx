@@ -109,6 +109,16 @@ if (!hasTestingLibs) {
     default: () => null,
     useDashboardViewMode: () => [personViewState.mode, () => {}],
   }));
+  vi.mock('../components/ShowPackedToggle', () => ({
+    default: ({ value, onChange }: any) => {
+      const React = require('react');
+      return React.createElement('button', { onClick: () => onChange(!value) }, `Show packed:${value}`);
+    },
+    useShowPacked: () => {
+      const React = require('react');
+      return React.useState(false);
+    },
+  }));
   vi.mock('../components/NotesDestinationPicker', () => ({ default: () => null }));
   vi.mock('../components/ManageDestinationsDrawer', () => ({
     default: (props: any) => {
@@ -179,6 +189,22 @@ if (!hasTestingLibs) {
 
     afterEach(() => {
       cleanup();
+    });
+
+    it('shows the Show packed switch only in Person view and feeds PersonView', async () => {
+      personViewState.mode = 'person';
+      const { unmount } = render(<MemoryRouter><Dashboard /></MemoryRouter>);
+      const user = await userEventLib.setup();
+      const toggle = await screen.findByRole('button', { name: 'Show packed:false' });
+      expect(personViewState.props.showPacked).toBe(false);
+      await user.click(toggle);
+      expect(personViewState.props.showPacked).toBe(true);
+      unmount();
+      cleanup();
+      personViewState.mode = 'columns';
+      render(<MemoryRouter><Dashboard /></MemoryRouter>);
+      await screen.findByRole('button', { name: 'Edit list' });
+      expect(screen.queryByText(/Show packed:/)).toBeNull();
     });
 
     it('opens list editor with the active list name', async () => {

@@ -16,6 +16,7 @@ export interface PersonViewProps {
   onMoveSharedItem: (fromListId: string, itemId: string, toListId: string) => void;
   onSelectedGroupChange?: (listId: string) => void;
   categories?: CategoryInfo[];
+  showPacked?: boolean;
 }
 
 interface MoveTarget {
@@ -95,7 +96,8 @@ function CategorizedRows({ rows, categories }: { rows: Row[]; categories: Catego
   );
 }
 
-function ItemSection({ title, color, rows, onAdd, categories }: {
+function ItemSection({ title, color, rows, onAdd, categories, showPacked }: {
+  showPacked: boolean;
   title: string;
   categories: CategoryInfo[];
   color: string | null;
@@ -128,13 +130,13 @@ function ItemSection({ title, color, rows, onAdd, categories }: {
         </ActionIcon>
       </Group>
       {rows.length === 0 && <Text size="sm" c="dimmed">No items yet</Text>}
-      <CategorizedRows rows={todo} categories={categories} />
-      {summary && (
+      <CategorizedRows rows={showPacked ? rows : todo} categories={categories} />
+      {!showPacked && summary && (
         <UnstyledButton onClick={() => setExpanded(v => !v)} aria-expanded={expanded} style={{ minHeight: 44, width: '100%' }}>
           <Text size="sm" c="dimmed">{`${expanded ? '▾' : '▸'} ${summary}`}</Text>
         </UnstyledButton>
       )}
-      {expanded && <CategorizedRows rows={[...packed, ...notNeeded]} categories={categories} />}
+      {!showPacked && expanded && <CategorizedRows rows={[...packed, ...notNeeded]} categories={categories} />}
     </section>
   );
 }
@@ -144,7 +146,7 @@ const toRows = (items: DashboardItem[], notNeededIds: string[], shared: boolean,
 
 export default function PersonView({
   groups, isTrip, currentUserId, onCheckItem, onToggleNotNeeded, onOpenAddDrawer, onItemHistory, onMoveSharedItem, onSelectedGroupChange,
-  categories = [],
+  categories = [], showPacked = false,
 }: PersonViewProps) {
   const people = useMemo(() => orderPeople(groups, currentUserId), [groups, currentUserId]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -195,6 +197,7 @@ export default function PersonView({
         rows={toRows(g.wholeFamilyItems, g.notNeededWhole, false, sharedActionsFor(g))}
         onAdd={() => onOpenAddDrawer(g.listId, null)}
         categories={categories}
+        showPacked={showPacked}
       />
     ));
 
@@ -293,6 +296,7 @@ export default function PersonView({
             ]}
             onAdd={() => onOpenAddDrawer(group.listId, selected.userId)}
             categories={categories}
+            showPacked={showPacked}
           />
         ) : (
           <>
@@ -303,6 +307,7 @@ export default function PersonView({
               rows={toRows(personalItems, group.notNeededByUser[selected.userId] || [], false, personalActions)}
               onAdd={() => onOpenAddDrawer(group.listId, selected.userId)}
               categories={categories}
+              showPacked={showPacked}
             />
             <ItemSection
               key={`${group.listId}:shared`}
@@ -311,6 +316,7 @@ export default function PersonView({
               rows={toRows(group.wholeFamilyItems, group.notNeededWhole, false, sharedActions)}
               onAdd={() => onOpenAddDrawer(group.listId, null)}
               categories={categories}
+              showPacked={showPacked}
             />
           </>
         )}
