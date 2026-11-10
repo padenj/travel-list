@@ -20,8 +20,31 @@
   Total: 9 tables created per spec
 */
 
+// The pre-spec schema only ever existed in development databases (trips.title,
+// trip_element_pricing). Production databases reach this migration with the current
+// schema already created by initializeDatabase, where the drops below fail on FK
+// references from the booking tables — so only rebuild when the legacy shape exists.
+async function hasLegacyTripSchema(db) {
+  const pricing = await db.get(`SELECT 1 FROM sqlite_master WHERE type='table' AND name='trip_element_pricing'`);
+  if (pricing) return true;
+  const tripCols = await db.all(`PRAGMA table_info(trips)`);
+  return tripCols.some((c) => c.name === 'title');
+}
+
 module.exports.up = async function up({ db }) {
-  // First, drop the old incorrect schema in reverse order
+  if (await hasLegacyTripSchema(db)) {
+    const { foreign_keys: fkWasOn } = await db.get(`PRAGMA foreign_keys`);
+    await db.exec(`PRAGMA foreign_keys = OFF`);
+    try {
+      await dropLegacyTripSchema(db);
+    } finally {
+      if (fkWasOn) await db.exec(`PRAGMA foreign_keys = ON`);
+    }
+  }
+  await createTripSchema(db);
+};
+
+async function dropLegacyTripSchema(db) {
   await db.exec(`DROP INDEX IF EXISTS idx_trip_participants_family_member;`);
   await db.exec(`DROP INDEX IF EXISTS idx_trip_participants_trip;`);
   await db.exec(`DROP TABLE IF EXISTS trip_participants;`);
@@ -59,8 +82,9 @@ module.exports.up = async function up({ db }) {
   await db.exec(`DROP INDEX IF EXISTS idx_trips_deleted;`);
   await db.exec(`DROP INDEX IF EXISTS idx_trips_family;`);
   await db.exec(`DROP TABLE IF EXISTS trips;`);
+}
 
-  // Now create the correct schema per spec
+async function createTripSchema(db) {
 
   // 1. Create trips table (with 'name' not 'title', and 'status' field)
   await db.exec(`
@@ -261,7 +285,7 @@ module.exports.up = async function up({ db }) {
       FOREIGN KEY (element_id) REFERENCES trip_elements(id) ON DELETE CASCADE
     );
   `);
-};
+}
 
 module.exports.down = async function down({ db }) {
   // Drop tables in reverse order of creation
