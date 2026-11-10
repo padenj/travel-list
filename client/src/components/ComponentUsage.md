@@ -109,7 +109,7 @@ One entry per trip, labelled "<trip>" or "<trip> · N destinations" (`utils/list
   - `SplitRailLayout`
   - `ManagePackingLists`
 
-The title is the list's label. On a destination list the pencil renames the destination, "Destinations" opens `ManageDestinationsDrawer`, and Move in the member-conflict alert moves the person with their items (`moveFrom`).
+The title is the list's label. On a destination list the pencil renames the destination, "Destinations" opens `ManageDestinationsDrawer`, and Move in the member-conflict alert moves the person with their items (`moveFrom`). When the trip has two or more destinations, a scrollable row of pill tabs (color dot + destination name) switches between destination lists via `openForList`; tabs are disabled while loading, moving or renaming. The dashboard's "Edit list" opens the selected person's destination in Person view.
 
 ### ManagePackingLists
 **Used in:**
@@ -235,7 +235,13 @@ Inline-editable seat number per trip traveler.
 **Used in:**
   - `Dashboard` (Person view; receives `categories` from `Dashboard`'s `getCategories` call)
 
-Person-first packing: a sticky chip row (one per traveler, colored by destination, showing items left), the selected person's items and their destination's shared items, a collapsed "N packed · M not needed" row, swipe to the next or previous person, and a ⋯ menu (Not needed / Move to <destination> / History). Move and not-needed actions are disabled offline (`useOnline`).
+Person-first packing: a sticky chip row (one per traveler, colored by destination, showing items left), the selected person's items and their destination's shared items, a collapsed "N packed · M not needed" row, swipe to the next or previous person, and a ⋯ menu (Not needed / Move to <destination> / History). Move and not-needed actions are disabled offline (`useOnline`). Section titles are "<person> · <destination>" and "<destination> shared" (no trip name). When the person is the only traveler at their destination, both are combined into one category-grouped section with a "shared" badge on shared rows. `showPacked` keeps packed and not-needed items inline in their category instead of behind the fold-out.
+
+### ShowPackedToggle
+**Used in:**
+  - `Dashboard` (Person view only)
+
+"Show packed" `Switch`. `useShowPacked` stores the choice in `localStorage.personViewShowPacked` (default off).
 
 ### DestinationColumns
 **Used in:**
