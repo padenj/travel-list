@@ -50,6 +50,7 @@ export default defineConfig({
       'client/src/__tests__/PackingListsSideBySide.fillViewport.test.tsx', // fillViewport=false leaves column height natural
       'client/src/__tests__/lodging.test.ts', // Lodging labels, per-night and cancel deadline helpers
       'client/src/__tests__/lodgingDrafts.test.ts', // Stay and room form drafts
+      'client/src/__tests__/lodgingRows.test.ts', // Lodging row model and totals
       'src/**/*.test.{ts,tsx}',           // Frontend unit tests
       'server/**/*.test.ts',              // Backend unit tests
       'tests/integration/**/*.test.ts',   // Integration tests
