@@ -48,6 +48,7 @@ export default defineConfig({
       'client/src/__tests__/DashboardViewToggle.test.tsx',
       'client/src/__tests__/ShowPackedToggle.test.tsx', // Show packed switch persistence // Person/Columns toggle persistence
       'client/src/__tests__/PackingListsSideBySide.fillViewport.test.tsx', // fillViewport=false leaves column height natural
+      'client/src/__tests__/lodging.test.ts', // Lodging labels, per-night and cancel deadline helpers
       'src/**/*.test.{ts,tsx}',           // Frontend unit tests
       'server/**/*.test.ts',              // Backend unit tests
       'tests/integration/**/*.test.ts',   // Integration tests
