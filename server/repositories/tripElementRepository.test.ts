@@ -91,13 +91,12 @@ describe('TripElementRepository', () => {
         sortPosition: 2,
         typeSpecificData: {
           address: '123 Main St, LA',
+          phone: '+1 555 0100',
+          website: 'https://grand.example',
           checkInDate: '2026-06-01',
+          checkInTime: '15:00',
           checkOutDate: '2026-06-05',
-          roomType: 'Deluxe Suite',
-          bookingSource: 'Booking.com',
-          advertisedPriceCash: 200,
-          advertisedPricePoints: 3000,
-          advertisedLoyaltyProgram: 'Hilton'
+          checkOutTime: '11:00'
         }
       });
 
@@ -106,6 +105,9 @@ describe('TripElementRepository', () => {
       expect((element as any).hotelDetails).toBeTruthy();
       expect((element as any).hotelDetails.address).toBe('123 Main St, LA');
       expect((element as any).hotelDetails.checkInDate).toBe('2026-06-01');
+      expect((element as any).hotelDetails).toMatchObject({
+        phone: '+1 555 0100', website: 'https://grand.example', checkInTime: '15:00', checkOutTime: '11:00',
+      });
     });
 
     it('should create a car rental element with details', async () => {
@@ -697,6 +699,65 @@ describe('TripElementRepository', () => {
       spy.mockRestore();
       const after = ((await repo.getElementById(element.id)) as any).legs;
       expect(after.map((l: any) => l.id)).toEqual(original.map((l: any) => l.id));
+    });
+  });
+
+  describe('hotel elements', () => {
+    it('creates and hydrates hotel details', async () => {
+      const el = await repo.createElement(tripId, {
+        elementType: 'hotel', name: 'Casa Azul', notes: 'Quiet floor',
+        typeSpecificData: { address: '1 Beach Rd\nCabo', phone: '+52 1', website: 'https://casa.example',
+          checkInDate: '2027-01-01', checkInTime: '15:00', checkOutDate: '2027-01-04', checkOutTime: '11:00' },
+      });
+      const got = await repo.getElementById(el.id);
+      expect((got as any)?.hotelDetails).toMatchObject({
+        address: '1 Beach Rd\nCabo', phone: '+52 1', website: 'https://casa.example',
+        checkInDate: '2027-01-01', checkInTime: '15:00', checkOutDate: '2027-01-04', checkOutTime: '11:00',
+        destinationId: null, destinationName: null,
+      });
+    });
+
+    it('hydrates hotels in getElementsByTrip', async () => {
+      await repo.createElement(tripId, {
+        elementType: 'hotel', name: 'Casa',
+        typeSpecificData: { checkInDate: '2027-01-01', checkOutDate: '2027-01-04' },
+      });
+      const list = await repo.getElementsByTrip(tripId);
+      expect((list[0] as any).hotelDetails).toMatchObject({ checkInDate: '2027-01-01' });
+    });
+
+    it('partially updates hotel details, null clears a field', async () => {
+      const el = await repo.createElement(tripId, {
+        elementType: 'hotel', name: 'Casa',
+        typeSpecificData: { checkInDate: '2027-01-01', checkOutDate: '2027-01-04', phone: '123' },
+      });
+      await repo.updateElement(el.id, { typeSpecificData: { checkOutTime: '10:00', phone: null } });
+      const got = await repo.getElementById(el.id);
+      expect((got as any)?.hotelDetails).toMatchObject({ checkInDate: '2027-01-01', checkOutTime: '10:00', phone: null });
+    });
+
+    it('inserts the details row if it is missing', async () => {
+      const el = await repo.createElement(tripId, { elementType: 'hotel', name: 'Bare' });
+      const db = await getDb();
+      await db.run('DELETE FROM hotel_element_details WHERE element_id = ?', [el.id]);
+      await repo.updateElement(el.id, { typeSpecificData: { checkInDate: '2027-02-01', checkOutDate: '2027-02-02' } });
+      expect(((await repo.getElementById(el.id)) as any)?.hotelDetails).toMatchObject({ checkInDate: '2027-02-01' });
+    });
+
+    it('ignores a soft-deleted destination when hydrating', async () => {
+      const db = await getDb();
+      await db.run(`INSERT INTO packing_lists (id, family_id, name) VALUES ('pl1', ?, 'List')`, [familyId]);
+      await db.run(
+        `INSERT INTO trip_destinations (id, trip_id, name, color, position, packing_list_id) VALUES ('d1', ?, 'Cabo', 'blue', 0, 'pl1')`,
+        [tripId]
+      );
+      const el = await repo.createElement(tripId, {
+        elementType: 'hotel', name: 'Casa',
+        typeSpecificData: { checkInDate: '2027-01-01', checkOutDate: '2027-01-02', destinationId: 'd1' },
+      });
+      expect(((await repo.getElementById(el.id)) as any)?.hotelDetails).toMatchObject({ destinationId: 'd1', destinationName: 'Cabo' });
+      await db.run(`UPDATE trip_destinations SET deleted_at = CURRENT_TIMESTAMP WHERE id = 'd1'`);
+      expect(((await repo.getElementById(el.id)) as any)?.hotelDetails).toMatchObject({ destinationId: null, destinationName: null });
     });
   });
 });
