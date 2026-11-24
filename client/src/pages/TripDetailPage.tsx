@@ -105,7 +105,7 @@ export function TripDetailPage() {
 
   return (
     <Container size="lg" py="md">
-      <TripHeader trip={trip} onAdd={() => setAdding(true)} />
+      <TripHeader trip={trip} onAddFlight={() => setAdding(true)} onAddLodging={() => {}} />
       <TripTravelersStrip
         tripId={tripId}
         participants={participants}

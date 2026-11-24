@@ -193,7 +193,8 @@ describe('TripDetailPage', () => {
     api.createElement.mockResolvedValue({ id: 'el-2' });
     renderPage();
 
-    await user.click(await screen.findByRole('button', { name: 'Add flight' }));
+    await user.click(await screen.findByRole('button', { name: 'Add' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Flight' }));
     const dialog = await screen.findByRole('dialog', { name: 'Add flight' });
     expect(within(dialog).queryByLabelText('Name')).toBeNull();
     await user.click(within(dialog).getByRole('button', { name: 'mock fill leg' }));
@@ -222,7 +223,8 @@ describe('TripDetailPage', () => {
   it('blocks saving an incomplete leg with an inline message', async () => {
     const user = userEvent.setup();
     renderPage();
-    await user.click(await screen.findByRole('button', { name: 'Add flight' }));
+    await user.click(await screen.findByRole('button', { name: 'Add' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Flight' }));
     const dialog = await screen.findByRole('dialog', { name: 'Add flight' });
     await user.click(within(dialog).getByRole('button', { name: 'Save flight' }));
     expect(await within(dialog).findByText('Enter the flight date')).toBeTruthy();
@@ -233,7 +235,8 @@ describe('TripDetailPage', () => {
     const user = userEvent.setup();
     api.createElement.mockResolvedValue({ id: 'el-5' });
     renderPage();
-    await user.click(await screen.findByRole('button', { name: 'Add flight' }));
+    await user.click(await screen.findByRole('button', { name: 'Add' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Flight' }));
     const dialog = await screen.findByRole('dialog', { name: 'Add flight' });
     await user.click(within(dialog).getByRole('button', { name: 'mock two legs' }));
     await user.click(within(dialog).getByRole('button', { name: 'Save flight' }));
