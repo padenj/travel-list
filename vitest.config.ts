@@ -52,6 +52,7 @@ export default defineConfig({
       'client/src/__tests__/lodgingDrafts.test.ts', // Stay and room form drafts
       'client/src/__tests__/lodgingRows.test.ts', // Lodging row model and totals
       'client/src/__tests__/AddMenu.test.tsx', // Add menu (Flight / Lodging)
+      'client/src/__tests__/AddLodgingDialog.test.tsx', // Add lodging dialog
       'src/**/*.test.{ts,tsx}',           // Frontend unit tests
       'server/**/*.test.ts',              // Backend unit tests
       'tests/integration/**/*.test.ts',   // Integration tests
