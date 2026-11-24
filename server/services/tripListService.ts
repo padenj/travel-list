@@ -209,6 +209,7 @@ export async function deleteDestinationTx(
     : 0;
   const now = new Date().toISOString();
   await db.run(`UPDATE trip_destinations SET deleted_at = ?, updated_at = ? WHERE id = ?`, [now, now, destination.id]);
+  await db.run(`UPDATE hotel_element_details SET destination_id = NULL WHERE destination_id = ?`, [destination.id]);
   await db.run(`DELETE FROM trip_packing_lists WHERE trip_id = ? AND packing_list_id = ?`, [destination.tripId, destination.packingListId]);
   const { count } = await db.get(`SELECT COUNT(*) AS count FROM packing_list_items WHERE packing_list_id = ?`, [destination.packingListId]);
   if (input.deleteList || count === 0) {

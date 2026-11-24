@@ -4,6 +4,7 @@ import { closeDb, getDb } from '../db';
 import { withTransaction } from '../utils/transaction';
 import { TripDestinationRepository } from '../repositories/tripDestinationRepository';
 import { TripRepository } from '../repositories/tripRepository';
+import { TripElementRepository } from '../repositories/tripElementRepository';
 import {
   createTripWithFirstDestination,
   createShellTripForListTx,
@@ -184,6 +185,29 @@ describe('tripListService', () => {
       expect((await trips.getTripById(place!.tripId))!.name).toBe('Rome');
       expect(await listName(rome.packingListId)).toBe('Rome');
       expect((await repo.listForTrip(seed.tripId)).map(d => d.name)).toEqual(['Paris']);
+    });
+
+    it('clears hotel destination_id when the destination is deleted', async () => {
+      await repo.create({ tripId: seed.tripId, familyId: seed.familyId, name: 'Paris', memberIds: [seed.dad] });
+      const rome = await repo.create({ tripId: seed.tripId, familyId: seed.familyId, name: 'Rome', memberIds: [seed.mom] });
+      const hotel = await new TripElementRepository().createElement(seed.tripId, {
+        elementType: 'hotel', name: 'Casa',
+        typeSpecificData: { checkInDate: '2027-03-01', checkOutDate: '2027-03-03', destinationId: rome.id },
+      });
+      await tx(db => deleteDestinationTx(db, { destination: rome, familyId: seed.familyId, deleteList: true }));
+      const row = await seed.db.get('SELECT destination_id FROM hotel_element_details WHERE element_id = ?', [hotel.id]);
+      expect(row.destination_id).toBeNull();
+    });
+
+    it('softDelete on the repository also clears hotel destination_id', async () => {
+      const rome = await repo.create({ tripId: seed.tripId, familyId: seed.familyId, name: 'Rome', memberIds: [seed.mom] });
+      const hotel = await new TripElementRepository().createElement(seed.tripId, {
+        elementType: 'hotel', name: 'Casa',
+        typeSpecificData: { checkInDate: '2027-03-01', checkOutDate: '2027-03-03', destinationId: rome.id },
+      });
+      await repo.softDelete(rome.id);
+      const row = await seed.db.get('SELECT destination_id FROM hotel_element_details WHERE element_id = ?', [hotel.id]);
+      expect(row.destination_id).toBeNull();
     });
 
     it('deletes an empty list instead of re-homing it', async () => {
