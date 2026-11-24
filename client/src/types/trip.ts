@@ -55,17 +55,41 @@ export interface FlightLeg {
 }
 
 export interface HotelDetails {
-  elementId: string;
-  address?: string;
-  checkInDate: string;
-  checkOutDate: string;
-  roomType?: string;
-  bookingSource?: string;
-  advertisedPriceCash?: number;
-  advertisedPricePoints?: number;
-  advertisedLoyaltyProgram?: string;
-  createdAt: string;
-  updatedAt: string;
+  address: string | null;
+  phone: string | null;
+  website: string | null;
+  checkInDate: string | null;
+  checkInTime: string | null;
+  checkOutDate: string | null;
+  checkOutTime: string | null;
+  destinationId: string | null;
+  destinationName?: string | null;
+}
+
+export type RoomType = 'standard' | 'suite' | 'studio' | '1br' | '2br' | '3br' | 'other';
+export type BedType = 'king' | 'queen' | 'full' | 'twin' | 'sofa_bed' | 'bunk' | 'crib';
+export type AmenityKey = 'breakfast' | 'fridge' | 'microwave' | 'kitchen' | 'pool' | 'hot_tub' | 'parking' | 'wifi' | 'laundry' | 'airport_shuttle' | 'gym';
+export type Refundability = 'free' | 'partial' | 'nonrefundable';
+
+export interface BedCount { type: BedType; count: number }
+
+export interface LodgingRoom {
+  roomType: RoomType | null;
+  beds: BedCount[];
+  roomDescription: string | null;
+  amenities: AmenityKey[];
+  otherAmenities: string | null;
+  refundability: Refundability | null;
+  cancelBy: string | null;
+  cancellationPolicy: string | null;
+}
+
+export interface BookingCoupon {
+  id?: string;
+  code: string;
+  savingsCash: number | null;
+  savingsPoints: number | null;
+  notes: string | null;
 }
 
 export interface CarRentalDetails {
@@ -161,6 +185,11 @@ export interface Booking {
   currentConfirmationNumber: string | null;
   actualTotalCash: number;
   actualTotalPoints: number;
+  bookingSite?: string | null;
+  siteItineraryNumber?: string | null;
+  advertisedIncludesTaxes?: boolean;
+  room?: LodgingRoom | null;
+  coupons?: BookingCoupon[];
 }
 
 export interface CreateBookingPayload {
@@ -171,6 +200,11 @@ export interface CreateBookingPayload {
   notes?: string | null;
   elementIds: string[];
   travelerIds: string[];
+  bookingSite?: string | null;
+  siteItineraryNumber?: string | null;
+  advertisedIncludesTaxes?: boolean;
+  room?: LodgingRoom | null;
+  coupons?: Omit<BookingCoupon, 'id'>[];
 }
 
 export interface BookingTransaction {

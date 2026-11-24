@@ -8,7 +8,7 @@ import { getAuthToken } from '../api';
 
 const API_BASE = '/api/trips';
 
-type TripElementWritePayload = Omit<Partial<TripElement>, 'notes'> & {
+export type TripElementWritePayload = Omit<Partial<TripElement>, 'notes'> & {
   notes?: string | null;
   typeSpecificData?: Record<string, unknown>;
 };
