@@ -142,9 +142,9 @@ Compact flights table (CSS grid) that reflows to cards on mobile; shows legs, la
 
 ### ElementDialog
 **Used in:**
-  - `pages/TripDetailPage.tsx` (hosts `FlightDetailsTab`, bookings and `FlightSeatsTab`)
+  - `pages/TripDetailPage.tsx` (hosts the flight tabs and the lodging Details/Rooms tabs)
 
-Generic modal with swipeable Details/Bookings/Seats tabs; full-screen on mobile.
+Generic modal with swipeable tabs (Details/Bookings/Seats for flights, Details/Rooms for stays); `initialTab` picks the starting tab; full-screen on mobile.
 
 ### FlightDetailsTab
 **Used in:**
@@ -168,7 +168,69 @@ Create-flight modal: `FlightLegsEditor` + notes. No name field — the server ti
 **Used in:**
   - `pages/TripDetailPage.tsx`
 
-Trip title, badge, dates and Add flight button (floating on mobile).
+Trip title, badge, dates and the `AddMenu` (floating on mobile).
+
+### AddMenu
+**Used in:**
+  - `TripHeader`
+
+Header "+ Add" menu with Flight and Lodging items.
+
+### LodgingSection
+**Used in:**
+  - `pages/TripDetailPage.tsx`
+
+Lodging rows and total on the trip page.
+
+### LodgingStayForm
+**Used in:**
+  - `AddLodgingDialog`
+  - `LodgingDetailsTab`
+
+Stay fields shared by add and edit.
+
+### AddLodgingDialog
+**Used in:**
+  - `pages/TripDetailPage.tsx`
+
+Creates a stay, then the page opens it on the Rooms tab.
+
+### LodgingDetailsTab
+**Used in:**
+  - `pages/TripDetailPage.tsx` (passed into `ElementDialog`)
+
+Stay read view with maps, phone and website links, edit and delete.
+
+### LodgingRoomsTab
+**Used in:**
+  - `pages/TripDetailPage.tsx` (passed into `ElementDialog`)
+
+Rooms list, "+ Room" button and a "Not in a room" hint.
+
+### RoomBlock
+**Used in:**
+  - `LodgingRoomsTab`
+
+Room summary lines plus `BookingTransactionList`.
+
+### RoomForm
+**Used in:**
+  - `LodgingRoomsTab` (create)
+  - `RoomBlock` (edit)
+
+Room booking form.
+
+### BedsEditor
+**Used in:**
+  - `RoomForm`
+
+Bed type and count row editor.
+
+### CouponsEditor
+**Used in:**
+  - `RoomForm`
+
+Coupon row editor.
 
 ### TripTravelersStrip
 **Used in:**
@@ -203,7 +265,8 @@ Read-mode booking: confirmation (and original), traveler chips, money line, "Cov
 
 ### BookingTransactionList
 **Used in:**
-  - `BookingBlock` (only consumer)
+  - `BookingBlock`
+  - `RoomBlock`
 
 Lists/add/removes transactions for a single booking; supports recording price-drop rebookings (negative amount + new confirmation number) and free-text fee/tax breakdown notes. Reports its transaction count via `onCountChange` and whether its add form is open via `onEditingChange` (both read by `BookingBlock`).
 

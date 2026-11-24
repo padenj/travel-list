@@ -228,6 +228,14 @@ This document maps server routes implemented in `server/routes.ts` to their purp
   - Purpose: Body `{ name, includeOneOffs }`. Creates a dateless trip with a copy of every destination and its list (members, item groups, unchecked items; one-off items only with `includeOneOffs`). Returns 201 `{ trip, destinations }`.
   - Client helper: `tripApi.copyTrip`
 
+- POST /trips/:tripId/elements, PUT /trips/:tripId/elements/:elementId
+  - Purpose: Create/update a trip element. For `elementType: 'hotel'`, `typeSpecificData` carries `address`, `phone`, `website`, `checkInDate`, `checkInTime`, `checkOutDate`, `checkOutTime`, `destinationId` (must belong to the trip, else 404). Check-in and check-out dates are required on create; check-out must be after check-in. Elements return the stay as `hotelDetails` (plus `destinationName`).
+  - Client helper: `tripApi.createElement`, `tripApi.updateElement`
+
+- POST /trips/:tripId/bookings, PUT /trips/:tripId/bookings/:bookingId
+  - Purpose: Bookings for flights or hotel rooms. A booking links either flights or exactly one hotel (400 otherwise). Hotel-room bookings accept `bookingSite`, `siteItineraryNumber`, `advertisedIncludesTaxes`, `room` (`roomType`, `beds`, `roomDescription`, `amenities`, `otherAmenities`, `refundability`, `cancelBy`, `cancellationPolicy`; `null` removes it) and `coupons` (full replacement). `travelerIds` may be empty for hotel rooms. 409 when a traveler is already in another booking for the same element.
+  - Client helper: `tripApi.createBooking`, `tripApi.updateBooking`
+
 ---
 
 ## Trip Destinations
@@ -245,7 +253,7 @@ This document maps server routes implemented in `server/routes.ts` to their purp
   - Client helper: `tripApi.updateDestination`
 
 - DELETE /trips/:tripId/destinations/:destinationId
-  - Purpose: Remove a destination atomically. Body `{ moveSharedItemsTo?, deleteList? }`; 409 `last_destination` when it is the trip's only destination; 409 `destination_has_items` when the list has items and neither is given. A kept list moves into its own new trip.
+  - Purpose: Remove a destination atomically. Body `{ moveSharedItemsTo?, deleteList? }`; 409 `last_destination` when it is the trip's only destination; 409 `destination_has_items` when the list has items and neither is given. A kept list moves into its own new trip. Stays that pointed at the destination keep their data and have `destinationId` cleared.
   - Client helper: `tripApi.deleteDestination`
 
 - POST /trips/:tripId/split
