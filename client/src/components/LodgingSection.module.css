@@ -1,0 +1,121 @@
+.section {
+  margin-top: var(--mantine-spacing-md);
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-sm);
+  overflow: hidden;
+}
+
+.band {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--mantine-spacing-sm);
+  padding: 6px 10px;
+  background: var(--mantine-color-default-hover);
+}
+
+.bandTitle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.8fr) minmax(0, 1.4fr) minmax(0, 1.3fr) minmax(0, 1.3fr) auto;
+  column-gap: var(--mantine-spacing-sm);
+  align-items: baseline;
+  padding: 4px 10px;
+}
+
+.columns {
+  font-size: var(--mantine-font-size-xs);
+  color: var(--mantine-color-dimmed);
+  border-bottom: 1px solid var(--mantine-color-default-border);
+}
+
+.row {
+  cursor: pointer;
+  font-size: var(--mantine-font-size-sm);
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
+.row[data-tone='a'] {
+  background: var(--mantine-color-yellow-light);
+}
+
+.row[data-tone='b'] {
+  background: var(--mantine-color-grape-light);
+}
+
+.row:hover {
+  filter: brightness(0.96);
+}
+
+.row:focus-visible {
+  outline: 2px solid var(--mantine-color-blue-filled);
+  outline-offset: -2px;
+}
+
+.name { grid-column: 1; overflow-wrap: anywhere; }
+.date { grid-column: 2; }
+.price { grid-column: 3; }
+.confirm { grid-column: 4; overflow-wrap: anywhere; }
+.badges { grid-column: 5; }
+
+.strong {
+  font-weight: 700;
+}
+
+.sub {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--mantine-spacing-xs);
+  padding-left: 1.25rem;
+  font-size: var(--mantine-font-size-xs);
+}
+
+.deadline {
+  color: var(--mantine-color-dimmed);
+}
+
+.deadline[data-state='soon'] {
+  color: var(--mantine-color-orange-filled);
+  font-weight: 600;
+}
+
+.deadline[data-state='passed'] {
+  text-decoration: line-through;
+}
+
+@media (max-width: 48em) {
+  .grid {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .columns {
+    display: none;
+  }
+
+  .name,
+  .price {
+    grid-column: 1;
+  }
+
+  .date,
+  .confirm {
+    grid-column: 2;
+    text-align: right;
+  }
+
+  .badges {
+    grid-column: 1 / -1;
+  }
+
+  .sub {
+    padding-left: 0;
+  }
+}
