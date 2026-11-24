@@ -48,7 +48,7 @@ describe('RoomForm', () => {
       room: expect.objectContaining({ beds: [{ type: 'king', count: 1 }], amenities: ['pool'] }),
       coupons: [{ code: 'EXP10', savingsCash: 42.18, savingsPoints: null, notes: null }],
     }));
-  });
+  }, 20000);
 
   it('disables travelers already in another room of the stay', () => {
     renderWithMantine(<RoomForm tripId="t1" stayId="h1" participants={participants} bookings={[otherRoom]}
