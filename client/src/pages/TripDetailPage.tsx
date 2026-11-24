@@ -1,18 +1,23 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { Alert, Button, Container, Loader, Text } from '@mantine/core';
-import { Booking, Trip, TripElement, TripParticipant } from '../types/trip';
+import { Alert, Button, Container, Group, Loader, Text } from '@mantine/core';
+import { Booking, Trip, TripDestination, TripElement, TripParticipant } from '../types/trip';
 import { tripApi } from '../api/tripApi';
 import { buildFlightRows, flightTotals } from '../utils/flightRows';
+import { buildLodgingRows, lodgingTotals } from '../utils/lodgingRows';
 import { TripHeader } from '../components/TripHeader';
 import { TripTravelersStrip } from '../components/TripTravelersStrip';
 import TripPackingSection from '../components/TripPackingSection';
 import { FlightsSection } from '../components/FlightsSection';
-import { ElementDialog } from '../components/ElementDialog';
+import { ElementDialog, ElementDialogTab } from '../components/ElementDialog';
 import { FlightDetailsTab } from '../components/FlightDetailsTab';
 import { FlightSeatsTab } from '../components/FlightSeatsTab';
 import { AddElementDialog } from '../components/AddElementDialog';
 import { BookingCard } from '../components/BookingCard';
+import { LodgingSection } from '../components/LodgingSection';
+import { AddLodgingDialog } from '../components/AddLodgingDialog';
+import { LodgingDetailsTab } from '../components/LodgingDetailsTab';
+import { LodgingRoomsTab } from '../components/LodgingRoomsTab';
 import '../styles/trips.css';
 
 export function TripDetailPage() {
@@ -21,6 +26,9 @@ export function TripDetailPage() {
   const [elements, setElements] = useState<TripElement[]>([]);
   const [participants, setParticipants] = useState<TripParticipant[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
+  const [destinations, setDestinations] = useState<TripDestination[]>([]);
+  const [addingLodging, setAddingLodging] = useState(false);
+  const [openRoomForm, setOpenRoomForm] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [reloadError, setReloadError] = useState<string | null>(null);
@@ -35,16 +43,18 @@ export function TripDetailPage() {
   const load = useCallback(async (id: string, initial = false) => {
     try {
       if (initial) setLoading(true);
-      const [tripData, elementsData, participantsData, bookingsData] = await Promise.all([
+      const [tripData, elementsData, participantsData, bookingsData, destinationsData] = await Promise.all([
         tripApi.getTrip(id),
         tripApi.listElements(id),
         tripApi.listParticipants(id),
         tripApi.listBookings(id),
+        tripApi.listDestinations(id),
       ]);
       setTrip(tripData);
       setElements(elementsData);
       setParticipants(participantsData);
       setBookings(bookingsData);
+      setDestinations(destinationsData);
       setLoadError(null);
       setReloadError(null);
     } catch (err) {
@@ -82,9 +92,16 @@ export function TripDetailPage() {
 
   const rows = useMemo(() => buildFlightRows(elements, bookings), [elements, bookings]);
   const totals = useMemo(() => flightTotals(elements, bookings), [elements, bookings]);
-  const hiddenCount = elements.filter(e => e.elementType !== 'flight').length;
+  const lodgingRows = useMemo(() => buildLodgingRows(elements, bookings, destinations), [elements, bookings, destinations]);
+  const lodgingTotal = useMemo(() => lodgingTotals(elements, bookings), [elements, bookings]);
+  const hiddenCount = elements.filter(e => e.elementType !== 'flight' && e.elementType !== 'hotel').length;
   const selected = elements.find(e => e.id === selectedId) ?? null;
   const selectedBookingCount = selected ? bookings.filter(b => b.elementIds.includes(selected.id)).length : 0;
+
+  const openElement = (id: string | null, roomForm = false) => {
+    setOpenRoomForm(roomForm);
+    setSelectedId(id);
+  };
 
   if (loading) {
     return <Container size="lg" py="md"><Loader size="sm" aria-label="Loading" /></Container>;
@@ -103,9 +120,92 @@ export function TripDetailPage() {
     return <Container size="lg" py="md"><Text>Trip not found</Text></Container>;
   }
 
+  const flightTabs = (el: TripElement): ElementDialogTab[] => [
+    {
+      value: 'details',
+      label: 'Details',
+      content: (
+        <FlightDetailsTab
+          key={el.id}
+          tripId={tripId}
+          element={el}
+          onChanged={reload}
+          onDeleted={async () => {
+            openElement(null);
+            await reload();
+          }}
+          onEditingChange={setEditingDetails}
+        />
+      ),
+    },
+    {
+      value: 'bookings',
+      label: 'Bookings',
+      count: selectedBookingCount,
+      content: (
+        <BookingCard
+          tripId={tripId}
+          elementId={el.id}
+          elements={elements}
+          participants={participants}
+          bookings={bookings}
+          onParticipantsChanged={handleParticipantsFromBooking}
+          refreshKey={bookingsVersion}
+          onBookingsChanged={reloadBookings}
+          onEditingChange={setEditingBookings}
+        />
+      ),
+    },
+    {
+      value: 'seats',
+      label: 'Seats',
+      content: <FlightSeatsTab tripId={tripId} element={el} travelers={participants} />,
+    },
+  ];
+
+  const hotelTabs = (el: TripElement): ElementDialogTab[] => [
+    {
+      value: 'details',
+      label: 'Details',
+      content: (
+        <LodgingDetailsTab
+          key={el.id}
+          tripId={tripId}
+          element={el}
+          destinations={destinations}
+          onChanged={reload}
+          onDeleted={async () => {
+            openElement(null);
+            await reload();
+          }}
+          onEditingChange={setEditingDetails}
+        />
+      ),
+    },
+    {
+      value: 'rooms',
+      label: 'Rooms',
+      count: selectedBookingCount,
+      content: (
+        <LodgingRoomsTab
+          key={el.id}
+          tripId={tripId}
+          stay={el}
+          participants={participants}
+          bookings={bookings}
+          onParticipantsChanged={handleParticipantsFromBooking}
+          refreshKey={bookingsVersion}
+          onBookingsChanged={reloadBookings}
+          onEditingChange={setEditingBookings}
+          initialFormOpen={openRoomForm}
+        />
+      ),
+    },
+  ];
+
   return (
     <Container size="lg" py="md">
-      <TripHeader trip={trip} onAddFlight={() => setAdding(true)} onAddLodging={() => {}} />
+      <TripHeader trip={trip} onAddFlight={() => setAdding(true)} onAddLodging={() => setAddingLodging(true)} />
       <TripTravelersStrip
         tripId={tripId}
         participants={participants}
@@ -118,10 +218,16 @@ export function TripDetailPage() {
         <Alert color="red" mt="sm" withCloseButton onClose={() => setReloadError(null)}>{reloadError}</Alert>
       )}
 
-      {rows.length === 0 ? (
-        <Button mt="md" variant="light" onClick={() => setAdding(true)}>Add your first flight</Button>
+      {rows.length === 0 && lodgingRows.length === 0 ? (
+        <Group mt="md" gap="xs">
+          <Button variant="light" onClick={() => setAdding(true)}>Add a flight</Button>
+          <Button variant="light" onClick={() => setAddingLodging(true)}>Add lodging</Button>
+        </Group>
       ) : (
-        <FlightsSection rows={rows} totalLabel={totals.label} onOpen={setSelectedId} />
+        <>
+          {rows.length > 0 && <FlightsSection rows={rows} totalLabel={totals.label} onOpen={id => openElement(id)} />}
+          {lodgingRows.length > 0 && <LodgingSection rows={lodgingRows} totalLabel={lodgingTotal.label} onOpen={id => openElement(id)} />}
+        </>
       )}
 
       {hiddenCount > 0 && (
@@ -131,6 +237,18 @@ export function TripDetailPage() {
             : `${hiddenCount} other elements hidden until their sections are built`}
         </Text>
       )}
+
+      <AddLodgingDialog
+        tripId={tripId}
+        opened={addingLodging}
+        destinations={destinations}
+        onClose={() => setAddingLodging(false)}
+        onCreated={async created => {
+          setAddingLodging(false);
+          await reload();
+          openElement(created.id, true);
+        }}
+      />
 
       <AddElementDialog
         tripId={tripId}
@@ -144,52 +262,13 @@ export function TripDetailPage() {
 
       {selected && (
         <ElementDialog
+          key={selected.id}
           opened
-          onClose={() => setSelectedId(null)}
+          onClose={() => openElement(null)}
           title={selected.name}
           swipeEnabled={!editingDetails && !editingBookings}
-          tabs={[
-            {
-              value: 'details',
-              label: 'Details',
-              content: (
-                <FlightDetailsTab
-                  key={selected.id}
-                  tripId={tripId}
-                  element={selected}
-                  onChanged={reload}
-                  onDeleted={async () => {
-                    setSelectedId(null);
-                    await reload();
-                  }}
-                  onEditingChange={setEditingDetails}
-                />
-              ),
-            },
-            {
-              value: 'bookings',
-              label: 'Bookings',
-              count: selectedBookingCount,
-              content: (
-                <BookingCard
-                  tripId={tripId}
-                  elementId={selected.id}
-                  elements={elements}
-                  participants={participants}
-                  bookings={bookings}
-                  onParticipantsChanged={handleParticipantsFromBooking}
-                  refreshKey={bookingsVersion}
-                  onBookingsChanged={reloadBookings}
-                  onEditingChange={setEditingBookings}
-                />
-              ),
-            },
-            {
-              value: 'seats',
-              label: 'Seats',
-              content: <FlightSeatsTab tripId={tripId} element={selected} travelers={participants} />,
-            },
-          ]}
+          initialTab={selected.elementType === 'hotel' && openRoomForm ? 'rooms' : undefined}
+          tabs={selected.elementType === 'hotel' ? hotelTabs(selected) : flightTabs(selected)}
         />
       )}
     </Container>

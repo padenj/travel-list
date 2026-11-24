@@ -1,7 +1,7 @@
 /* @vitest-environment jsdom */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import { cleanup, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithMantine } from '../test-utils/renderWithMantine';
 
@@ -11,6 +11,7 @@ vi.mock('../api/tripApi', () => ({
     listElements: vi.fn(),
     listParticipants: vi.fn(),
     listBookings: vi.fn(),
+    listDestinations: vi.fn(),
     createElement: vi.fn(),
     updateElement: vi.fn(),
     deleteElement: vi.fn(),
@@ -36,6 +37,11 @@ vi.mock('../components/BookingCard', () => ({
       <span>{`${bookings.length} trip bookings`}</span>
       <button type="button" onClick={() => onBookingsChanged()}>mock bookings changed</button>
     </div>
+  ),
+}));
+vi.mock('../components/LodgingRoomsTab', () => ({
+  LodgingRoomsTab: ({ stay, initialFormOpen }: { stay: { id: string }; initialFormOpen?: boolean }) => (
+    <div>{`rooms tab ${stay.id}${initialFormOpen ? ' form open' : ''}`}</div>
   ),
 }));
 vi.mock('../components/FlightSeatGrid', () => ({
@@ -135,6 +141,7 @@ describe('TripDetailPage', () => {
     api.listElements.mockResolvedValue([]);
     api.listParticipants.mockResolvedValue([]);
     api.listBookings.mockResolvedValue([]);
+    api.listDestinations.mockResolvedValue([]);
   });
 
   it('renders the compact page with header, travelers and flight rows', async () => {
@@ -164,9 +171,10 @@ describe('TripDetailPage', () => {
     expect(within(flights).getByText('ABC123')).toBeTruthy();
   });
 
-  it('shows an add-first-flight button when there are no elements', async () => {
+  it('shows add-flight and add-lodging buttons when there are no elements', async () => {
     renderPage();
-    expect(await screen.findByRole('button', { name: 'Add your first flight' })).toBeTruthy();
+    expect(await screen.findByRole('button', { name: 'Add a flight' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Add lodging' })).toBeTruthy();
   });
 
   it('hides date text when the trip has no dates', async () => {
@@ -177,15 +185,49 @@ describe('TripDetailPage', () => {
     expect(screen.queryByText(/ – /)).toBeNull();
   });
 
-  it('shows a notice for hidden non-flight elements', async () => {
-    const hotel = { id: 'h-1', tripId: 'trip-1', elementType: 'hotel', name: 'Resort', sortPosition: 1, createdAt: '', updatedAt: '' };
-    api.listElements.mockResolvedValue([flightEl(), hotel]);
+  it('shows a notice for hidden elements, not counting hotels', async () => {
+    const car = { id: 'c-1', tripId: 'trip-1', elementType: 'car_rental', name: 'Hertz', sortPosition: 1, createdAt: '', updatedAt: '' };
+    const hotel = { id: 'h-1', tripId: 'trip-1', elementType: 'hotel', name: 'Resort', sortPosition: 2, createdAt: '', updatedAt: '',
+      hotelDetails: { address: null, phone: null, website: null, checkInDate: '2026-09-01', checkInTime: null, checkOutDate: '2026-09-03', checkOutTime: null, destinationId: null } };
+    api.listElements.mockResolvedValue([flightEl(), car, hotel]);
     renderPage();
     expect(await screen.findByText('1 other element hidden until its section is built')).toBeTruthy();
+    expect(screen.getByRole('region', { name: 'Lodging' })).toBeTruthy();
     cleanup();
-    api.listElements.mockResolvedValue([flightEl(), hotel, { ...hotel, id: 'h-2' }]);
+    api.listElements.mockResolvedValue([flightEl(), car, { ...car, id: 'c-2' }]);
     renderPage();
     expect(await screen.findByText('2 other elements hidden until their sections are built')).toBeTruthy();
+  });
+
+  it('opens a stay with Details and Rooms tabs', async () => {
+    const user = userEvent.setup();
+    const hotel = { id: 'h-1', tripId: 'trip-1', elementType: 'hotel', name: 'Resort', sortPosition: 2, createdAt: '', updatedAt: '',
+      hotelDetails: { address: '1 Beach Rd', phone: null, website: null, checkInDate: '2026-09-01', checkInTime: null, checkOutDate: '2026-09-03', checkOutTime: null, destinationId: null } };
+    api.listElements.mockResolvedValue([hotel]);
+    renderPage();
+    await user.click(await screen.findByRole('button', { name: 'Open Resort' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Resort' });
+    expect(within(dialog).getByRole('tab', { name: /Details/ })).toBeTruthy();
+    expect(within(dialog).getByRole('tab', { name: /Rooms/ })).toBeTruthy();
+    expect(within(dialog).queryByRole('tab', { name: /Seats/ })).toBeNull();
+    expect(within(dialog).getByRole('link', { name: 'Open in Maps' })).toBeTruthy();
+  });
+
+  it('adds lodging and opens the new stay on the Rooms tab with the form open', async () => {
+    const user = userEvent.setup();
+    const created = { id: 'h-9', tripId: 'trip-1', elementType: 'hotel', name: 'Casa', sortPosition: 0, createdAt: '', updatedAt: '',
+      hotelDetails: { address: null, phone: null, website: null, checkInDate: '2026-09-01', checkInTime: null, checkOutDate: '2026-09-02', checkOutTime: null, destinationId: null } };
+    api.createElement.mockResolvedValue(created);
+    renderPage();
+    await user.click(await screen.findByRole('button', { name: 'Add' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Lodging' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Add lodging' });
+    await user.type(within(dialog).getByLabelText('Hotel name'), 'Casa');
+    fireEvent.change(within(dialog).getByLabelText('Check-in date'), { target: { value: '2026-09-01' } });
+    api.listElements.mockResolvedValue([created]);
+    await user.click(within(dialog).getByRole('button', { name: 'Save stay' }));
+    const stayDialog = await screen.findByRole('dialog', { name: 'Casa' });
+    expect(within(stayDialog).getByText('rooms tab h-9 form open')).toBeTruthy();
   });
 
   it('creates a flight without a name, closes the dialog and reloads elements', async () => {

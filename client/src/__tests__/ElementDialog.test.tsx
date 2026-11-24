@@ -78,4 +78,13 @@ describe('ElementDialog', () => {
     fireEvent.touchEnd(body, { touches: end, changedTouches: end });
     expect(screen.getByText(/details body/i)).toBeTruthy();
   });
+
+  it('starts on initialTab when given', () => {
+    renderWithMantine(
+      <ElementDialog opened onClose={() => {}} title="T" initialTab="b"
+        tabs={[{ value: 'a', label: 'A', content: <div>tab a</div> }, { value: 'b', label: 'B', content: <div>tab b</div> }]} />
+    );
+    expect(screen.getByText('tab b')).toBeTruthy();
+    expect(screen.queryByText('tab a')).toBeNull();
+  });
 });

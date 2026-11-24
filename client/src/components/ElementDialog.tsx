@@ -16,11 +16,12 @@ interface ElementDialogProps {
   title: ReactNode;
   tabs: ElementDialogTab[];
   swipeEnabled?: boolean;
+  initialTab?: string;
 }
 
-export function ElementDialog({ opened, onClose, title, tabs, swipeEnabled = true }: ElementDialogProps) {
+export function ElementDialog({ opened, onClose, title, tabs, swipeEnabled = true, initialTab }: ElementDialogProps) {
   const isMobile = Boolean(useMediaQuery('(max-width: 48em)'));
-  const [active, setActive] = useState(tabs[0]?.value ?? '');
+  const [active, setActive] = useState(initialTab ?? tabs[0]?.value ?? '');
   const bodyRef = useRef<HTMLDivElement>(null);
   const touchStart = useRef<{ x: number; y: number } | null>(null);
 
