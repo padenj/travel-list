@@ -1,7 +1,6 @@
-import { AmenityKey, BedCount, BedType, Booking, BookingCoupon, LodgingRoom, Refundability, RoomType } from '../types/trip';
+import { BedCount, BedType, Booking, BookingCoupon, PropertyAmenity, Refundability, RoomAmenity, RoomType } from '../types/trip';
 import { formatPrice } from './flightRows';
 import { formatMoney } from './money';
-import { nightsBetween } from './tripDates';
 
 export const ROOM_TYPE_OPTIONS: { value: RoomType; label: string }[] = [
   { value: 'standard', label: 'Standard' },
@@ -23,11 +22,8 @@ export const BED_TYPE_OPTIONS: { value: BedType; label: string }[] = [
   { value: 'crib', label: 'Crib' },
 ];
 
-export const AMENITY_OPTIONS: { value: AmenityKey; label: string }[] = [
+export const PROPERTY_AMENITY_OPTIONS: { value: PropertyAmenity; label: string }[] = [
   { value: 'breakfast', label: 'Breakfast' },
-  { value: 'fridge', label: 'Fridge' },
-  { value: 'microwave', label: 'Microwave' },
-  { value: 'kitchen', label: 'Kitchen' },
   { value: 'pool', label: 'Pool' },
   { value: 'hot_tub', label: 'Hot tub' },
   { value: 'parking', label: 'Parking' },
@@ -36,6 +32,16 @@ export const AMENITY_OPTIONS: { value: AmenityKey; label: string }[] = [
   { value: 'airport_shuttle', label: 'Airport shuttle' },
   { value: 'gym', label: 'Gym' },
 ];
+
+export const ROOM_AMENITY_OPTIONS: { value: RoomAmenity; label: string }[] = [
+  { value: 'fridge', label: 'Fridge' },
+  { value: 'microwave', label: 'Microwave' },
+  { value: 'kitchenette', label: 'Kitchenette' },
+  { value: 'jetted_tub', label: 'Jetted tub' },
+  { value: 'balcony', label: 'Balcony' },
+];
+
+const ALL_AMENITY_OPTIONS = [...PROPERTY_AMENITY_OPTIONS, ...ROOM_AMENITY_OPTIONS] as { value: string; label: string }[];
 
 export const REFUNDABILITY_OPTIONS: { value: Refundability; label: string }[] = [
   { value: 'free', label: 'Free' },
@@ -59,8 +65,8 @@ export function bedsLabel(beds: BedCount[] | null | undefined): string {
   return (beds ?? []).map(b => `${b.count} × ${labelOf(BED_TYPE_OPTIONS, b.type)}`).join(' + ');
 }
 
-export function amenitiesLabel(amenities: AmenityKey[] | null | undefined, other: string | null | undefined): string {
-  const parts = (amenities ?? []).map(a => labelOf(AMENITY_OPTIONS, a)).filter(Boolean);
+export function amenitiesLabel(amenities: string[] | null | undefined, other: string | null | undefined): string {
+  const parts = (amenities ?? []).map(a => ALL_AMENITY_OPTIONS.find(o => o.value === a)?.label ?? '').filter(Boolean);
   if (other?.trim()) parts.push(other.trim());
   return parts.join(' · ');
 }
@@ -72,6 +78,23 @@ export function formatTime(value: string | null | undefined): string {
   return `${h % 12 === 0 ? 12 : h % 12}:${m[2]} ${h < 12 ? 'AM' : 'PM'}`;
 }
 
+// "15:00" → "3 PM"; legacy values with minutes keep them ("15:30" → "3:30 PM").
+export function hourLabel(value: string | null | undefined): string {
+  const m = value?.match(/^(\d{2}):(\d{2})$/);
+  if (!m) return '';
+  if (m[2] !== '00') return formatTime(value);
+  const h = Number(m[1]);
+  return `${h % 12 === 0 ? 12 : h % 12} ${h < 12 ? 'AM' : 'PM'}`;
+}
+
+export const HOUR_OPTIONS: { value: string; label: string }[] = Array.from({ length: 24 }, (_, h) => {
+  const value = `${String(h).padStart(2, '0')}:00`;
+  return { value, label: hourLabel(value) };
+});
+
+export const CHECK_IN_QUICK = ['14:00', '15:00', '16:00', '17:00'];
+export const CHECK_OUT_QUICK = ['10:00', '11:00', '12:00'];
+
 function shortDate(ymd: string): string {
   const [y, mo, d] = ymd.slice(0, 10).split('-').map(Number);
   return new Date(y, mo - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
@@ -82,10 +105,13 @@ export function formatDeadline(cancelBy: string): string {
   return time ? `${shortDate(cancelBy)}, ${time}` : shortDate(cancelBy);
 }
 
-export function perNight(total: number | null | undefined, checkIn: string | null | undefined, checkOut: string | null | undefined): number | null {
-  if (total == null) return null;
-  const nights = nightsBetween(checkIn, checkOut);
-  return nights && nights > 0 ? Math.round((total / nights) * 100) / 100 : null;
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+export function nightlyPrice(booking: Booking | null | undefined, nights: number | null | undefined): number | null {
+  if (!booking) return null;
+  if (booking.advertisedRateCash != null) return booking.advertisedRateCash;
+  if (booking.advertisedPriceCash != null && nights && nights > 0) return round2(booking.advertisedPriceCash / nights);
+  return null;
 }
 
 export type DeadlineState = 'none' | 'ok' | 'soon' | 'passed';
@@ -104,7 +130,7 @@ export function cancelDeadlineState(cancelBy: string | null | undefined, now: Da
   return days <= 7 ? 'soon' : 'ok';
 }
 
-export function cancelLabel(room: Pick<LodgingRoom, 'refundability' | 'cancelBy'> | null | undefined): string {
+export function cancelLabel(room: Pick<Booking, 'refundability' | 'cancelBy'> | null | undefined): string {
   if (!room) return '';
   const until = room.cancelBy ? formatDeadline(room.cancelBy) : '';
   switch (room.refundability) {
@@ -115,7 +141,7 @@ export function cancelLabel(room: Pick<LodgingRoom, 'refundability' | 'cancelBy'
   }
 }
 
-export function roomTitle(room: Pick<LodgingRoom, 'roomType' | 'beds'> | null | undefined): string {
+export function roomTitle(room: { roomType: RoomType | null; beds: BedCount[] } | null | undefined): string {
   if (!room) return 'Room';
   const parts = [roomTypeLabel(room.roomType), bedsLabel(room.beds)].filter(Boolean);
   return parts.length ? parts.join(' · ') : 'Room';
@@ -131,18 +157,39 @@ export function couponsLabel(coupons: BookingCoupon[] | null | undefined): strin
   return `Coupons: ${items.join(' · ')}`;
 }
 
-// "Adv $1,612.00 total incl. taxes ($403.00/nt) · Paid $1,580.00"
-export function roomMoneyLine(booking: Booking, nights: number | null): string {
-  const parts: string[] = [];
-  const advertised = formatPrice(booking.advertisedPriceCash, booking.advertisedPricePoints);
-  if (advertised) {
-    let text = `Adv ${advertised} total${booking.advertisedIncludesTaxes ? ' incl. taxes' : ''}`;
-    if (booking.advertisedPriceCash && nights && nights > 0) {
-      text += ` (${formatMoney(Math.round((booking.advertisedPriceCash / nights) * 100) / 100)}/nt)`;
-    }
-    parts.push(text);
+export interface PaymentSummary {
+  dueCash: number;
+  duePoints: number;
+  paidCash: number;
+  paidPoints: number;
+  remainingCash: number;
+  remainingPoints: number;
+  atCheckIn: boolean;
+  label: string;
+}
+
+// Remaining = (due at booking + due at check-in) − paid transactions, never below zero.
+export function paymentSummary(booking: Booking | null | undefined): PaymentSummary | null {
+  if (!booking) return null;
+  if (booking.dueAtBookingCash == null && booking.dueAtBookingPoints == null && booking.dueLaterCash == null) return null;
+  const dueLater = booking.dueLaterCash ?? 0;
+  const dueCash = round2((booking.dueAtBookingCash ?? 0) + dueLater);
+  const duePoints = booking.dueAtBookingPoints ?? 0;
+  const paidCash = booking.actualTotalCash ?? 0;
+  const paidPoints = booking.actualTotalPoints ?? 0;
+  const remainingCash = Math.max(0, round2(dueCash - paidCash));
+  const remainingPoints = Math.max(0, duePoints - paidPoints);
+  const atCheckIn = remainingCash > 0 && remainingCash <= dueLater && remainingPoints === 0;
+
+  let label: string;
+  if (remainingCash === 0 && remainingPoints === 0) {
+    label = 'Paid in full';
+  } else if (atCheckIn) {
+    label = `Remaining ${formatMoney(remainingCash)} at check-in`;
+  } else {
+    const atBookingCash = Math.max(0, round2(remainingCash - dueLater));
+    const atBooking = formatPrice(atBookingCash, remainingPoints);
+    label = `Remaining ${formatPrice(remainingCash, remainingPoints)}${atBooking ? ` (incl. ${atBooking} due at booking)` : ''}`;
   }
-  const paid = formatPrice(booking.actualTotalCash, booking.actualTotalPoints);
-  parts.push(`Paid ${paid || formatMoney(0)}`);
-  return parts.join(' · ');
+  return { dueCash, duePoints, paidCash, paidPoints, remainingCash, remainingPoints, atCheckIn, label };
 }
