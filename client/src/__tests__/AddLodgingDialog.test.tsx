@@ -51,4 +51,51 @@ describe('AddLodgingDialog', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Save stay' }));
     expect(await screen.findByText('Destination not found')).toBeTruthy();
   });
+
+  it('sends the booking fields with the stay', async () => {
+    vi.mocked(tripApi.createElement).mockResolvedValue({ id: 'h1' } as any);
+    renderWithMantine(<AddLodgingDialog tripId="t1" opened destinations={[]} onClose={() => {}} onCreated={() => {}} />);
+    await userEvent.type(screen.getByLabelText('Hotel name'), 'Casa');
+    fireEvent.change(screen.getByLabelText('Check-in date'), { target: { value: '2027-03-01' } });
+    await userEvent.click(screen.getByRole('checkbox', { name: '3 PM' }));
+    await userEvent.click(screen.getByRole('checkbox', { name: '11 AM' }));
+    await userEvent.type(screen.getByRole('textbox', { name: 'Booking site' }), 'Expedia');
+    await userEvent.type(screen.getByLabelText('Site itinerary #'), '7231004');
+    await userEvent.type(screen.getByLabelText('Hotel confirmation #'), 'H-88213');
+    await userEvent.type(screen.getByLabelText('Advertised nightly (cash)'), '403');
+    await userEvent.type(screen.getByLabelText('Advertised total (cash)'), '1612');
+    await userEvent.type(screen.getByLabelText('Due at booking (cash)'), '1430');
+    await userEvent.type(screen.getByLabelText('Due at check-in (cash)'), '182.40');
+    await userEvent.type(screen.getByLabelText('Due at check-in note'), 'Resort fee');
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Pool' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Save stay' }));
+    await waitFor(() => expect(tripApi.createElement).toHaveBeenCalled());
+    const payload = vi.mocked(tripApi.createElement).mock.calls[0][1] as any;
+    expect(payload.typeSpecificData).toMatchObject({ checkInTime: '15:00', checkOutTime: '11:00', amenities: ['pool'] });
+    expect(payload.booking).toMatchObject({
+      bookingSite: 'Expedia', siteItineraryNumber: '7231004', confirmationNumber: 'H-88213',
+      advertisedRateCash: 403, advertisedPriceCash: 1612, dueAtBookingCash: 1430, dueLaterCash: 182.4, dueLaterNotes: 'Resort fee',
+    });
+  }, 30000);
+
+  it('closes without asking when nothing was entered', async () => {
+    const onClose = vi.fn();
+    renderWithMantine(<AddLodgingDialog tripId="t1" opened destinations={[]} onClose={onClose} onCreated={() => {}} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it('asks before discarding typed values', async () => {
+    const onClose = vi.fn();
+    renderWithMantine(<AddLodgingDialog tripId="t1" opened destinations={[]} onClose={onClose} onCreated={() => {}} />);
+    await userEvent.type(screen.getByLabelText('Hotel name'), 'Casa');
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(await screen.findByText('Discard unsaved changes?')).toBeTruthy();
+    await userEvent.click(screen.getByRole('button', { name: 'Keep editing' }));
+    expect(onClose).not.toHaveBeenCalled();
+    expect((screen.getByLabelText('Hotel name') as HTMLInputElement).value).toBe('Casa');
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Discard' }));
+    expect(onClose).toHaveBeenCalled();
+  });
 });
