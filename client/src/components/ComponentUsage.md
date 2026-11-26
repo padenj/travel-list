@@ -142,9 +142,9 @@ Compact flights table (CSS grid) that reflows to cards on mobile; shows legs, la
 
 ### ElementDialog
 **Used in:**
-  - `pages/TripDetailPage.tsx` (hosts the flight tabs and the lodging Details/Rooms tabs)
+  - `pages/TripDetailPage.tsx` (hosts the flight tabs and the lodging Details/Rooms/Payments tabs)
 
-Generic modal with swipeable tabs (Details/Bookings/Seats for flights, Details/Rooms for stays); `initialTab` picks the starting tab; full-screen on mobile.
+Generic modal with swipeable tabs (Details/Bookings/Seats for flights, Details/Rooms/Payments for stays); `initialTab` picks the starting tab; full-screen on mobile. `keepMounted` keeps inactive tabs mounted (stays only) and `dirty` shows `DiscardChangesModal` before closing.
 
 ### FlightDetailsTab
 **Used in:**
@@ -187,19 +187,19 @@ Lodging rows and total on the trip page.
   - `AddLodgingDialog`
   - `LodgingDetailsTab`
 
-Stay fields shared by add and edit.
+Stay fields shared by add and edit: hotel, check-in/out hours (`HourPicker`), booking references, advertised nightly and total price, payment schedule, cancellation, property amenities, coupons and notes.
 
 ### AddLodgingDialog
 **Used in:**
   - `pages/TripDetailPage.tsx`
 
-Creates a stay, then the page opens it on the Rooms tab.
+Creates a stay with its booking (asks before discarding typed values), then the page opens it on the Rooms tab.
 
 ### LodgingDetailsTab
 **Used in:**
   - `pages/TripDetailPage.tsx` (passed into `ElementDialog`)
 
-Stay read view with maps, phone and website links, edit and delete.
+Stay read view (maps, phone, website, booking references, price, payment schedule, cancellation, amenities, coupons) with edit and delete; reports dirty state.
 
 ### LodgingRoomsTab
 **Used in:**
@@ -211,14 +211,33 @@ Rooms list, "+ Room" button and a "Not in a room" hint.
 **Used in:**
   - `LodgingRoomsTab`
 
-Room summary lines plus `BookingTransactionList`.
+Room summary (type, beds, travelers, description, room amenities) with edit and delete.
 
 ### RoomForm
 **Used in:**
   - `LodgingRoomsTab` (create)
   - `RoomBlock` (edit)
 
-Room booking form.
+Room form: type, beds, description, room amenities and travelers.
+
+### LodgingPaymentsTab
+**Used in:**
+  - `pages/TripDetailPage.tsx` (passed into `ElementDialog`)
+
+Due / paid / remaining summary for the stay's booking plus `BookingTransactionList`.
+
+### HourPicker
+**Used in:**
+  - `LodgingStayForm` (check-in, check-out and cancel-by times)
+
+Hour-only time picker: quick chips plus an "Other" hour select.
+
+### DiscardChangesModal
+**Used in:**
+  - `ElementDialog`
+  - `AddLodgingDialog`
+
+"Discard unsaved changes?" confirmation with Discard / Keep editing.
 
 ### BedsEditor
 **Used in:**
@@ -228,7 +247,7 @@ Bed type and count row editor.
 
 ### CouponsEditor
 **Used in:**
-  - `RoomForm`
+  - `LodgingStayForm`
 
 Coupon row editor.
 
@@ -266,7 +285,7 @@ Read-mode booking: confirmation (and original), traveler chips, money line, "Cov
 ### BookingTransactionList
 **Used in:**
   - `BookingBlock`
-  - `RoomBlock`
+  - `LodgingPaymentsTab`
 
 Lists/add/removes transactions for a single booking; supports recording price-drop rebookings (negative amount + new confirmation number) and free-text fee/tax breakdown notes. Reports its transaction count via `onCountChange` and whether its add form is open via `onEditingChange` (both read by `BookingBlock`).
 

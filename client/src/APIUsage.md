@@ -114,8 +114,8 @@ Keep this checklist updated as you complete migration verification and removal s
   - client/src/components/ManageDestinationsDrawer.tsx (`getTrip`)
 - `createElement`:
   - client/src/components/AddElementDialog.tsx (flight `name` omitted; the server titles flights from their legs)
-  - client/src/components/AddLodgingDialog.tsx (hotel stay with `typeSpecificData`: address, phone, website, check-in/out date+time, destinationId)
-- `updateElement` (notes only, `null` clears), `deleteElement`:
+  - client/src/components/AddLodgingDialog.tsx (hotel stay with `typeSpecificData` and the stay's `booking`)
+- `updateElement` (flight notes, `null` clears; hotel stay fields plus `booking`), `deleteElement`:
   - client/src/components/FlightDetailsTab.tsx
   - client/src/components/LodgingDetailsTab.tsx
 - `syncLegs`:
@@ -129,17 +129,19 @@ Keep this checklist updated as you complete migration verification and removal s
 - `updateParticipant`:
   - not used by the UI (kept for API completeness)
 - `listBookings`:
-  - client/src/pages/TripDetailPage.tsx (trip-wide list passed to `BookingCard`)
+  - client/src/pages/TripDetailPage.tsx (trip-wide list passed to `BookingCard`; the stay's booking via `stayBooking` for the lodging Details and Payments tabs)
 - `createBooking`, `updateBooking` (scalars + full `elementIds`/`travelerIds` replacement; 409 on traveler conflicts):
   - client/src/components/BookingForm.tsx
-  - client/src/components/RoomForm.tsx (hotel room: bookingSite, siteItineraryNumber, advertisedIncludesTaxes, room, coupons; travelers optional)
 - `deleteBooking`:
   - client/src/components/BookingBlock.tsx
+- `createRoom`, `updateRoom`:
+  - client/src/components/RoomForm.tsx
+- `deleteRoom`:
   - client/src/components/RoomBlock.tsx
 - `getBooking`, `linkBookingElement`, `unlinkBookingElement`, `addBookingTraveler`, `removeBookingTraveler`:
   - not used by the UI (kept for API completeness)
 - `listBookingTransactions`, `addBookingTransaction`, `deleteBookingTransaction`:
-  - client/src/components/BookingTransactionList.tsx (rendered inside `BookingBlock.tsx` and `RoomBlock.tsx`)
+  - client/src/components/BookingTransactionList.tsx (rendered inside `BookingBlock.tsx` and `LodgingPaymentsTab.tsx`)
 - `updateBookingTransaction`:
   - not used by the UI (kept for API completeness)
 - `listSeatsForLeg`, `assignSeat`, `removeSeat`:
