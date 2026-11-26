@@ -1,6 +1,6 @@
 import { ActionIcon, Button, Group, Stack, TextInput } from '@mantine/core';
 import { IconX } from '@tabler/icons-react';
-import { CouponDraft } from '../utils/roomDraft';
+import { CouponDraft } from '../utils/stayDraft';
 
 interface CouponsEditorProps {
   coupons: CouponDraft[];

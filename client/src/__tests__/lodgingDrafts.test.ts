@@ -1,63 +1,96 @@
 import { describe, it, expect } from 'vitest';
-import { emptyStayDraft, stayDraftFromElement, validateStayDraft, stayPayload, addDays } from '../utils/stayDraft';
-import { emptyRoomDraft, roomDraftFromBooking, validateRoomDraft, roomPayload } from '../utils/roomDraft';
+import { Booking, LodgingRoom, TripElement } from '../types/trip';
+import { addDays, emptyStayDraft, stayDraftFromElement, stayPayload, validateStayDraft, isStayDraftDirty } from '../utils/stayDraft';
+import { emptyRoomDraft, roomDraftFromRoom, roomPayload, validateRoomDraft } from '../utils/roomDraft';
 
-describe('stay drafts', () => {
-  it('addDays', () => expect(addDays('2027-02-28', 1)).toBe('2027-03-01'));
-  it('validates', () => {
-    expect(validateStayDraft({ ...emptyStayDraft(), name: '' })).toMatch(/name/i);
-    expect(validateStayDraft({ ...emptyStayDraft(), name: 'H', checkInDate: '2027-01-02', checkOutDate: '2027-01-02' })).toMatch(/after/i);
-    expect(validateStayDraft({ ...emptyStayDraft(), name: 'H', checkInDate: '2027-01-02', checkOutDate: '' })).toMatch(/check-out/i);
-    expect(validateStayDraft({ ...emptyStayDraft(), name: 'H', checkInDate: '2027-01-02', checkOutDate: '2027-01-03' })).toBeNull();
-  });
-  it('builds a payload, blanks become null', () => {
-    const draft = { ...emptyStayDraft(), name: ' Casa ', address: '1 Rd', checkInDate: '2027-01-02', checkOutDate: '2027-01-03', checkInTime: '15:00', notes: '' };
-    expect(stayPayload(draft)).toEqual({
-      elementType: 'hotel', name: 'Casa', notes: null,
-      typeSpecificData: { address: '1 Rd', phone: null, website: null, checkInDate: '2027-01-02', checkInTime: '15:00',
-        checkOutDate: '2027-01-03', checkOutTime: null, destinationId: null },
+const element: TripElement = {
+  id: 'h1', tripId: 't1', elementType: 'hotel', name: 'Hyatt', sortPosition: 0, createdAt: '', updatedAt: '', notes: 'n',
+  hotelDetails: {
+    address: '1 Beach', phone: null, website: null, checkInDate: '2027-03-01', checkInTime: '15:00',
+    checkOutDate: '2027-03-05', checkOutTime: '11:00', destinationId: null, amenities: ['pool'], otherAmenities: 'Bar',
+  },
+  bookingId: 'b1',
+};
+
+const booking: Booking = {
+  id: 'b1', tripId: 't1', confirmationNumber: 'H-1', advertisedPriceCash: 1612, advertisedPricePoints: null,
+  loyaltyProgram: 'Hyatt', notes: null, createdAt: '', updatedAt: '', elementIds: ['h1'], travelerIds: [],
+  currentConfirmationNumber: 'H-1', actualTotalCash: 0, actualTotalPoints: 0,
+  bookingSite: 'Expedia', siteItineraryNumber: '7231', advertisedIncludesTaxes: true,
+  advertisedRateCash: 403, advertisedRatePoints: null, dueAtBookingCash: 1430, dueAtBookingPoints: null,
+  dueLaterCash: 182.4, dueLaterNotes: 'Resort fee', refundability: 'free', cancelBy: '2027-02-27T18:00',
+  cancellationPolicy: 'Free until 2 days', coupons: [{ id: 'c1', code: 'X', savingsCash: 10, savingsPoints: null, notes: null }],
+};
+
+describe('stay draft', () => {
+  it('round-trips element + booking through the draft', () => {
+    const draft = stayDraftFromElement(element, booking);
+    expect(draft).toMatchObject({
+      name: 'Hyatt', checkInTime: '15:00', amenities: ['pool'], otherAmenities: 'Bar',
+      bookingSite: 'Expedia', siteItineraryNumber: '7231', confirmationNumber: 'H-1', loyaltyProgram: 'Hyatt',
+      rateCash: '403', priceCash: '1612', includesTaxes: true, dueAtBookingCash: '1430', dueLaterCash: '182.4',
+      dueLaterNotes: 'Resort fee', refundability: 'free', cancelDate: '2027-02-27', cancelTime: '18:00',
+      cancellationPolicy: 'Free until 2 days', coupons: [{ code: 'X', savingsCash: '10', savingsPoints: '', notes: '' }],
+    });
+    const payload = stayPayload(draft);
+    expect(payload).toEqual({
+      elementType: 'hotel', name: 'Hyatt', notes: 'n',
+      typeSpecificData: {
+        address: '1 Beach', phone: null, website: null, checkInDate: '2027-03-01', checkInTime: '15:00',
+        checkOutDate: '2027-03-05', checkOutTime: '11:00', destinationId: null, amenities: ['pool'], otherAmenities: 'Bar',
+      },
+      booking: {
+        bookingSite: 'Expedia', siteItineraryNumber: '7231', confirmationNumber: 'H-1', loyaltyProgram: 'Hyatt',
+        advertisedRateCash: 403, advertisedRatePoints: null, advertisedPriceCash: 1612, advertisedPricePoints: null,
+        advertisedIncludesTaxes: true, dueAtBookingCash: 1430, dueAtBookingPoints: null, dueLaterCash: 182.4,
+        dueLaterNotes: 'Resort fee', refundability: 'free', cancelBy: '2027-02-27T18:00', cancellationPolicy: 'Free until 2 days',
+        coupons: [{ code: 'X', savingsCash: 10, savingsPoints: null, notes: null }],
+      },
     });
   });
-  it('round-trips an element', () => {
-    const draft = stayDraftFromElement({ id: 'h', name: 'Casa', notes: 'n', elementType: 'hotel',
-      hotelDetails: { address: 'A', phone: null, website: null, checkInDate: '2027-01-02', checkInTime: null, checkOutDate: '2027-01-03', checkOutTime: '11:00', destinationId: 'd1' } } as any);
-    expect(draft).toMatchObject({ name: 'Casa', notes: 'n', address: 'A', phone: '', checkOutTime: '11:00', destinationId: 'd1' });
+
+  it('builds a draft without a booking', () => {
+    expect(stayDraftFromElement(element, null)).toMatchObject({ bookingSite: '', rateCash: '', coupons: [], refundability: null });
+  });
+
+  it('validates', () => {
+    const ok = { ...emptyStayDraft(), name: 'X', checkInDate: '2027-01-01', checkOutDate: '2027-01-02' };
+    expect(validateStayDraft(ok)).toBeNull();
+    expect(validateStayDraft({ ...ok, name: ' ' })).toBe('Hotel name is required');
+    expect(validateStayDraft({ ...ok, checkOutDate: '2027-01-01' })).toBe('Check-out must be after check-in');
+    expect(validateStayDraft({ ...ok, dueLaterCash: '-1' })).toBe('Amounts must be 0 or more');
+    expect(validateStayDraft({ ...ok, rateCash: 'abc' })).toBe('Amounts must be 0 or more');
+    expect(validateStayDraft({ ...ok, dueAtBookingPoints: '1.5' })).toBe('Points must be a whole number, 0 or more');
+    expect(validateStayDraft({ ...ok, cancelTime: '18:00' })).toBe('Add a cancel-by date for the time');
+    expect(validateStayDraft({ ...ok, coupons: [{ code: '', savingsCash: '', savingsPoints: '', notes: '' }] })).toBe('Coupon code is required');
+  });
+
+  it('detects dirty drafts', () => {
+    const start = emptyStayDraft();
+    expect(isStayDraftDirty(start, emptyStayDraft())).toBe(false);
+    expect(isStayDraftDirty(start, { ...start, name: 'a' })).toBe(true);
+  });
+
+  it('addDays crosses months', () => {
+    expect(addDays('2027-01-31', 1)).toBe('2027-02-01');
   });
 });
 
-describe('room drafts', () => {
-  it('validates numbers, beds and coupons', () => {
-    expect(validateRoomDraft({ ...emptyRoomDraft(), priceCash: 'abc' })).toMatch(/price/i);
-    expect(validateRoomDraft({ ...emptyRoomDraft(), beds: [{ type: 'king', count: 1 }, { type: 'king', count: 1 }] })).toMatch(/once/i);
-    expect(validateRoomDraft({ ...emptyRoomDraft(), coupons: [{ code: '', savingsCash: '', savingsPoints: '', notes: '' }] })).toMatch(/code/i);
-    expect(validateRoomDraft({ ...emptyRoomDraft(), cancelTime: '18:00' })).toMatch(/date/i);
+describe('room draft', () => {
+  const room: LodgingRoom = {
+    id: 'r1', elementId: 'h1', position: 0, roomType: 'suite', beds: [{ type: 'king', count: 1 }],
+    description: 'Ocean', amenities: ['microwave'], otherAmenities: null, travelerIds: ['p1'],
+  };
+
+  it('round-trips a room', () => {
+    const draft = roomDraftFromRoom(room);
+    expect(draft).toEqual({ roomType: 'suite', beds: [{ type: 'king', count: 1 }], description: 'Ocean', amenities: ['microwave'], otherAmenities: '', travelerIds: ['p1'] });
+    expect(roomPayload(draft)).toEqual({ roomType: 'suite', beds: [{ type: 'king', count: 1 }], description: 'Ocean', amenities: ['microwave'], otherAmenities: null, travelerIds: ['p1'] });
+  });
+
+  it('validates beds', () => {
     expect(validateRoomDraft(emptyRoomDraft())).toBeNull();
-  });
-  it('builds a booking payload', () => {
-    const draft = {
-      ...emptyRoomDraft(), bookingSite: 'Expedia', siteItineraryNumber: '7300', confirmationNumber: 'H1',
-      priceCash: '1612', pricePoints: '', includesTaxes: true, roomType: 'suite' as const,
-      beds: [{ type: 'king' as const, count: 1 }], amenities: ['pool' as const], refundability: 'free' as const,
-      cancelDate: '2027-02-27', cancelTime: '18:00',
-      coupons: [{ code: 'EXP10', savingsCash: '42.18', savingsPoints: '', notes: '' }], travelerIds: [],
-    };
-    expect(roomPayload(draft, 'h1')).toEqual({
-      elementIds: ['h1'], travelerIds: [],
-      bookingSite: 'Expedia', siteItineraryNumber: '7300', confirmationNumber: 'H1', loyaltyProgram: null,
-      advertisedPriceCash: 1612, advertisedPricePoints: null, advertisedIncludesTaxes: true, notes: null,
-      room: { roomType: 'suite', beds: [{ type: 'king', count: 1 }], roomDescription: null, amenities: ['pool'], otherAmenities: null,
-        refundability: 'free', cancelBy: '2027-02-27T18:00', cancellationPolicy: null },
-      coupons: [{ code: 'EXP10', savingsCash: 42.18, savingsPoints: null, notes: null }],
-    });
-  });
-  it('drafts from a booking', () => {
-    const draft = roomDraftFromBooking({
-      id: 'b', tripId: 't', confirmationNumber: 'H1', advertisedPriceCash: 900, advertisedPricePoints: null, loyaltyProgram: null,
-      notes: null, createdAt: '', updatedAt: '', elementIds: ['h1'], travelerIds: ['p1'], currentConfirmationNumber: 'H1',
-      actualTotalCash: 0, actualTotalPoints: 0, bookingSite: 'Expedia', siteItineraryNumber: null, advertisedIncludesTaxes: false,
-      room: { roomType: null, beds: [], roomDescription: null, amenities: [], otherAmenities: null, refundability: null, cancelBy: '2027-02-27T18:00', cancellationPolicy: null },
-      coupons: [],
-    });
-    expect(draft).toMatchObject({ confirmationNumber: 'H1', priceCash: '900', bookingSite: 'Expedia', cancelDate: '2027-02-27', cancelTime: '18:00', travelerIds: ['p1'] });
+    expect(validateRoomDraft({ ...emptyRoomDraft(), beds: [{ type: 'king', count: 0 }] })).toBe('Bed count must be 1 to 9');
+    expect(validateRoomDraft({ ...emptyRoomDraft(), beds: [{ type: 'king', count: 1 }, { type: 'king', count: 1 }] })).toBe('Each bed type may appear once');
   });
 });
