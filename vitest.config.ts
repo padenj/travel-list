@@ -57,6 +57,7 @@ export default defineConfig({
       'client/src/__tests__/RoomForm.test.tsx', // Room form (beds, amenities, coupons)
       'client/src/__tests__/LodgingRoomsTab.test.tsx', // Rooms tab and room blocks
       'client/src/__tests__/LodgingSection.test.tsx', // Lodging section rows
+      'client/src/__tests__/HourPicker.test.tsx', // Hour chips + other select
       'src/**/*.test.{ts,tsx}',           // Frontend unit tests
       'server/**/*.test.ts',              // Backend unit tests
       'tests/integration/**/*.test.ts',   // Integration tests
