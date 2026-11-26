@@ -2,6 +2,7 @@ import { ReactNode, TouchEvent, useRef, useState } from 'react';
 import { Badge, Modal, Tabs } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import { getSwipeDirection, isSwipeBlocked } from '../utils/swipe';
+import { DiscardChangesModal } from './DiscardChangesModal';
 
 export interface ElementDialogTab {
   value: string;
@@ -17,13 +18,20 @@ interface ElementDialogProps {
   tabs: ElementDialogTab[];
   swipeEnabled?: boolean;
   initialTab?: string;
+  keepMounted?: boolean;
+  dirty?: boolean;
 }
 
-export function ElementDialog({ opened, onClose, title, tabs, swipeEnabled = true, initialTab }: ElementDialogProps) {
+export function ElementDialog({ opened, onClose, title, tabs, swipeEnabled = true, initialTab, keepMounted = false, dirty = false }: ElementDialogProps) {
   const isMobile = Boolean(useMediaQuery('(max-width: 48em)'));
   const [active, setActive] = useState(initialTab ?? tabs[0]?.value ?? '');
   const bodyRef = useRef<HTMLDivElement>(null);
   const touchStart = useRef<{ x: number; y: number } | null>(null);
+  const [confirmingDiscard, setConfirmingDiscard] = useState(false);
+  const requestClose = () => {
+    if (dirty) setConfirmingDiscard(true);
+    else onClose();
+  };
 
   const handleTouchStart = (event: TouchEvent<HTMLDivElement>) => {
     const touch = event.touches[0];
@@ -48,8 +56,9 @@ export function ElementDialog({ opened, onClose, title, tabs, swipeEnabled = tru
   };
 
   return (
-    <Modal opened={opened} onClose={onClose} title={title} size="lg" fullScreen={isMobile} centered={!isMobile}>
-      <Tabs value={active} onChange={value => value && setActive(value)} keepMounted={false}>
+    <>
+    <Modal opened={opened} onClose={requestClose} title={title} size="lg" fullScreen={isMobile} centered={!isMobile}>
+      <Tabs value={active} onChange={value => value && setActive(value)} keepMounted={keepMounted}>
         <Tabs.List grow>
           {tabs.map(tab => (
             <Tabs.Tab
@@ -70,5 +79,11 @@ export function ElementDialog({ opened, onClose, title, tabs, swipeEnabled = tru
         </div>
       </Tabs>
     </Modal>
+    <DiscardChangesModal
+      opened={confirmingDiscard}
+      onKeepEditing={() => setConfirmingDiscard(false)}
+      onDiscard={() => { setConfirmingDiscard(false); onClose(); }}
+    />
+    </>
   );
 }

@@ -1,5 +1,5 @@
 /* @vitest-environment jsdom */
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { cleanup, fireEvent, screen } from '@testing-library/react';
 import { renderWithMantine } from '../test-utils/renderWithMantine';
 import { ElementDialog, ElementDialogTab } from '../components/ElementDialog';
@@ -86,5 +86,38 @@ describe('ElementDialog', () => {
     );
     expect(screen.getByText('tab b')).toBeTruthy();
     expect(screen.queryByText('tab a')).toBeNull();
+  });
+
+  it('keeps inactive tabs mounted when keepMounted is set, preserving typed values', () => {
+    renderDialog({ keepMounted: true });
+    fireEvent.change(screen.getByLabelText('notes'), { target: { value: 'typed' } });
+    fireEvent.click(screen.getByRole('tab', { name: /seats/i }));
+    fireEvent.click(screen.getByRole('tab', { name: /details/i }));
+    expect((screen.getByLabelText('notes') as HTMLInputElement).value).toBe('typed');
+  });
+
+  it('closes immediately when not dirty', () => {
+    const onClose = vi.fn();
+    renderDialog({ onClose });
+    fireEvent.click(document.querySelector('.mantine-Modal-close') as HTMLElement);
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it('asks before discarding when dirty; Keep editing keeps it open', async () => {
+    const onClose = vi.fn();
+    renderDialog({ onClose, dirty: true });
+    fireEvent.click(document.querySelector('.mantine-Modal-close') as HTMLElement);
+    expect(await screen.findByText('Discard unsaved changes?')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }));
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByText(/details body/i)).toBeTruthy();
+  });
+
+  it('Discard closes the dialog', async () => {
+    const onClose = vi.fn();
+    renderDialog({ onClose, dirty: true });
+    fireEvent.click(document.querySelector('.mantine-Modal-close') as HTMLElement);
+    fireEvent.click(await screen.findByRole('button', { name: 'Discard' }));
+    expect(onClose).toHaveBeenCalled();
   });
 });
