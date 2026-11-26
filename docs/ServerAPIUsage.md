@@ -232,7 +232,7 @@ This document maps server routes implemented in `server/routes.ts` to their purp
   - Purpose: Create/update a trip element. For `elementType: 'hotel'`, `typeSpecificData` carries `address`, `phone`, `website`, `checkInDate`, `checkInTime`, `checkOutDate`, `checkOutTime`, `destinationId` (must belong to the trip, else 404), `amenities` (property amenities: `breakfast`, `pool`, `hot_tub`, `parking`, `wifi`, `laundry`, `airport_shuttle`, `gym`) and `otherAmenities`. Check-in and check-out dates are required on create; check-out must be after check-in. A hotel body may include `booking` (`confirmationNumber`, `loyaltyProgram`, `bookingSite`, `siteItineraryNumber`, `advertisedRateCash/Points`, `advertisedPriceCash/Points`, `advertisedIncludesTaxes`, `dueAtBookingCash/Points`, `dueLaterCash`, `dueLaterNotes`, `refundability`, `cancelBy`, `cancellationPolicy`, `coupons`); it creates or updates the stay's single booking in the same transaction. Elements return the stay as `hotelDetails` (plus `destinationName`), `rooms` and `bookingId`.
   - Client helper: `tripApi.createElement`, `tripApi.updateElement`
 
-- POST /trips/:tripId/bookings, PUT /trips/:tripId/bookings/:bookingId
+- POST /trips/:tripId/bookings, PATCH /trips/:tripId/bookings/:id
   - Purpose: Bookings for flights or a hotel stay. A booking links either flights or exactly one hotel (400 otherwise). A stay has at most one booking (400 "This stay already has a booking") and stay bookings carry no travelers (travelers belong to rooms). All bookings accept the money fields listed above; `coupons` is a full replacement. Flight bookings require travelers; 409 when a traveler is already in another booking for the same element.
   - Client helper: `tripApi.createBooking`, `tripApi.updateBooking`
 
