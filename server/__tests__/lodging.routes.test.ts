@@ -37,6 +37,8 @@ describe('lodging routes', () => {
   const post = (path: string, body: unknown) => request(app).post(`/api/trips/${tripId}${path}`).set('Authorization', auth).send(body as object);
   const patch = (path: string, body: unknown) => request(app).patch(`/api/trips/${tripId}${path}`).set('Authorization', auth).send(body as object);
   const put = (path: string, body: unknown) => request(app).put(`/api/trips/${tripId}${path}`).set('Authorization', auth).send(body as object);
+  const del = (path: string) => request(app).delete(`/api/trips/${tripId}${path}`).set('Authorization', auth);
+  const get = (path: string) => request(app).get(`/api/trips/${tripId}${path}`).set('Authorization', auth);
 
   async function addDestination(name: string, memberIds: string[]) {
     const res = await post('/destinations', { name, memberIds });
@@ -100,24 +102,68 @@ describe('lodging routes', () => {
     });
   });
 
-  describe('room bookings', () => {
-    it('creates a room booking without travelers', async () => {
-      const stayId = (await addStay()).body.id;
-      const res = await post('/bookings', {
-        elementIds: [stayId], travelerIds: [], bookingSite: 'Expedia', siteItineraryNumber: '7300',
-        advertisedPriceCash: 900, advertisedIncludesTaxes: true,
-        room: { roomType: 'suite', beds: [{ type: 'king', count: 1 }] }, coupons: [{ code: 'SAVE10', savingsCash: 10 }],
+  describe('stay booking', () => {
+    it('creates the stay with its booking in one request', async () => {
+      const res = await post('/elements', {
+        elementType: 'hotel', name: 'Casa Azul',
+        typeSpecificData: { checkInDate: '2027-01-01', checkOutDate: '2027-01-04', amenities: ['pool'] },
+        booking: {
+          bookingSite: 'expedia', siteItineraryNumber: '7301', confirmationNumber: 'H-1',
+          advertisedPriceCash: 612.4, advertisedRateCash: 189, dueAtBookingCash: 430, dueLaterCash: 182.4,
+          refundability: 'free', cancelBy: '2026-12-30', coupons: [{ code: 'SAVE10', savingsCash: 10 }],
+        },
       });
       expect(res.status).toBe(201);
-      expect(res.body).toMatchObject({ bookingSite: 'Expedia', room: { roomType: 'suite' }, coupons: [{ code: 'SAVE10' }] });
-      const list = await request(app).get(`/api/trips/${tripId}/bookings`).set('Authorization', auth);
-      expect(list.body[0]).toMatchObject({ bookingSite: 'Expedia', advertisedIncludesTaxes: true, room: { roomType: 'suite' } });
+      expect(res.body.hotelDetails.amenities).toEqual(['pool']);
+      expect(res.body.rooms).toEqual([]);
+      const booking = (await get(`/bookings/${res.body.bookingId}`)).body;
+      expect(booking).toMatchObject({
+        elementIds: [res.body.id], travelerIds: [], bookingSite: 'expedia', siteItineraryNumber: '7301',
+        advertisedRateCash: 189, dueAtBookingCash: 430, dueLaterCash: 182.4, refundability: 'free',
+        coupons: [{ code: 'SAVE10' }],
+      });
+      expect(booking).not.toHaveProperty('room');
     });
-    it('still requires travelers for flight bookings', async () => {
-      const flightId = await addFlight();
-      expect((await post('/bookings', { elementIds: [flightId], travelerIds: [] })).status).toBe(400);
-      expect((await post('/bookings', { elementIds: [flightId], travelerIds: [dadP] })).status).toBe(201);
+
+    it('creates an empty booking when none is sent', async () => {
+      const res = await addStay();
+      expect(res.status).toBe(201);
+      expect(res.body.bookingId).toBeTruthy();
     });
+
+    it('rejects invalid booking fields and property amenities on create', async () => {
+      const base = { elementType: 'hotel', name: 'Casa', typeSpecificData: { checkInDate: '2027-01-01', checkOutDate: '2027-01-04' } };
+      expect((await post('/elements', { ...base, booking: { dueLaterCash: -5 } })).status).toBe(400);
+      expect((await post('/elements', { ...base, booking: { refundability: 'maybe' } })).status).toBe(400);
+      expect((await post('/elements', { ...base, booking: { coupons: [{ code: '' }] } })).status).toBe(400);
+      expect((await post('/elements', { ...base, typeSpecificData: { ...base.typeSpecificData, amenities: ['microwave'] } })).status).toBe(400);
+    });
+
+    it('PUT updates stay and booking together', async () => {
+      const stay = (await addStay()).body;
+      const res = await put(`/elements/${stay.id}`, {
+        name: 'Casa Roja', typeSpecificData: { amenities: ['gym'] },
+        booking: { confirmationNumber: 'H-9', dueLaterCash: 50, coupons: [{ code: 'B' }] },
+      });
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({ name: 'Casa Roja', bookingId: stay.bookingId });
+      expect(res.body.hotelDetails.amenities).toEqual(['gym']);
+      expect((await get(`/bookings/${stay.bookingId}`)).body).toMatchObject({ confirmationNumber: 'H-9', dueLaterCash: 50, coupons: [{ code: 'B' }] });
+      expect((await put(`/elements/${stay.id}`, { booking: { cancelBy: 'soon' } })).status).toBe(400);
+    });
+
+    it('allows only one booking per stay', async () => {
+      const stay = (await addStay()).body;
+      const res = await post('/bookings', { elementIds: [stay.id], travelerIds: [] });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('This stay already has a booking');
+    });
+
+    it('rejects travelers on a stay booking', async () => {
+      const stay = (await addStay()).body;
+      expect((await patch(`/bookings/${stay.bookingId}`, { travelerIds: [dadP] })).status).toBe(400);
+    });
+
     it('rejects mixing a stay with flights, or two stays', async () => {
       const stayId = (await addStay()).body.id;
       const stay2 = (await addStay()).body.id;
@@ -125,45 +171,74 @@ describe('lodging routes', () => {
       expect((await post('/bookings', { elementIds: [stayId, flightId], travelerIds: [dadP] })).status).toBe(400);
       expect((await post('/bookings', { elementIds: [stayId, stay2], travelerIds: [] })).status).toBe(400);
     });
-    it('rejects room or coupons on a flight booking', async () => {
+
+    it('PATCH on a stay booking accepts the new fields; adding a flight is rejected', async () => {
+      const stay = (await addStay()).body;
       const flightId = await addFlight();
-      expect((await post('/bookings', { elementIds: [flightId], travelerIds: [dadP], room: { roomType: 'suite' } })).status).toBe(400);
-      expect((await post('/bookings', { elementIds: [flightId], travelerIds: [dadP], coupons: [] })).status).toBe(400);
-    });
-    it('rejects invalid room and coupons', async () => {
-      const stayId = (await addStay()).body.id;
-      expect((await post('/bookings', { elementIds: [stayId], travelerIds: [], room: { roomType: 'castle' } })).status).toBe(400);
-      expect((await post('/bookings', { elementIds: [stayId], travelerIds: [], coupons: [{ code: '' }] })).status).toBe(400);
-    });
-    it('PATCH updates room and coupons, and adding a flight to a room booking is rejected', async () => {
-      const stayId = (await addStay()).body.id;
-      const flightId = await addFlight();
-      const id = (await post('/bookings', { elementIds: [stayId], travelerIds: [] })).body.id;
-      const patched = await patch(`/bookings/${id}`, { room: { amenities: ['pool'] }, coupons: [{ code: 'X' }], travelerIds: [] });
+      const patched = await patch(`/bookings/${stay.bookingId}`, { dueAtBookingPoints: 9000, dueLaterNotes: 'resort fee' });
       expect(patched.status).toBe(200);
-      expect(patched.body).toMatchObject({ room: { amenities: ['pool'] }, coupons: [{ code: 'X' }] });
-      expect((await patch(`/bookings/${id}`, { room: { roomType: 'castle' } })).status).toBe(400);
-      expect((await post(`/bookings/${id}/elements`, { elementId: flightId })).status).toBe(400);
+      expect(patched.body).toMatchObject({ dueAtBookingPoints: 9000, dueLaterNotes: 'resort fee' });
+      expect((await patch(`/bookings/${stay.bookingId}`, { dueAtBookingPoints: 1.5 })).status).toBe(400);
+      expect((await post(`/bookings/${stay.bookingId}/elements`, { elementId: flightId })).status).toBe(400);
     });
-    it('PATCH rejects room details and empty travelers on a flight booking', async () => {
+
+    it('flight bookings still require travelers and accept the generic fields', async () => {
       const flightId = await addFlight();
-      const id = (await post('/bookings', { elementIds: [flightId], travelerIds: [dadP] })).body.id;
-      expect((await patch(`/bookings/${id}`, { room: { roomType: 'suite' } })).status).toBe(400);
-      expect((await patch(`/bookings/${id}`, { travelerIds: [] })).status).toBe(400);
+      expect((await post('/bookings', { elementIds: [flightId], travelerIds: [] })).status).toBe(400);
+      const res = await post('/bookings', { elementIds: [flightId], travelerIds: [dadP], refundability: 'nonrefundable' });
+      expect(res.status).toBe(201);
+      expect(res.body.refundability).toBe('nonrefundable');
     });
+
     it('PATCH still edits notes on a booking whose flight was deleted', async () => {
       const flightId = await addFlight();
       const id = (await post('/bookings', { elementIds: [flightId], travelerIds: [dadP] })).body.id;
-      await request(app).delete(`/api/trips/${tripId}/elements/${flightId}`).set('Authorization', auth).expect(204);
+      await del(`/elements/${flightId}`).expect(204);
       expect((await patch(`/bookings/${id}`, { notes: 'still editable' })).status).toBe(200);
     });
-    it('applies the traveler conflict rule (409) to rooms', async () => {
-      const stayId = (await addStay()).body.id;
-      expect((await post('/bookings', { elementIds: [stayId], travelerIds: [dadP] })).status).toBe(201);
-      const conflict = await post('/bookings', { elementIds: [stayId], travelerIds: [dadP] });
+  });
+
+  describe('rooms', () => {
+    it('adds, updates and deletes rooms on a stay', async () => {
+      const stay = (await addStay()).body;
+      const created = await post(`/elements/${stay.id}/rooms`, {
+        roomType: 'suite', beds: [{ type: 'king', count: 1 }], amenities: ['jetted_tub'], travelerIds: [dadP],
+      });
+      expect(created.status).toBe(201);
+      expect(created.body).toMatchObject({ elementId: stay.id, roomType: 'suite', amenities: ['jetted_tub'], travelerIds: [dadP] });
+      const roomId = created.body.id;
+      const updated = await put(`/rooms/${roomId}`, { description: 'Ocean view', travelerIds: [dadP, momP] });
+      expect(updated.status).toBe(200);
+      expect(updated.body.description).toBe('Ocean view');
+      const el = (await get(`/elements/${stay.id}`)).body;
+      expect(el.rooms).toHaveLength(1);
+      expect(el.rooms[0].travelerIds.sort()).toEqual([dadP, momP].sort());
+      expect((await del(`/rooms/${roomId}`)).status).toBe(204);
+      expect((await get(`/elements/${stay.id}`)).body.rooms).toEqual([]);
+    });
+
+    it('validates rooms', async () => {
+      const stay = (await addStay()).body;
+      expect((await post(`/elements/${stay.id}/rooms`, { roomType: 'castle' })).status).toBe(400);
+      expect((await post(`/elements/${stay.id}/rooms`, { amenities: ['pool'] })).status).toBe(400);
+      expect((await post(`/elements/${stay.id}/rooms`, { travelerIds: ['nope'] })).status).toBe(404);
+    });
+
+    it('rejects rooms on non-hotel elements and unknown ids', async () => {
+      const flightId = await addFlight();
+      expect((await post(`/elements/${flightId}/rooms`, {})).status).toBe(400);
+      expect((await post(`/elements/nope/rooms`, {})).status).toBe(404);
+      expect((await put(`/rooms/nope`, {})).status).toBe(404);
+      expect((await del(`/rooms/nope`)).status).toBe(404);
+    });
+
+    it('returns 409 when a traveler is already in another room of the stay', async () => {
+      const stay = (await addStay()).body;
+      expect((await post(`/elements/${stay.id}/rooms`, { travelerIds: [dadP] })).status).toBe(201);
+      const conflict = await post(`/elements/${stay.id}/rooms`, { travelerIds: [dadP] });
       expect(conflict.status).toBe(409);
-      expect(conflict.body.error).toMatch(/already on/);
-      expect((await post('/bookings', { elementIds: [stayId], travelerIds: [momP] })).status).toBe(201);
+      expect(conflict.body.error).toBe('Dad is already in another room of this stay');
+      expect((await post(`/elements/${stay.id}/rooms`, { travelerIds: [momP] })).status).toBe(201);
     });
   });
 });

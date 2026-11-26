@@ -162,7 +162,7 @@ export class BookingRepository {
       await this.assertNoTravelerConflicts(tripId, input.elementIds, input.travelerIds);
       const cols = ['id', 'trip_id', 'advertised_includes_taxes', ...SCALAR_FIELDS.map(([, c]) => c)];
       const vals = [id, tripId, input.advertisedIncludesTaxes ? 1 : 0,
-        ...SCALAR_FIELDS.map(([k]) => fieldValue(k, (input as Record<string, unknown>)[k]))];
+        ...SCALAR_FIELDS.map(([k]) => fieldValue(k, (input as unknown as Record<string, unknown>)[k]))];
       await db.run(`INSERT INTO bookings (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`, vals);
       for (const elementId of input.elementIds) {
         await db.run(`INSERT INTO booking_links (booking_id, element_id) VALUES (?, ?)`, [id, elementId]);
