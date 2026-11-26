@@ -363,6 +363,15 @@ const SCHEMAS = {
       booking_site TEXT,
       site_itinerary_number TEXT,
       advertised_includes_taxes INTEGER NOT NULL DEFAULT 0,
+      advertised_rate_cash DECIMAL,
+      advertised_rate_points INTEGER,
+      due_at_booking_cash DECIMAL,
+      due_at_booking_points INTEGER,
+      due_later_cash DECIMAL,
+      due_later_notes TEXT,
+      refundability TEXT,
+      cancel_by TEXT,
+      cancellation_policy TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
       FOREIGN KEY (trip_id) REFERENCES trips(id) ON DELETE CASCADE
@@ -418,25 +427,34 @@ const SCHEMAS = {
       check_out_date TEXT,
       check_out_time TEXT,
       destination_id TEXT,
+      amenities TEXT NOT NULL DEFAULT '[]',
+      other_amenities TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
       FOREIGN KEY (element_id) REFERENCES trip_elements(id) ON DELETE CASCADE,
       FOREIGN KEY (destination_id) REFERENCES trip_destinations(id)
     );
 
-    CREATE TABLE IF NOT EXISTS lodging_room_details (
-      booking_id TEXT PRIMARY KEY,
+    CREATE TABLE IF NOT EXISTS lodging_rooms (
+      id TEXT PRIMARY KEY,
+      element_id TEXT NOT NULL,
+      position INTEGER NOT NULL DEFAULT 0,
       room_type TEXT,
-      beds TEXT,
-      room_description TEXT,
-      amenities TEXT,
+      beds TEXT NOT NULL DEFAULT '[]',
+      description TEXT,
+      amenities TEXT NOT NULL DEFAULT '[]',
       other_amenities TEXT,
-      refundability TEXT,
-      cancel_by TEXT,
-      cancellation_policy TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-      FOREIGN KEY (booking_id) REFERENCES bookings(id) ON DELETE CASCADE
+      FOREIGN KEY (element_id) REFERENCES trip_elements(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS lodging_room_travelers (
+      room_id TEXT NOT NULL,
+      participant_id TEXT NOT NULL,
+      PRIMARY KEY (room_id, participant_id),
+      FOREIGN KEY (room_id) REFERENCES lodging_rooms(id) ON DELETE CASCADE,
+      FOREIGN KEY (participant_id) REFERENCES trip_participants(id) ON DELETE RESTRICT
     );
 
     CREATE TABLE IF NOT EXISTS booking_coupons (
@@ -498,6 +516,7 @@ const SCHEMAS = {
     CREATE INDEX IF NOT EXISTS idx_booking_travelers_participant ON booking_travelers(participant_id);
     CREATE INDEX IF NOT EXISTS idx_booking_transactions_booking ON booking_transactions(booking_id);
     CREATE INDEX IF NOT EXISTS idx_booking_coupons_booking ON booking_coupons(booking_id);
+    CREATE INDEX IF NOT EXISTS idx_lodging_rooms_element ON lodging_rooms(element_id);
     CREATE INDEX IF NOT EXISTS idx_flight_traveler_seats_leg ON flight_traveler_seats(leg_id);
   `
 };
