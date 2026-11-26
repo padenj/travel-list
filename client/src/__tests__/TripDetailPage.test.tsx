@@ -11,6 +11,7 @@ vi.mock('../api/tripApi', () => ({
     listElements: vi.fn(),
     listParticipants: vi.fn(),
     listBookings: vi.fn(),
+    listBookingTransactions: vi.fn(),
     listDestinations: vi.fn(),
     createElement: vi.fn(),
     updateElement: vi.fn(),
@@ -43,6 +44,9 @@ vi.mock('../components/LodgingRoomsTab', () => ({
   LodgingRoomsTab: ({ stay, initialFormOpen }: { stay: { id: string }; initialFormOpen?: boolean }) => (
     <div>{`rooms tab ${stay.id}${initialFormOpen ? ' form open' : ''}`}</div>
   ),
+}));
+vi.mock('../components/LodgingPaymentsTab', () => ({
+  LodgingPaymentsTab: ({ booking }: { booking: { id: string } | null }) => <div>{`payments tab ${booking?.id ?? 'none'}`}</div>,
 }));
 vi.mock('../components/FlightSeatGrid', () => ({
   FlightSeatGrid: ({ legId }: { legId: string }) => <div>seat grid {legId}</div>,
@@ -199,11 +203,15 @@ describe('TripDetailPage', () => {
     expect(await screen.findByText('2 other elements hidden until their sections are built')).toBeTruthy();
   });
 
-  it('opens a stay with Details and Rooms tabs', async () => {
+  it('opens a stay with Details, Rooms and Payments tabs', async () => {
     const user = userEvent.setup();
-    const hotel = { id: 'h-1', tripId: 'trip-1', elementType: 'hotel', name: 'Resort', sortPosition: 2, createdAt: '', updatedAt: '',
+    const hotel = { id: 'h-1', tripId: 'trip-1', elementType: 'hotel', name: 'Resort', sortPosition: 2, createdAt: '', updatedAt: '', bookingId: 'b-1',
+      rooms: [{ id: 'r-1', elementId: 'h-1', position: 0, roomType: null, beds: [], description: null, amenities: [], otherAmenities: null, travelerIds: [] }],
       hotelDetails: { address: '1 Beach Rd', phone: null, website: null, checkInDate: '2026-09-01', checkInTime: null, checkOutDate: '2026-09-03', checkOutTime: null, destinationId: null } };
     api.listElements.mockResolvedValue([hotel]);
+    api.listBookings.mockResolvedValue([{ id: 'b-1', tripId: 'trip-1', elementIds: ['h-1'], travelerIds: [], confirmationNumber: 'H-1',
+      currentConfirmationNumber: 'H-1', advertisedPriceCash: null, advertisedPricePoints: null, loyaltyProgram: null, notes: null,
+      createdAt: '', updatedAt: '', actualTotalCash: 0, actualTotalPoints: 0, bookingSite: 'Expedia', siteItineraryNumber: '7231004' }]);
     renderPage();
     await user.click(await screen.findByRole('button', { name: 'Open Resort' }));
     const dialog = await screen.findByRole('dialog', { name: 'Resort' });
@@ -211,6 +219,10 @@ describe('TripDetailPage', () => {
     expect(within(dialog).getByRole('tab', { name: /Rooms/ })).toBeTruthy();
     expect(within(dialog).queryByRole('tab', { name: /Seats/ })).toBeNull();
     expect(within(dialog).getByRole('link', { name: 'Open in Maps' })).toBeTruthy();
+    expect(within(dialog).getByRole('tab', { name: /Payments/ })).toBeTruthy();
+    expect(within(dialog).getByRole('tab', { name: /Rooms/ }).textContent).toContain('1');
+    expect(within(dialog).getByText('Expedia 7231004 · Hotel H-1')).toBeTruthy();
+    expect(within(dialog).getByText('payments tab b-1')).toBeTruthy();
   });
 
   it('adds lodging and opens the new stay on the Rooms tab with the form open', async () => {
@@ -448,5 +460,25 @@ describe('TripDetailPage', () => {
 
     await waitFor(() => expect(api.getTrip.mock.calls.length).toBe(callsBefore + 1));
     expect(await screen.findByRole('heading', { name: 'Cabo' })).toBeTruthy();
+  });
+
+  it('asks before closing a stay with unsaved edits', async () => {
+    const user = userEvent.setup();
+    const hotel = { id: 'h-1', tripId: 'trip-1', elementType: 'hotel', name: 'Resort', sortPosition: 2, createdAt: '', updatedAt: '',
+      hotelDetails: { address: null, phone: null, website: null, checkInDate: '2026-09-01', checkInTime: null, checkOutDate: '2026-09-03', checkOutTime: null, destinationId: null } };
+    api.listElements.mockResolvedValue([hotel]);
+    renderPage();
+    await user.click(await screen.findByRole('button', { name: 'Open Resort' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Resort' });
+    await user.click(within(dialog).getByRole('button', { name: 'Edit stay' }));
+    await user.type(within(dialog).getByLabelText('Hotel name'), ' Spa');
+    await user.click(dialog.querySelector('.mantine-Modal-close') as HTMLElement);
+    expect(await screen.findByText('Discard unsaved changes?')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Keep editing' }));
+    expect(screen.getByRole('dialog', { name: 'Resort' })).toBeTruthy();
+    expect((within(dialog).getByLabelText('Hotel name') as HTMLInputElement).value).toBe('Resort Spa');
+    await user.click(dialog.querySelector('.mantine-Modal-close') as HTMLElement);
+    await user.click(await screen.findByRole('button', { name: 'Discard' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Resort' })).toBeNull());
   });
 });
