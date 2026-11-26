@@ -1,7 +1,15 @@
 export const ROOM_TYPES = ['standard', 'suite', 'studio', '1br', '2br', '3br', 'other'] as const;
 export const BED_TYPES = ['king', 'queen', 'full', 'twin', 'sofa_bed', 'bunk', 'crib'] as const;
-export const AMENITIES = ['breakfast', 'fridge', 'microwave', 'kitchen', 'pool', 'hot_tub', 'parking', 'wifi', 'laundry', 'airport_shuttle', 'gym'] as const;
 export const REFUNDABILITY = ['free', 'partial', 'nonrefundable'] as const;
+export const PROPERTY_AMENITIES = ['breakfast', 'pool', 'hot_tub', 'parking', 'wifi', 'laundry', 'airport_shuttle', 'gym'] as const;
+export const ROOM_AMENITIES = ['fridge', 'microwave', 'kitchenette', 'jetted_tub', 'balcony'] as const;
+
+function amenitiesError(value: unknown, allowed: readonly string[]): string | null {
+  if (value === undefined || value === null) return null;
+  if (!Array.isArray(value)) return 'Amenities must be an array';
+  if (value.some(a => !allowed.includes(a))) return 'Unknown amenity';
+  return null;
+}
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -33,6 +41,8 @@ export function validateStay(
       return 'Times must be HH:mm';
     }
   }
+  const amenityErr = amenitiesError(d.amenities, PROPERTY_AMENITIES);
+  if (amenityErr) return amenityErr;
   return null;
 }
 
@@ -49,16 +59,9 @@ export function validateRoom(room: any): string | null {
       seen.add(bed.type);
     }
   }
-  if (room.amenities != null) {
-    if (!Array.isArray(room.amenities)) return 'Amenities must be an array';
-    if (room.amenities.some((a: any) => !(AMENITIES as readonly string[]).includes(a))) return 'Unknown amenity';
-  }
-  if (room.refundability != null && !(REFUNDABILITY as readonly string[]).includes(room.refundability)) {
-    return 'Unknown refundability';
-  }
-  if (room.cancelBy != null && room.cancelBy !== '' && (typeof room.cancelBy !== 'string' || !DATETIME_RE.test(room.cancelBy))) {
-    return 'Cancel-by must be YYYY-MM-DD or YYYY-MM-DDTHH:mm';
-  }
+  const amenityErr = amenitiesError(room.amenities, ROOM_AMENITIES);
+  if (amenityErr) return amenityErr;
+  if (room.travelerIds !== undefined && !Array.isArray(room.travelerIds)) return 'Travelers must be an array';
   return null;
 }
 
@@ -69,5 +72,26 @@ export function validateCoupons(coupons: any): string | null {
     if (c.savingsCash != null && (typeof c.savingsCash !== 'number' || !(c.savingsCash >= 0))) return 'Coupon savings must be 0 or more';
     if (c.savingsPoints != null && (!Number.isInteger(c.savingsPoints) || c.savingsPoints < 0)) return 'Coupon points must be a whole number, 0 or more';
   }
+  return null;
+}
+
+const CASH_FIELDS = ['advertisedPriceCash', 'advertisedRateCash', 'dueAtBookingCash', 'dueLaterCash'] as const;
+const POINTS_FIELDS = ['advertisedPricePoints', 'advertisedRatePoints', 'dueAtBookingPoints'] as const;
+
+export function validateBookingFields(data: any): string | null {
+  const d = data ?? {};
+  for (const key of CASH_FIELDS) {
+    const v = d[key];
+    if (v != null && (typeof v !== 'number' || !(v >= 0) || !Number.isFinite(v))) return 'Amounts must be 0 or more';
+  }
+  for (const key of POINTS_FIELDS) {
+    const v = d[key];
+    if (v != null && (!Number.isInteger(v) || v < 0)) return 'Points must be a whole number, 0 or more';
+  }
+  if (d.refundability != null && !(REFUNDABILITY as readonly string[]).includes(d.refundability)) return 'Unknown refundability';
+  if (d.cancelBy != null && d.cancelBy !== '' && (typeof d.cancelBy !== 'string' || !DATETIME_RE.test(d.cancelBy))) {
+    return 'Cancel-by must be YYYY-MM-DD or YYYY-MM-DDTHH:mm';
+  }
+  if (d.coupons !== undefined) return validateCoupons(d.coupons);
   return null;
 }
