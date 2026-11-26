@@ -2,7 +2,7 @@ import { Booking, TripDestination, TripElement } from '../types/trip';
 import { formatPrice } from './flightRows';
 import { formatMoney } from './money';
 import { nightsBetween } from './tripDates';
-import { DeadlineState, cancelDeadlineState, cancelLabel } from './lodging';
+import { DeadlineState, cancelDeadlineState, cancelLabel, nightlyPrice, paymentSummary } from './lodging';
 
 export interface LodgingRow {
   id: string;
@@ -15,6 +15,7 @@ export interface LodgingRow {
   roomCount: number;
   destination: { name: string; color: string | null } | null;
   deadline: { label: string; state: Exclude<DeadlineState, 'none'> } | null;
+  remaining: string | null;
 }
 
 function shortDate(ymd: string | null | undefined): string {
@@ -23,12 +24,13 @@ function shortDate(ymd: string | null | undefined): string {
   return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
-function roomsFor(elementId: string, bookings: Booking[]): Booking[] {
-  return bookings.filter(b => b.elementIds.length === 1 && b.elementIds[0] === elementId);
-}
-
-function confirmLabel(b: Booking): string {
-  return [b.siteItineraryNumber, b.currentConfirmationNumber].filter(Boolean).join(' / ');
+// The stay's single booking: by bookingId, else the first booking linking only this stay.
+export function stayBooking(element: TripElement, bookings: Booking[]): Booking | null {
+  if (element.bookingId) {
+    const byId = bookings.find(b => b.id === element.bookingId);
+    if (byId) return byId;
+  }
+  return bookings.find(b => b.elementIds.length === 1 && b.elementIds[0] === element.id) ?? null;
 }
 
 export function buildLodgingRows(elements: TripElement[], bookings: Booking[], destinations: TripDestination[], now: Date = new Date()): LodgingRow[] {
@@ -36,37 +38,24 @@ export function buildLodgingRows(elements: TripElement[], bookings: Booking[], d
     .filter(e => e.elementType === 'hotel')
     .map(element => {
       const h = element.hotelDetails;
-      const rooms = roomsFor(element.id, bookings);
+      const b = stayBooking(element, bookings);
       const nights = nightsBetween(h?.checkInDate, h?.checkOutDate);
       const dateLabel = h?.checkInDate && h?.checkOutDate
         ? `${shortDate(h.checkInDate)} → ${shortDate(h.checkOutDate)}${nights ? ` · ${nights} nt${nights === 1 ? '' : 's'}` : ''}`
         : '';
 
-      const advCash = rooms.reduce((s, r) => s + (r.advertisedPriceCash ?? 0), 0);
-      const advPts = rooms.reduce((s, r) => s + (r.advertisedPricePoints ?? 0), 0);
-      const paidCash = rooms.reduce((s, r) => s + r.actualTotalCash, 0);
-      const paidPts = rooms.reduce((s, r) => s + r.actualTotalPoints, 0);
       let priceLabel = '—';
-      if (advCash || advPts) {
-        priceLabel = formatPrice(advCash, advPts);
-        if (advCash && nights) priceLabel += ` (${formatMoney(Math.round((advCash / nights) * 100) / 100)}/nt)`;
-      } else if (paidCash || paidPts) {
-        priceLabel = `Paid ${formatPrice(paidCash, paidPts)}`;
+      if (b && (b.advertisedPriceCash || b.advertisedPricePoints)) {
+        priceLabel = formatPrice(b.advertisedPriceCash, b.advertisedPricePoints);
+        const nightly = nightlyPrice(b, nights);
+        if (nightly) priceLabel += ` (${formatMoney(nightly)}/nt)`;
+      } else if (b && (b.actualTotalCash || b.actualTotalPoints)) {
+        priceLabel = `Paid ${formatPrice(b.actualTotalCash, b.actualTotalPoints)}`;
       }
 
-      const labels = rooms.map(confirmLabel);
-      const first = labels[0] ?? '';
-      const distinct = new Set(labels.filter(Boolean));
-      const extra = first && distinct.size > 1 ? ` +${distinct.size - 1}` : '';
-      const confirmation = first ? `${first}${extra}` : '—';
-
-      const deadlines = rooms
-        .filter(r => r.room?.cancelBy)
-        .map(r => ({ cancelBy: r.room!.cancelBy!, label: cancelLabel(r.room), state: cancelDeadlineState(r.room!.cancelBy, now) }));
-      const upcoming = deadlines.filter(d => d.state !== 'passed').sort((a, b) => (a.cancelBy < b.cancelBy ? -1 : 1));
-      const passed = deadlines.filter(d => d.state === 'passed').sort((a, b) => (a.cancelBy < b.cancelBy ? 1 : -1));
-      const pick = upcoming[0] ?? passed[0];
-
+      const confirmation = b ? [b.siteItineraryNumber, b.currentConfirmationNumber].filter(Boolean).join(' / ') || '—' : '—';
+      const state = cancelDeadlineState(b?.cancelBy ?? null, now);
+      const summary = paymentSummary(b);
       const dest = h?.destinationId ? destinations.find(d => d.id === h.destinationId) : undefined;
 
       return {
@@ -77,9 +66,10 @@ export function buildLodgingRows(elements: TripElement[], bookings: Booking[], d
         nights,
         priceLabel,
         confirmation,
-        roomCount: rooms.length,
+        roomCount: element.rooms?.length ?? 0,
         destination: dest ? { name: dest.name, color: dest.color } : null,
-        deadline: pick ? { label: pick.label, state: pick.state as Exclude<DeadlineState, 'none'> } : null,
+        deadline: state !== 'none' ? { label: cancelLabel(b), state } : null,
+        remaining: summary && (summary.remainingCash > 0 || summary.remainingPoints > 0) ? summary.label : null,
       };
     })
     .sort((a, b) => {
@@ -92,14 +82,19 @@ export function buildLodgingRows(elements: TripElement[], bookings: Booking[], d
     });
 }
 
-// Each room counts its advertised total, or what was paid when nothing was advertised.
+// Per stay: the amounts due if any are set, else the advertised total, else what was paid.
 export function lodgingTotals(elements: TripElement[], bookings: Booking[]): { cash: number; points: number; label: string } {
-  const stayIds = new Set(elements.filter(e => e.elementType === 'hotel').map(e => e.id));
   let cash = 0;
   let points = 0;
-  for (const b of bookings) {
-    if (b.elementIds.length !== 1 || !stayIds.has(b.elementIds[0])) continue;
-    if (b.advertisedPriceCash || b.advertisedPricePoints) {
+  for (const element of elements) {
+    if (element.elementType !== 'hotel') continue;
+    const b = stayBooking(element, bookings);
+    if (!b) continue;
+    const summary = paymentSummary(b);
+    if (summary) {
+      cash += summary.dueCash;
+      points += summary.duePoints;
+    } else if (b.advertisedPriceCash || b.advertisedPricePoints) {
       cash += b.advertisedPriceCash ?? 0;
       points += b.advertisedPricePoints ?? 0;
     } else {
@@ -107,5 +102,6 @@ export function lodgingTotals(elements: TripElement[], bookings: Booking[]): { c
       points += b.actualTotalPoints;
     }
   }
+  cash = Math.round(cash * 100) / 100;
   return { cash, points, label: formatPrice(cash, points) };
 }
