@@ -4,19 +4,10 @@ import { withTransaction } from '../utils/transaction';
 
 export type RoomType = 'standard' | 'suite' | 'studio' | '1br' | '2br' | '3br' | 'other';
 export type BedType = 'king' | 'queen' | 'full' | 'twin' | 'sofa_bed' | 'bunk' | 'crib';
-export type Amenity = 'breakfast' | 'fridge' | 'microwave' | 'kitchen' | 'pool' | 'hot_tub' | 'parking' | 'wifi' | 'laundry' | 'airport_shuttle' | 'gym';
+export type PropertyAmenity = 'breakfast' | 'pool' | 'hot_tub' | 'parking' | 'wifi' | 'laundry' | 'airport_shuttle' | 'gym';
+export type RoomAmenity = 'fridge' | 'microwave' | 'kitchenette' | 'jetted_tub' | 'balcony';
 export type Refundability = 'free' | 'partial' | 'nonrefundable';
-
-export interface RoomDetails {
-  roomType: RoomType | null;
-  beds: { type: BedType; count: number }[];
-  roomDescription: string | null;
-  amenities: Amenity[];
-  otherAmenities: string | null;
-  refundability: Refundability | null;
-  cancelBy: string | null;
-  cancellationPolicy: string | null;
-}
+export interface BedCount { type: BedType; count: number }
 
 export interface BookingCoupon {
   id: string;
@@ -27,27 +18,47 @@ export interface BookingCoupon {
 }
 export type CouponInput = Partial<Omit<BookingCoupon, 'id'>> & { id?: string; code: string };
 
-const EMPTY_ROOM: RoomDetails = {
-  roomType: null, beds: [], roomDescription: null, amenities: [], otherAmenities: null,
-  refundability: null, cancelBy: null, cancellationPolicy: null,
-};
-
-function blankToNull(v: string | null | undefined): string | null {
+export function blankToNull(v: string | null | undefined): string | null {
   return v == null || v.trim() === '' ? null : v;
 }
 
-function parseJsonArray<T>(v: string | null): T[] {
+export function parseJsonArray<T>(v: string | null): T[] {
   if (!v) return [];
   try { const parsed = JSON.parse(v); return Array.isArray(parsed) ? parsed : []; } catch { return []; }
 }
 
-function rowToRoom(r: any): RoomDetails {
-  return {
-    roomType: r.room_type ?? null, beds: parseJsonArray(r.beds), roomDescription: r.room_description ?? null,
-    amenities: parseJsonArray(r.amenities), otherAmenities: r.other_amenities ?? null,
-    refundability: r.refundability ?? null, cancelBy: r.cancel_by ?? null, cancellationPolicy: r.cancellation_policy ?? null,
-  };
-}
+const BOOKING_SELECT = (p = '') => `
+  ${p}id as id, ${p}trip_id as tripId, ${p}confirmation_number as confirmationNumber,
+  ${p}advertised_price_cash as advertisedPriceCash, ${p}advertised_price_points as advertisedPricePoints,
+  ${p}loyalty_program as loyaltyProgram, ${p}notes as notes, ${p}booking_site as bookingSite,
+  ${p}site_itinerary_number as siteItineraryNumber, ${p}advertised_includes_taxes as advertisedIncludesTaxes,
+  ${p}advertised_rate_cash as advertisedRateCash, ${p}advertised_rate_points as advertisedRatePoints,
+  ${p}due_at_booking_cash as dueAtBookingCash, ${p}due_at_booking_points as dueAtBookingPoints,
+  ${p}due_later_cash as dueLaterCash, ${p}due_later_notes as dueLaterNotes,
+  ${p}refundability as refundability, ${p}cancel_by as cancelBy, ${p}cancellation_policy as cancellationPolicy,
+  ${p}created_at as createdAt, ${p}updated_at as updatedAt`;
+
+const SCALAR_FIELDS: Array<[keyof UpdateBookingInput, string]> = [
+  ['confirmationNumber', 'confirmation_number'],
+  ['advertisedPriceCash', 'advertised_price_cash'],
+  ['advertisedPricePoints', 'advertised_price_points'],
+  ['loyaltyProgram', 'loyalty_program'],
+  ['notes', 'notes'],
+  ['bookingSite', 'booking_site'],
+  ['siteItineraryNumber', 'site_itinerary_number'],
+  ['advertisedRateCash', 'advertised_rate_cash'],
+  ['advertisedRatePoints', 'advertised_rate_points'],
+  ['dueAtBookingCash', 'due_at_booking_cash'],
+  ['dueAtBookingPoints', 'due_at_booking_points'],
+  ['dueLaterCash', 'due_later_cash'],
+  ['dueLaterNotes', 'due_later_notes'],
+  ['refundability', 'refundability'],
+  ['cancelBy', 'cancel_by'],
+  ['cancellationPolicy', 'cancellation_policy'],
+];
+const TEXT_FIELDS = new Set(['confirmationNumber', 'loyaltyProgram', 'notes', 'bookingSite', 'siteItineraryNumber',
+  'dueLaterNotes', 'refundability', 'cancelBy', 'cancellationPolicy']);
+const fieldValue = (key: string, v: unknown) => (v === undefined ? null : TEXT_FIELDS.has(key) ? blankToNull(v as string | null) : v);
 
 export interface Booking {
   id: string;
@@ -60,6 +71,15 @@ export interface Booking {
   bookingSite: string | null;
   siteItineraryNumber: string | null;
   advertisedIncludesTaxes: boolean;
+  advertisedRateCash: number | null;
+  advertisedRatePoints: number | null;
+  dueAtBookingCash: number | null;
+  dueAtBookingPoints: number | null;
+  dueLaterCash: number | null;
+  dueLaterNotes: string | null;
+  refundability: Refundability | null;
+  cancelBy: string | null;
+  cancellationPolicy: string | null;
   createdAt: string;
   updatedAt: string;
   elementIds: string[];
@@ -67,7 +87,6 @@ export interface Booking {
   currentConfirmationNumber: string | null;
   actualTotalCash: number;
   actualTotalPoints: number;
-  room: RoomDetails | null;
   coupons: BookingCoupon[];
 }
 
@@ -80,7 +99,15 @@ export interface CreateBookingInput {
   bookingSite?: string | null;
   siteItineraryNumber?: string | null;
   advertisedIncludesTaxes?: boolean;
-  room?: Partial<RoomDetails> | null;
+  advertisedRateCash?: number | null;
+  advertisedRatePoints?: number | null;
+  dueAtBookingCash?: number | null;
+  dueAtBookingPoints?: number | null;
+  dueLaterCash?: number | null;
+  dueLaterNotes?: string | null;
+  refundability?: Refundability | null;
+  cancelBy?: string | null;
+  cancellationPolicy?: string | null;
   coupons?: CouponInput[];
   elementIds: string[];
   travelerIds: string[];
@@ -102,7 +129,15 @@ export interface UpdateBookingInput {
   bookingSite?: string | null;
   siteItineraryNumber?: string | null;
   advertisedIncludesTaxes?: boolean;
-  room?: Partial<RoomDetails> | null;
+  advertisedRateCash?: number | null;
+  advertisedRatePoints?: number | null;
+  dueAtBookingCash?: number | null;
+  dueAtBookingPoints?: number | null;
+  dueLaterCash?: number | null;
+  dueLaterNotes?: string | null;
+  refundability?: Refundability | null;
+  cancelBy?: string | null;
+  cancellationPolicy?: string | null;
   coupons?: CouponInput[];
   elementIds?: string[];
   travelerIds?: string[];
@@ -125,47 +160,19 @@ export class BookingRepository {
     const db = await this.db;
     await withTransaction(db, async () => {
       await this.assertNoTravelerConflicts(tripId, input.elementIds, input.travelerIds);
-      await db.run(
-        `INSERT INTO bookings (id, trip_id, confirmation_number, advertised_price_cash, advertised_price_points, loyalty_program, notes,
-                               booking_site, site_itinerary_number, advertised_includes_taxes, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
-        [id, tripId, input.confirmationNumber || null, input.advertisedPriceCash ?? null,
-         input.advertisedPricePoints ?? null, input.loyaltyProgram || null, input.notes || null,
-         blankToNull(input.bookingSite), blankToNull(input.siteItineraryNumber), input.advertisedIncludesTaxes ? 1 : 0]
-      );
+      const cols = ['id', 'trip_id', 'advertised_includes_taxes', ...SCALAR_FIELDS.map(([, c]) => c)];
+      const vals = [id, tripId, input.advertisedIncludesTaxes ? 1 : 0,
+        ...SCALAR_FIELDS.map(([k]) => fieldValue(k, (input as Record<string, unknown>)[k]))];
+      await db.run(`INSERT INTO bookings (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`, vals);
       for (const elementId of input.elementIds) {
         await db.run(`INSERT INTO booking_links (booking_id, element_id) VALUES (?, ?)`, [id, elementId]);
       }
       for (const participantId of input.travelerIds) {
         await db.run(`INSERT INTO booking_travelers (booking_id, participant_id) VALUES (?, ?)`, [id, participantId]);
       }
-      await this.writeRoom(db, id, input.room);
       await this.writeCoupons(db, id, input.coupons);
     });
     return this.getBookingById(id) as Promise<Booking>;
-  }
-
-  private async writeRoom(db: any, bookingId: string, room: Partial<RoomDetails> | null | undefined): Promise<void> {
-    if (room === undefined) return;
-    if (room === null) {
-      await db.run('DELETE FROM lodging_room_details WHERE booking_id = ?', [bookingId]);
-      return;
-    }
-    const existing = await db.get('SELECT * FROM lodging_room_details WHERE booking_id = ?', [bookingId]);
-    const current: RoomDetails = existing ? rowToRoom(existing) : EMPTY_ROOM;
-    const merged: RoomDetails = { ...current, ...room } as RoomDetails;
-    await db.run(
-      `INSERT INTO lodging_room_details
-         (booking_id, room_type, beds, room_description, amenities, other_amenities, refundability, cancel_by, cancellation_policy)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(booking_id) DO UPDATE SET
-         room_type = excluded.room_type, beds = excluded.beds, room_description = excluded.room_description,
-         amenities = excluded.amenities, other_amenities = excluded.other_amenities, refundability = excluded.refundability,
-         cancel_by = excluded.cancel_by, cancellation_policy = excluded.cancellation_policy, updated_at = datetime('now')`,
-      [bookingId, merged.roomType ?? null, JSON.stringify(merged.beds ?? []), blankToNull(merged.roomDescription),
-       JSON.stringify(merged.amenities ?? []), blankToNull(merged.otherAmenities), merged.refundability ?? null,
-       blankToNull(merged.cancelBy), blankToNull(merged.cancellationPolicy)]
-    );
   }
 
   private async writeCoupons(db: any, bookingId: string, coupons: CouponInput[] | undefined): Promise<void> {
@@ -232,28 +239,24 @@ export class BookingRepository {
 
   async getBookingById(id: string): Promise<Booking | null> {
     const db = await this.db;
-    const row = await db.get(
-      `SELECT id, trip_id as tripId, confirmation_number as confirmationNumber,
-              advertised_price_cash as advertisedPriceCash, advertised_price_points as advertisedPricePoints,
-              loyalty_program as loyaltyProgram, notes, booking_site as bookingSite,
-              site_itinerary_number as siteItineraryNumber, advertised_includes_taxes as advertisedIncludesTaxes,
-              created_at as createdAt, updated_at as updatedAt
-       FROM bookings WHERE id = ?`,
-      [id]
-    );
+    const row = await db.get(`SELECT ${BOOKING_SELECT()} FROM bookings WHERE id = ?`, [id]);
     if (!row) return null;
     return this.hydrate(row);
+  }
+
+  async getBookingIdForElement(elementId: string): Promise<string | null> {
+    const db = await this.db;
+    const row = await db.get<{ bookingId: string }>(
+      `SELECT bl.booking_id as bookingId FROM booking_links bl JOIN bookings b ON b.id = bl.booking_id
+       WHERE bl.element_id = ? ORDER BY b.created_at, b.id LIMIT 1`, [elementId]);
+    return row?.bookingId ?? null;
   }
 
   async getBookingsForTrip(tripId: string, elementId?: string): Promise<Booking[]> {
     const db = await this.db;
     const rows = elementId
       ? await db.all(
-          `SELECT DISTINCT b.id, b.trip_id as tripId, b.confirmation_number as confirmationNumber,
-                  b.advertised_price_cash as advertisedPriceCash, b.advertised_price_points as advertisedPricePoints,
-                  b.loyalty_program as loyaltyProgram, b.notes, b.booking_site as bookingSite,
-                  b.site_itinerary_number as siteItineraryNumber, b.advertised_includes_taxes as advertisedIncludesTaxes,
-                  b.created_at as createdAt, b.updated_at as updatedAt
+          `SELECT DISTINCT ${BOOKING_SELECT('b.')}
            FROM bookings b
            JOIN booking_links bl ON bl.booking_id = b.id
            WHERE b.trip_id = ? AND bl.element_id = ?
@@ -261,12 +264,7 @@ export class BookingRepository {
           [tripId, elementId]
         )
       : await db.all(
-          `SELECT id, trip_id as tripId, confirmation_number as confirmationNumber,
-                  advertised_price_cash as advertisedPriceCash, advertised_price_points as advertisedPricePoints,
-                  loyalty_program as loyaltyProgram, notes, booking_site as bookingSite,
-                  site_itinerary_number as siteItineraryNumber, advertised_includes_taxes as advertisedIncludesTaxes,
-                  created_at as createdAt, updated_at as updatedAt
-           FROM bookings WHERE trip_id = ? ORDER BY created_at ASC`,
+          `SELECT ${BOOKING_SELECT()} FROM bookings WHERE trip_id = ? ORDER BY created_at ASC`,
           [tripId]
         );
 
@@ -294,22 +292,11 @@ export class BookingRepository {
       );
     }
 
-    const fieldMap: Record<string, string> = {
-      confirmationNumber: 'confirmation_number',
-      advertisedPriceCash: 'advertised_price_cash',
-      advertisedPricePoints: 'advertised_price_points',
-      loyaltyProgram: 'loyalty_program',
-      notes: 'notes',
-      bookingSite: 'booking_site',
-      siteItineraryNumber: 'site_itinerary_number',
-      advertisedIncludesTaxes: 'advertised_includes_taxes',
-    };
-    const dbUpdates: Record<string, any> = {};
-    for (const [key, dbKey] of Object.entries(fieldMap)) {
-      if (!(key in updates)) continue;
-      const value = (updates as any)[key];
-      dbUpdates[dbKey] = key === 'advertisedIncludesTaxes' ? (value ? 1 : 0) : value ?? null;
+    const dbUpdates: Record<string, unknown> = {};
+    for (const [key, column] of SCALAR_FIELDS) {
+      if (key in updates) dbUpdates[column] = fieldValue(key, (updates as Record<string, unknown>)[key]);
     }
+    if (updates.advertisedIncludesTaxes !== undefined) dbUpdates.advertised_includes_taxes = updates.advertisedIncludesTaxes ? 1 : 0;
 
     const db = await this.db;
     await withTransaction(db, async () => {
@@ -329,7 +316,6 @@ export class BookingRepository {
           await db.run(`INSERT INTO booking_travelers (booking_id, participant_id) VALUES (?, ?)`, [id, participantId]);
         }
       }
-      await this.writeRoom(db, id, updates.room);
       await this.writeCoupons(db, id, updates.coupons);
     });
     return this.getBookingById(id) as Promise<Booking>;
@@ -338,7 +324,6 @@ export class BookingRepository {
   async deleteBooking(id: string): Promise<void> {
     const db = await this.db;
     await db.run(`DELETE FROM booking_transactions WHERE booking_id = ?`, [id]);
-    await db.run(`DELETE FROM lodging_room_details WHERE booking_id = ?`, [id]);
     await db.run(`DELETE FROM booking_coupons WHERE booking_id = ?`, [id]);
     await db.run(`DELETE FROM booking_travelers WHERE booking_id = ?`, [id]);
     await db.run(`DELETE FROM booking_links WHERE booking_id = ?`, [id]);
@@ -399,13 +384,11 @@ export class BookingRepository {
        ORDER BY created_at DESC LIMIT 1`,
       [row.id]
     );
-    const roomRow = await db.get('SELECT * FROM lodging_room_details WHERE booking_id = ?', [row.id]);
     const couponRows = await db.all('SELECT * FROM booking_coupons WHERE booking_id = ? ORDER BY position', [row.id]);
 
     return {
       ...row,
       advertisedIncludesTaxes: Boolean(row.advertisedIncludesTaxes),
-      room: roomRow ? rowToRoom(roomRow) : null,
       coupons: couponRows.map((c: any) => ({
         id: c.id, code: c.code, savingsCash: c.savings_cash ?? null, savingsPoints: c.savings_points ?? null, notes: c.notes ?? null,
       })),

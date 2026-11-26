@@ -2,6 +2,8 @@ import { v4 as uuidv4 } from 'uuid';
 import { getDb } from '../db';
 import { withTransaction } from '../utils/transaction';
 import { flightTitle } from '../utils/flightTitle';
+import type { PropertyAmenity } from './bookingRepository';
+import type { LodgingRoom } from './lodgingRoomRepository';
 
 export interface TripElement {
   id: string;
@@ -20,6 +22,8 @@ export interface TripElement {
   createdAt: string;
   updatedAt: string;
   deletedAt?: string | null;
+  rooms?: LodgingRoom[];
+  bookingId?: string | null;
 }
 
 export interface FlightLegInput {
@@ -69,6 +73,8 @@ export interface HotelDetails {
   checkOutTime: string | null;
   destinationId: string | null;
   destinationName: string | null;
+  amenities: PropertyAmenity[];
+  otherAmenities: string | null;
 }
 
 export interface CarRentalDetails {

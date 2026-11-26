@@ -320,7 +320,7 @@ describe('BookingRepository', () => {
     });
   });
 
-  describe('lodging fields', () => {
+  describe('stay booking fields', () => {
     let hotelId: string;
 
     beforeEach(async () => {
@@ -330,54 +330,56 @@ describe('BookingRepository', () => {
       })).id;
     });
 
-    it('creates a booking with site fields, room and coupons', async () => {
+    it('creates a booking with site, price, schedule, cancellation and coupons', async () => {
       const b = await repo.createBooking(tripId, {
         elementIds: [hotelId], travelerIds: [],
-        bookingSite: 'Expedia', siteItineraryNumber: '7300', advertisedIncludesTaxes: true,
-        advertisedPriceCash: 900, confirmationNumber: 'H1',
-        room: { roomType: 'suite', beds: [{ type: 'king', count: 1 }], amenities: ['breakfast'], refundability: 'free', cancelBy: '2027-01-01' },
-        coupons: [{ code: 'SAVE10', savingsCash: 10, savingsPoints: null, notes: null }, { code: 'PTS', savingsCash: null, savingsPoints: 500, notes: 'promo' }],
+        bookingSite: 'expedia', siteItineraryNumber: '7301', confirmationNumber: 'H-1',
+        advertisedPriceCash: 612.4, advertisedRateCash: 189, advertisedIncludesTaxes: true,
+        dueAtBookingCash: 430, dueLaterCash: 182.4, dueLaterNotes: 'resort fee',
+        refundability: 'free', cancelBy: '2026-12-30', cancellationPolicy: 'Free until 48h',
+        coupons: [{ code: 'SAVE10', savingsCash: 10 }],
+      });
+      expect(b).toMatchObject({
+        bookingSite: 'expedia', siteItineraryNumber: '7301', confirmationNumber: 'H-1',
+        advertisedPriceCash: 612.4, advertisedRateCash: 189, advertisedRatePoints: null, advertisedIncludesTaxes: true,
+        dueAtBookingCash: 430, dueAtBookingPoints: null, dueLaterCash: 182.4, dueLaterNotes: 'resort fee',
+        refundability: 'free', cancelBy: '2026-12-30', cancellationPolicy: 'Free until 48h',
+        coupons: [{ code: 'SAVE10', savingsCash: 10, savingsPoints: null, notes: null }],
+      });
+      expect(b).not.toHaveProperty('room');
+      const list = await repo.getBookingsForTrip(tripId);
+      expect(list.find(x => x.id === b.id)).toMatchObject({ dueLaterCash: 182.4, refundability: 'free' });
+    });
+
+    it('defaults new fields to null / empty', async () => {
+      const b = await repo.createBooking(tripId, { elementIds: [hotelId], travelerIds: [] });
+      expect(await repo.getBookingById(b.id)).toMatchObject({
+        coupons: [], advertisedIncludesTaxes: false, bookingSite: null,
+        advertisedRateCash: null, dueAtBookingCash: null, dueLaterCash: null, refundability: null, cancelBy: null,
+      });
+    });
+
+    it('updates new fields and replaces coupons in order', async () => {
+      const b = await repo.createBooking(tripId, { elementIds: [hotelId], travelerIds: [], coupons: [{ code: 'A' }] });
+      await repo.updateBooking(b.id, {
+        coupons: [{ code: 'C' }, { code: 'B' }], dueLaterCash: 50, refundability: 'nonrefundable', cancelBy: null,
       });
       const got = await repo.getBookingById(b.id);
-      expect(got).toMatchObject({
-        bookingSite: 'Expedia', siteItineraryNumber: '7300', advertisedIncludesTaxes: true,
-        room: { roomType: 'suite', beds: [{ type: 'king', count: 1 }], amenities: ['breakfast'], refundability: 'free', cancelBy: '2027-01-01',
-          roomDescription: null, otherAmenities: null, cancellationPolicy: null },
-      });
-      expect(got!.coupons.map(c => c.code)).toEqual(['SAVE10', 'PTS']);
-      const list = await repo.getBookingsForTrip(tripId, hotelId);
-      expect(list[0].coupons).toHaveLength(2);
-      expect(list[0].room?.roomType).toBe('suite');
+      expect(got!.coupons!.map(c => c.code)).toEqual(['C', 'B']);
+      expect(got).toMatchObject({ dueLaterCash: 50, refundability: 'nonrefundable', cancelBy: null });
     });
 
-    it('defaults: no room, no coupons, includes taxes false', async () => {
-      const b = await repo.createBooking(tripId, { elementIds: [elementId], travelerIds: [participantAId] });
-      expect(await repo.getBookingById(b.id)).toMatchObject({ room: null, coupons: [], advertisedIncludesTaxes: false, bookingSite: null });
-    });
-
-    it('update replaces coupons in order, room null deletes the room', async () => {
-      const b = await repo.createBooking(tripId, {
-        elementIds: [hotelId], travelerIds: [], room: { roomType: 'standard' }, coupons: [{ code: 'A' }],
-      } as any);
-      await repo.updateBooking(b.id, { coupons: [{ code: 'C' }, { code: 'B' }], room: null, advertisedIncludesTaxes: true });
-      const got = await repo.getBookingById(b.id);
-      expect(got!.coupons.map(c => c.code)).toEqual(['C', 'B']);
-      expect(got!.room).toBeNull();
-      expect(got!.advertisedIncludesTaxes).toBe(true);
-    });
-
-    it('update merges a partial room', async () => {
-      const b = await repo.createBooking(tripId, { elementIds: [hotelId], travelerIds: [], room: { roomType: 'suite', amenities: ['pool'] } });
-      await repo.updateBooking(b.id, { room: { refundability: 'nonrefundable' } });
-      expect((await repo.getBookingById(b.id))!.room).toMatchObject({ roomType: 'suite', amenities: ['pool'], refundability: 'nonrefundable' });
-    });
-
-    it('delete removes room and coupons', async () => {
-      const b = await repo.createBooking(tripId, { elementIds: [hotelId], travelerIds: [], room: { roomType: 'suite' }, coupons: [{ code: 'A' }] } as any);
+    it('delete removes coupons', async () => {
+      const b = await repo.createBooking(tripId, { elementIds: [hotelId], travelerIds: [], coupons: [{ code: 'A' }] });
       await repo.deleteBooking(b.id);
       const db = await getDb();
-      expect(await db.get('SELECT COUNT(*) n FROM lodging_room_details WHERE booking_id = ?', [b.id])).toEqual({ n: 0 });
       expect(await db.get('SELECT COUNT(*) n FROM booking_coupons WHERE booking_id = ?', [b.id])).toEqual({ n: 0 });
+    });
+
+    it('getBookingIdForElement returns the stay booking or null', async () => {
+      expect(await repo.getBookingIdForElement(hotelId)).toBeNull();
+      const b = await repo.createBooking(tripId, { elementIds: [hotelId], travelerIds: [] });
+      expect(await repo.getBookingIdForElement(hotelId)).toBe(b.id);
     });
 
     it('createBooking is atomic: a failing coupon insert rolls back the booking', async () => {
@@ -385,12 +387,6 @@ describe('BookingRepository', () => {
       const before = (await db.get('SELECT COUNT(*) n FROM bookings')).n;
       await expect(repo.createBooking(tripId, { elementIds: [hotelId], travelerIds: [], coupons: [{ code: null }] } as any)).rejects.toThrow();
       expect((await db.get('SELECT COUNT(*) n FROM bookings')).n).toBe(before);
-    });
-
-    it('keeps a traveler in at most one room of a stay', async () => {
-      await repo.createBooking(tripId, { elementIds: [hotelId], travelerIds: [participantAId] });
-      await expect(repo.createBooking(tripId, { elementIds: [hotelId], travelerIds: [participantAId] })).rejects.toBeInstanceOf(BookingConflictError);
-      await expect(repo.createBooking(tripId, { elementIds: [hotelId], travelerIds: [participantBId] })).resolves.toBeTruthy();
     });
   });
 });
