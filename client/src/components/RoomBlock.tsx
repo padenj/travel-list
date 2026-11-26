@@ -1,51 +1,43 @@
 import { useEffect, useRef, useState } from 'react';
 import { ActionIcon, Alert, Badge, Button, Group, Paper, Text } from '@mantine/core';
 import { IconPencil, IconTrash } from '@tabler/icons-react';
-import { Booking, TripElement, TripParticipant } from '../types/trip';
+import { LodgingRoom, TripParticipant } from '../types/trip';
 import { tripApi } from '../api/tripApi';
 import { RoomForm } from './RoomForm';
-import { BookingTransactionList } from './BookingTransactionList';
-import { amenitiesLabel, cancelDeadlineState, cancelLabel, couponsLabel, roomMoneyLine, roomTitle } from '../utils/lodging';
-import { nightsBetween } from '../utils/tripDates';
+import { amenitiesLabel, roomTitle } from '../utils/lodging';
 
 interface RoomBlockProps {
   tripId: string;
-  stay: TripElement;
-  booking: Booking;
-  bookings: Booking[];
+  room: LodgingRoom;
   participants: TripParticipant[];
   onParticipantsChanged: (participants: TripParticipant[]) => void;
-  refreshKey: number;
+  takenTravelerIds: Set<string>;
   onChanged: () => Promise<void> | void;
   onEditingChange: (editing: boolean) => void;
+  onDirtyChange: (dirty: boolean) => void;
   actionsDisabled?: boolean;
 }
 
-const DEADLINE_COLOR = { ok: 'green', soon: 'orange', passed: 'dimmed', none: 'dimmed' } as const;
-
 export function RoomBlock({
-  tripId, stay, booking, bookings, participants, onParticipantsChanged, refreshKey, onChanged, onEditingChange, actionsDisabled,
+  tripId, room, participants, onParticipantsChanged, takenTravelerIds, onChanged, onEditingChange, onDirtyChange, actionsDisabled,
 }: RoomBlockProps) {
   const [editing, setEditing] = useState(false);
-  const [transactionFormOpen, setTransactionFormOpen] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [transactionCount, setTransactionCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const onEditingChangeRef = useRef(onEditingChange);
   onEditingChangeRef.current = onEditingChange;
 
-  const anyEditing = editing || transactionFormOpen;
   useEffect(() => {
-    onEditingChangeRef.current(anyEditing);
-  }, [anyEditing]);
+    onEditingChangeRef.current(editing);
+  }, [editing]);
   useEffect(() => () => onEditingChangeRef.current(false), []);
 
   const remove = async () => {
     try {
       setDeleting(true);
       setError(null);
-      await tripApi.deleteBooking(tripId, booking.id);
+      await tripApi.deleteRoom(tripId, room.id);
       await onChanged();
     } catch (err) {
       setConfirmingDelete(false);
@@ -59,36 +51,23 @@ export function RoomBlock({
     return (
       <RoomForm
         tripId={tripId}
-        stayId={stay.id}
+        stayId={room.elementId}
+        room={room}
+        takenTravelerIds={takenTravelerIds}
         participants={participants}
-        bookings={bookings}
-        booking={booking}
         onParticipantsChanged={onParticipantsChanged}
         onSaved={async () => {
           setEditing(false);
           await onChanged();
         }}
         onCancel={() => setEditing(false)}
+        onDirtyChange={onDirtyChange}
       />
     );
   }
 
-  const conf = booking.currentConfirmationNumber;
-  const room = booking.room ?? null;
-  const travelerNames = booking.travelerIds.map(id => participants.find(p => p.id === id)?.displayName ?? 'Unknown traveler');
-  const refs = [
-    [booking.bookingSite, booking.siteItineraryNumber].filter(Boolean).join(' '),
-    conf ? `Hotel ${conf}` : '',
-    booking.confirmationNumber && booking.confirmationNumber !== conf ? `orig ${booking.confirmationNumber}` : '',
-  ].filter(Boolean).join(' · ');
-  const nights = nightsBetween(stay.hotelDetails?.checkInDate, stay.hotelDetails?.checkOutDate);
-  const cancel = cancelLabel(room);
-  const deadline = cancelDeadlineState(room?.cancelBy ?? null);
-  const amenities = amenitiesLabel(room?.amenities, room?.otherAmenities);
-  const coupons = couponsLabel(booking.coupons);
-  const deletePrompt = `Delete ${conf ? `room ${conf}` : 'this room'}${
-    transactionCount > 0 ? ` and its ${transactionCount} transaction${transactionCount === 1 ? '' : 's'}` : ''
-  }?`;
+  const travelerNames = room.travelerIds.map(id => participants.find(p => p.id === id)?.displayName ?? 'Unknown traveler');
+  const amenities = amenitiesLabel(room.amenities, room.otherAmenities);
 
   return (
     <Paper withBorder p="xs" mt="xs">
@@ -113,32 +92,14 @@ export function RoomBlock({
 
       {confirmingDelete && (
         <Group gap="xs" mt={4}>
-          <Text size="sm">{deletePrompt}</Text>
+          <Text size="sm">Delete this room?</Text>
           <Button size="compact-xs" color="red" onClick={remove} loading={deleting}>Confirm</Button>
           <Button size="compact-xs" variant="default" onClick={() => setConfirmingDelete(false)}>Cancel</Button>
         </Group>
       )}
 
-      {refs && <Text size="sm">{refs}</Text>}
-      <Text size="sm" c="dimmed">{roomMoneyLine(booking, nights)}</Text>
-      {cancel && (
-        <Text size="sm" c={DEADLINE_COLOR[deadline]} td={deadline === 'passed' ? 'line-through' : undefined}>{cancel}</Text>
-      )}
-      {room?.cancellationPolicy && <Text size="xs" c="dimmed" style={{ whiteSpace: 'pre-line' }}>{room.cancellationPolicy}</Text>}
-      {room?.roomDescription && <Text size="sm">{room.roomDescription}</Text>}
+      {room.description && <Text size="sm">{room.description}</Text>}
       {amenities && <Text size="sm">{amenities}</Text>}
-      {coupons && <Text size="sm">{coupons}</Text>}
-      {booking.notes && <Text size="sm" style={{ whiteSpace: 'pre-line' }}>{booking.notes}</Text>}
-
-      <BookingTransactionList
-        tripId={tripId}
-        bookingId={booking.id}
-        originalConfirmationNumber={booking.confirmationNumber}
-        refreshKey={refreshKey}
-        onChanged={onChanged}
-        onCountChange={setTransactionCount}
-        onEditingChange={setTransactionFormOpen}
-      />
     </Paper>
   );
 }

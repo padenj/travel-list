@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Button, Group, Text } from '@mantine/core';
-import { Booking, TripElement, TripParticipant } from '../types/trip';
+import { TripElement, TripParticipant } from '../types/trip';
 import { RoomBlock } from './RoomBlock';
 import { RoomForm } from './RoomForm';
 
@@ -8,39 +8,52 @@ interface LodgingRoomsTabProps {
   tripId: string;
   stay: TripElement;
   participants: TripParticipant[];
-  bookings: Booking[];
   onParticipantsChanged: (participants: TripParticipant[]) => void;
-  refreshKey: number;
-  onBookingsChanged: () => Promise<void> | void;
+  onRoomsChanged: () => Promise<void> | void;
   onEditingChange: (editing: boolean) => void;
+  onDirtyChange: (dirty: boolean) => void;
   initialFormOpen?: boolean;
 }
 
+function toggled(prev: Set<string>, key: string, on: boolean): Set<string> {
+  if (prev.has(key) === on) return prev;
+  const next = new Set(prev);
+  if (on) next.add(key);
+  else next.delete(key);
+  return next;
+}
+
 export function LodgingRoomsTab({
-  tripId, stay, participants, bookings, onParticipantsChanged, refreshKey, onBookingsChanged, onEditingChange, initialFormOpen = false,
+  tripId, stay, participants, onParticipantsChanged, onRoomsChanged, onEditingChange, onDirtyChange, initialFormOpen = false,
 }: LodgingRoomsTabProps) {
   const [adding, setAdding] = useState(initialFormOpen);
   const [editingIds, setEditingIds] = useState<Set<string>>(new Set());
+  const [dirtyKeys, setDirtyKeys] = useState<Set<string>>(new Set());
   const onEditingChangeRef = useRef(onEditingChange);
   onEditingChangeRef.current = onEditingChange;
+  const onDirtyChangeRef = useRef(onDirtyChange);
+  onDirtyChangeRef.current = onDirtyChange;
 
   const anyEditing = adding || editingIds.size > 0;
+  const anyDirty = dirtyKeys.size > 0;
   useEffect(() => {
     onEditingChangeRef.current(anyEditing);
   }, [anyEditing]);
-  useEffect(() => () => onEditingChangeRef.current(false), []);
+  useEffect(() => {
+    onDirtyChangeRef.current(anyDirty);
+  }, [anyDirty]);
+  useEffect(() => () => {
+    onEditingChangeRef.current(false);
+    onDirtyChangeRef.current(false);
+  }, []);
 
-  const rooms = bookings.filter(b => b.elementIds.length === 1 && b.elementIds[0] === stay.id);
-  const inRoom = new Set(rooms.flatMap(r => r.travelerIds));
+  const rooms = stay.rooms ?? [];
+  const takenBy = (exceptRoomId: string | null) =>
+    new Set(rooms.filter(r => r.id !== exceptRoomId).flatMap(r => r.travelerIds));
+  const inRoom = takenBy(null);
   const notInRoom = inRoom.size > 0 ? participants.filter(p => !inRoom.has(p.id)) : [];
 
-  const setBlockEditing = (id: string, editing: boolean) =>
-    setEditingIds(prev => {
-      const next = new Set(prev);
-      if (editing) next.add(id);
-      else next.delete(id);
-      return next.size === prev.size && [...next].every(x => prev.has(x)) ? prev : next;
-    });
+  const setDirty = (key: string, dirty: boolean) => setDirtyKeys(prev => toggled(prev, key, dirty));
 
   return (
     <div>
@@ -53,14 +66,15 @@ export function LodgingRoomsTab({
         <RoomForm
           tripId={tripId}
           stayId={stay.id}
+          takenTravelerIds={inRoom}
           participants={participants}
-          bookings={bookings}
           onParticipantsChanged={onParticipantsChanged}
           onSaved={async () => {
             setAdding(false);
-            await onBookingsChanged();
+            await onRoomsChanged();
           }}
           onCancel={() => setAdding(false)}
+          onDirtyChange={dirty => setDirty('new', dirty)}
         />
       )}
 
@@ -68,14 +82,13 @@ export function LodgingRoomsTab({
         <RoomBlock
           key={room.id}
           tripId={tripId}
-          stay={stay}
-          booking={room}
-          bookings={bookings}
+          room={room}
           participants={participants}
           onParticipantsChanged={onParticipantsChanged}
-          refreshKey={refreshKey}
-          onChanged={onBookingsChanged}
-          onEditingChange={editing => setBlockEditing(room.id, editing)}
+          takenTravelerIds={takenBy(room.id)}
+          onChanged={onRoomsChanged}
+          onEditingChange={editing => setEditingIds(prev => toggled(prev, room.id, editing))}
+          onDirtyChange={dirty => setDirty(room.id, dirty)}
           actionsDisabled={adding}
         />
       ))}
