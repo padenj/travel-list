@@ -400,3 +400,20 @@ export class BookingRepository {
     };
   }
 }
+
+export const BOOKING_INPUT_KEYS = [
+  'confirmationNumber', 'advertisedPriceCash', 'advertisedPricePoints', 'loyaltyProgram', 'notes',
+  'bookingSite', 'siteItineraryNumber', 'advertisedIncludesTaxes',
+  'advertisedRateCash', 'advertisedRatePoints', 'dueAtBookingCash', 'dueAtBookingPoints',
+  'dueLaterCash', 'dueLaterNotes', 'refundability', 'cancelBy', 'cancellationPolicy', 'coupons',
+] as const;
+
+// Copies only the booking fields present in `body` (so PATCH stays partial).
+export function pickBookingInput(body: any): UpdateBookingInput {
+  const out: Record<string, unknown> = {};
+  for (const key of BOOKING_INPUT_KEYS) {
+    if (body && Object.prototype.hasOwnProperty.call(body, key)) out[key] = body[key];
+  }
+  if ('advertisedIncludesTaxes' in out) out.advertisedIncludesTaxes = Boolean(out.advertisedIncludesTaxes);
+  return out as UpdateBookingInput;
+}

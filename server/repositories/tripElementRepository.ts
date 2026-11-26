@@ -3,7 +3,7 @@ import { getDb } from '../db';
 import { withTransaction } from '../utils/transaction';
 import { flightTitle } from '../utils/flightTitle';
 import type { PropertyAmenity } from './bookingRepository';
-import type { LodgingRoom } from './lodgingRoomRepository';
+import { listRoomsForElement, type LodgingRoom } from './lodgingRoomRepository';
 
 export interface TripElement {
   id: string;
@@ -24,6 +24,11 @@ export interface TripElement {
   deletedAt?: string | null;
   rooms?: LodgingRoom[];
   bookingId?: string | null;
+}
+
+function parseAmenities(v: string | null | undefined): any[] {
+  if (!v) return [];
+  try { const p = JSON.parse(v); return Array.isArray(p) ? p : []; } catch { return []; }
 }
 
 export interface FlightLegInput {
@@ -160,10 +165,12 @@ export class TripElementRepository {
       const h = (element.typeSpecificData ?? {}) as Partial<HotelDetails>;
       await db.run(
         `INSERT INTO hotel_element_details
-           (element_id, address, phone, website, check_in_date, check_in_time, check_out_date, check_out_time, destination_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           (element_id, address, phone, website, check_in_date, check_in_time, check_out_date, check_out_time, destination_id,
+            amenities, other_amenities)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [id, h.address || null, h.phone || null, h.website || null, h.checkInDate || null, h.checkInTime || null,
-         h.checkOutDate || null, h.checkOutTime || null, h.destinationId || null]
+         h.checkOutDate || null, h.checkOutTime || null, h.destinationId || null,
+         JSON.stringify(Array.isArray(h.amenities) ? h.amenities : []), h.otherAmenities?.trim() || null]
       );
     } else if (element.elementType === 'car_rental' && element.typeSpecificData) {
       await db.run(
@@ -235,7 +242,13 @@ export class TripElementRepository {
         checkInDate: h.check_in_date ?? null, checkInTime: h.check_in_time ?? null,
         checkOutDate: h.check_out_date ?? null, checkOutTime: h.check_out_time ?? null,
         destinationId: h.live_destination_id ?? null, destinationName: h.destination_name ?? null,
+        amenities: parseAmenities(h.amenities), otherAmenities: h.other_amenities ?? null,
       } : null;
+      (row as any).rooms = await listRoomsForElement(db, elementId);
+      const link = await db.get(
+        `SELECT bl.booking_id AS bookingId FROM booking_links bl JOIN bookings b ON b.id = bl.booking_id
+          WHERE bl.element_id = ? ORDER BY b.created_at, b.id LIMIT 1`, [elementId]);
+      (row as any).bookingId = link?.bookingId ?? null;
     } else if (row.elementType === 'car_rental') {
       const details = await db.get(
         `SELECT element_id as elementId, rental_company as rentalCompany, car_size as carSize,
@@ -334,6 +347,7 @@ export class TripElementRepository {
       address: 'address', phone: 'phone', website: 'website',
       checkInDate: 'check_in_date', checkInTime: 'check_in_time',
       checkOutDate: 'check_out_date', checkOutTime: 'check_out_time', destinationId: 'destination_id',
+      amenities: 'amenities', otherAmenities: 'other_amenities',
     };
     await db.run('INSERT OR IGNORE INTO hotel_element_details (element_id) VALUES (?)', [elementId]);
     const sets: string[] = [];
@@ -342,7 +356,8 @@ export class TripElementRepository {
       if (Object.prototype.hasOwnProperty.call(data, key)) {
         sets.push(`${col} = ?`);
         const v = (data as any)[key];
-        values.push(v === '' ? null : v ?? null);
+        if (key === 'amenities') values.push(JSON.stringify(Array.isArray(v) ? v : []));
+        else values.push(typeof v === 'string' && v.trim() === '' ? null : v ?? null);
       }
     }
     if (sets.length === 0) return;

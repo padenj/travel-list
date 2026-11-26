@@ -760,4 +760,38 @@ describe('TripElementRepository', () => {
       expect(((await repo.getElementById(el.id)) as any)?.hotelDetails).toMatchObject({ destinationId: null, destinationName: null });
     });
   });
+
+  describe('hotel lodging hydration', () => {
+    it('stores property amenities and returns empty rooms and null bookingId', async () => {
+      const el = await repo.createElement(tripId, {
+        elementType: 'hotel', name: 'Casa',
+        typeSpecificData: { checkInDate: '2026-06-01', checkOutDate: '2026-06-03', amenities: ['pool', 'breakfast'], otherAmenities: 'EV' },
+      });
+      expect(el.hotelDetails).toMatchObject({ amenities: ['pool', 'breakfast'], otherAmenities: 'EV' });
+      expect(el.rooms).toEqual([]);
+      expect(el.bookingId).toBeNull();
+    });
+
+    it('updates amenities and hydrates rooms and bookingId', async () => {
+      const el = await repo.createElement(tripId, {
+        elementType: 'hotel', name: 'Casa', typeSpecificData: { checkInDate: '2026-06-01', checkOutDate: '2026-06-03' },
+      });
+      expect(el.hotelDetails!.amenities).toEqual([]);
+      await repo.updateElement(el.id, { typeSpecificData: { amenities: ['gym'], otherAmenities: '' } });
+      const { LodgingRoomRepository } = await import('./lodgingRoomRepository');
+      const { BookingRepository } = await import('./bookingRepository');
+      const room = await new LodgingRoomRepository().createRoom(el.id, { roomType: 'suite' });
+      const booking = await new BookingRepository().createBooking(tripId, { elementIds: [el.id], travelerIds: [] });
+      const got = await repo.getElementById(el.id);
+      expect(got!.hotelDetails).toMatchObject({ amenities: ['gym'], otherAmenities: null });
+      expect(got!.rooms!.map(r => r.id)).toEqual([room.id]);
+      expect(got!.bookingId).toBe(booking.id);
+    });
+
+    it('does not add rooms or bookingId to non-hotel elements', async () => {
+      const el = await repo.createElement(tripId, { elementType: 'activity', name: 'Zip line' });
+      expect(el).not.toHaveProperty('rooms');
+      expect(el).not.toHaveProperty('bookingId');
+    });
+  });
 });
