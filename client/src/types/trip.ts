@@ -29,6 +29,8 @@ export interface TripElement {
   updatedAt: string;
   legs?: FlightLeg[];
   hotelDetails?: HotelDetails;
+  rooms?: LodgingRoom[];
+  bookingId?: string | null;
   carRentalDetails?: CarRentalDetails;
   activityDetails?: ActivityDetails;
 }
@@ -54,6 +56,9 @@ export interface FlightLeg {
   updatedAt: string;
 }
 
+export type PropertyAmenity = 'breakfast' | 'pool' | 'hot_tub' | 'parking' | 'wifi' | 'laundry' | 'airport_shuttle' | 'gym';
+export type RoomAmenity = 'fridge' | 'microwave' | 'kitchenette' | 'jetted_tub' | 'balcony';
+
 export interface HotelDetails {
   address: string | null;
   phone: string | null;
@@ -64,25 +69,28 @@ export interface HotelDetails {
   checkOutTime: string | null;
   destinationId: string | null;
   destinationName?: string | null;
+  amenities?: PropertyAmenity[];
+  otherAmenities?: string | null;
 }
-
 export type RoomType = 'standard' | 'suite' | 'studio' | '1br' | '2br' | '3br' | 'other';
 export type BedType = 'king' | 'queen' | 'full' | 'twin' | 'sofa_bed' | 'bunk' | 'crib';
-export type AmenityKey = 'breakfast' | 'fridge' | 'microwave' | 'kitchen' | 'pool' | 'hot_tub' | 'parking' | 'wifi' | 'laundry' | 'airport_shuttle' | 'gym';
 export type Refundability = 'free' | 'partial' | 'nonrefundable';
 
 export interface BedCount { type: BedType; count: number }
 
 export interface LodgingRoom {
+  id: string;
+  elementId: string;
+  position: number;
   roomType: RoomType | null;
   beds: BedCount[];
-  roomDescription: string | null;
-  amenities: AmenityKey[];
+  description: string | null;
+  amenities: RoomAmenity[];
   otherAmenities: string | null;
-  refundability: Refundability | null;
-  cancelBy: string | null;
-  cancellationPolicy: string | null;
+  travelerIds: string[];
 }
+
+export type RoomPayload = Partial<Omit<LodgingRoom, 'id' | 'elementId' | 'position'>>;
 
 export interface BookingCoupon {
   id?: string;
@@ -170,7 +178,22 @@ export interface FlightAutofillDetails {
   sourceUrl: string;
 }
 
-export interface Booking {
+export interface BookingMoneyFields {
+  bookingSite?: string | null;
+  siteItineraryNumber?: string | null;
+  advertisedIncludesTaxes?: boolean;
+  advertisedRateCash?: number | null;
+  advertisedRatePoints?: number | null;
+  dueAtBookingCash?: number | null;
+  dueAtBookingPoints?: number | null;
+  dueLaterCash?: number | null;
+  dueLaterNotes?: string | null;
+  refundability?: Refundability | null;
+  cancelBy?: string | null;
+  cancellationPolicy?: string | null;
+}
+
+export interface Booking extends BookingMoneyFields {
   id: string;
   tripId: string;
   confirmationNumber: string | null;
@@ -185,14 +208,10 @@ export interface Booking {
   currentConfirmationNumber: string | null;
   actualTotalCash: number;
   actualTotalPoints: number;
-  bookingSite?: string | null;
-  siteItineraryNumber?: string | null;
-  advertisedIncludesTaxes?: boolean;
-  room?: LodgingRoom | null;
   coupons?: BookingCoupon[];
 }
 
-export interface CreateBookingPayload {
+export interface CreateBookingPayload extends BookingMoneyFields {
   confirmationNumber?: string | null;
   advertisedPriceCash?: number | null;
   advertisedPricePoints?: number | null;
@@ -200,12 +219,10 @@ export interface CreateBookingPayload {
   notes?: string | null;
   elementIds: string[];
   travelerIds: string[];
-  bookingSite?: string | null;
-  siteItineraryNumber?: string | null;
-  advertisedIncludesTaxes?: boolean;
-  room?: LodgingRoom | null;
   coupons?: Omit<BookingCoupon, 'id'>[];
 }
+
+export type StayBookingPayload = Omit<CreateBookingPayload, 'elementIds' | 'travelerIds'>;
 
 export interface BookingTransaction {
   id: string;

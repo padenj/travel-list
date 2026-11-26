@@ -1,7 +1,7 @@
 import {
   Trip, TripElement, TripElementConfirmation, FlightAutofillLookupInput, FlightAutofillDetails,
   TripParticipant, Booking, CreateBookingPayload, BookingTransaction, AddBookingTransactionPayload, FlightTravelerSeat,
-  FlightLeg, FlightLegPayload,
+  FlightLeg, FlightLegPayload, RoomPayload, LodgingRoom, StayBookingPayload,
   TripDestination, DestinationWritePayload, SplitListPayload, SplitResult, CopyTripPayload, CopyTripResult,
 } from '../types/trip';
 import { getAuthToken } from '../api';
@@ -11,6 +11,7 @@ const API_BASE = '/api/trips';
 export type TripElementWritePayload = Omit<Partial<TripElement>, 'notes'> & {
   notes?: string | null;
   typeSpecificData?: Record<string, unknown>;
+  booking?: StayBookingPayload;
 };
 
 function authHeaders(extra: Record<string, string> = {}): Record<string, string> {
@@ -236,6 +237,32 @@ export const tripApi = {
     if (!response.ok) {
       const body = await response.json().catch(() => ({}));
       throw new Error(body?.error || `Failed to delete booking: ${response.status}`);
+    }
+  },
+
+  createRoom: async (tripId: string, elementId: string, payload: RoomPayload): Promise<LodgingRoom> => {
+    const response = await fetch(`${API_BASE}/${tripId}/elements/${elementId}/rooms`, {
+      method: 'POST',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(payload),
+    });
+    return handleResponse(response);
+  },
+
+  updateRoom: async (tripId: string, roomId: string, payload: RoomPayload): Promise<LodgingRoom> => {
+    const response = await fetch(`${API_BASE}/${tripId}/rooms/${roomId}`, {
+      method: 'PUT',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(payload),
+    });
+    return handleResponse(response);
+  },
+
+  deleteRoom: async (tripId: string, roomId: string): Promise<void> => {
+    const response = await fetch(`${API_BASE}/${tripId}/rooms/${roomId}`, { method: 'DELETE', headers: authHeaders() });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body?.error || `Failed to delete room: ${response.status}`);
     }
   },
 

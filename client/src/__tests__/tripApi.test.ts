@@ -86,3 +86,23 @@ describe('tripApi destinations', () => {
     await expect(tripApi.deleteTrip('t1')).resolves.toBeUndefined();
   });
 });
+
+describe('room api', () => {
+  it('creates, updates and deletes rooms', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ id: 'r1' }) });
+    vi.stubGlobal('fetch', fetchMock);
+    await tripApi.createRoom('t1', 'h1', { roomType: 'suite', travelerIds: [] });
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/trips/t1/elements/h1/rooms', expect.objectContaining({ method: 'POST' }));
+    await tripApi.updateRoom('t1', 'r1', { description: 'x' });
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/trips/t1/rooms/r1', expect.objectContaining({ method: 'PUT' }));
+    await tripApi.deleteRoom('t1', 'r1');
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/trips/t1/rooms/r1', expect.objectContaining({ method: 'DELETE' }));
+    vi.unstubAllGlobals();
+  });
+
+  it('surfaces the 409 room conflict message', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 409, json: async () => ({ error: 'Dad is already in another room of this stay' }) }));
+    await expect(tripApi.createRoom('t1', 'h1', { travelerIds: ['p1'] })).rejects.toThrow('Dad is already in another room of this stay');
+    vi.unstubAllGlobals();
+  });
+});
