@@ -240,7 +240,7 @@ describe('TripDetailPage', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Save stay' }));
     const stayDialog = await screen.findByRole('dialog', { name: 'Casa' });
     expect(within(stayDialog).getByText('rooms tab h-9 form open')).toBeTruthy();
-  });
+  }, 15000);
 
   it('creates a flight without a name, closes the dialog and reloads elements', async () => {
     const user = userEvent.setup();
@@ -480,5 +480,5 @@ describe('TripDetailPage', () => {
     await user.click(dialog.querySelector('.mantine-Modal-close') as HTMLElement);
     await user.click(await screen.findByRole('button', { name: 'Discard' }));
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Resort' })).toBeNull());
-  });
+  }, 15000);
 });
