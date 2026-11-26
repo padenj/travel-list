@@ -8,9 +8,9 @@ import { LodgingRow } from '../utils/lodgingRows';
 const rows: LodgingRow[] = [
   { id: 'h1', name: 'Hyatt Ziva', checkInDate: '2027-03-01', dateLabel: 'Mar 1 → Mar 5 · 4 nts', nights: 4,
     priceLabel: '$1,612.00 ($403.00/nt)', confirmation: '7231004 / H-88213', roomCount: 2,
-    destination: { name: 'Cabo', color: '#ff8800' }, deadline: { label: 'Free cancel until Feb 27', state: 'soon' } },
+    destination: { name: 'Cabo', color: '#ff8800' }, deadline: { label: 'Free cancel until Feb 27', state: 'soon' }, remaining: 'Remaining $182.40 at check-in' },
   { id: 'h2', name: 'Airport Inn', checkInDate: '2027-03-05', dateLabel: 'Mar 5 → Mar 6 · 1 nt', nights: 1,
-    priceLabel: '—', confirmation: '—', roomCount: 0, destination: null, deadline: { label: 'Cancel by Feb 1', state: 'passed' } },
+    priceLabel: '—', confirmation: '—', roomCount: 0, destination: null, deadline: { label: 'Cancel by Feb 1', state: 'passed' }, remaining: null },
 ];
 
 describe('LodgingSection', () => {
@@ -39,5 +39,19 @@ describe('LodgingSection', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Open Hyatt Ziva' }));
     fireEvent.keyDown(screen.getByRole('button', { name: 'Open Airport Inn' }), { key: 'Enter' });
     expect(onOpen.mock.calls).toEqual([['h1'], ['h2']]);
+  });
+
+  it('shows the remaining amount on the sub-line', () => {
+    renderWithMantine(<LodgingSection rows={rows} totalLabel="" onOpen={() => {}} />);
+    const row = screen.getByRole('button', { name: 'Open Hyatt Ziva' });
+    expect(within(row).getByText('Remaining $182.40 at check-in')).toBeTruthy();
+    const inn = screen.getByRole('button', { name: 'Open Airport Inn' });
+    expect(within(inn).queryByText(/Remaining/)).toBeNull();
+  });
+
+  it('shows the sub-line when only a remaining amount is present', () => {
+    const only: LodgingRow[] = [{ ...rows[1], deadline: null, remaining: 'Remaining $50.00 at check-in' }];
+    renderWithMantine(<LodgingSection rows={only} totalLabel="" onOpen={() => {}} />);
+    expect(screen.getByText('Remaining $50.00 at check-in')).toBeTruthy();
   });
 });

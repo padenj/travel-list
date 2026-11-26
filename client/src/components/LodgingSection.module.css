@@ -91,6 +91,10 @@
   text-decoration: line-through;
 }
 
+.remaining {
+  font-weight: 700;
+}
+
 @media (max-width: 48em) {
   .grid {
     grid-template-columns: minmax(0, 1fr) auto;

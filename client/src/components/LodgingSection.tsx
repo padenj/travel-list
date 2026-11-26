@@ -56,7 +56,7 @@ export function LodgingSection({ rows, totalLabel, onOpen }: LodgingSectionProps
               </Badge>
             )}
           </span>
-          {(row.destination || row.deadline) && (
+          {(row.destination || row.deadline || row.remaining) && (
             <span className={classes.sub}>
               {row.destination && (
                 <Badge size="sm" variant="light" tt="none" color={row.destination.color ?? 'gray'}>{row.destination.name}</Badge>
@@ -64,6 +64,7 @@ export function LodgingSection({ rows, totalLabel, onOpen }: LodgingSectionProps
               {row.deadline && (
                 <span className={classes.deadline} data-state={row.deadline.state}>{row.deadline.label}</span>
               )}
+              {row.remaining && <span className={classes.remaining}>{row.remaining}</span>}
             </span>
           )}
         </div>
