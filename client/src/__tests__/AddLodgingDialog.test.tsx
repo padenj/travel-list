@@ -64,9 +64,9 @@ describe('AddLodgingDialog', () => {
     await userEvent.type(screen.getByLabelText('Hotel confirmation #'), 'H-88213');
     await userEvent.type(screen.getByLabelText('Advertised nightly (cash)'), '403');
     await userEvent.type(screen.getByLabelText('Advertised total (cash)'), '1612');
-    await userEvent.type(screen.getByLabelText('Due at booking (cash)'), '1430');
-    await userEvent.type(screen.getByLabelText('Due at check-in (cash)'), '182.40');
-    await userEvent.type(screen.getByLabelText('Due at check-in note'), 'Resort fee');
+    await userEvent.type(screen.getByLabelText('Total price (cash)'), '1612.40');
+    await userEvent.type(screen.getByLabelText('Due at check-in'), '182.40');
+    await userEvent.type(screen.getByLabelText('Check-in note'), 'Resort fee');
     await userEvent.click(screen.getByRole('checkbox', { name: 'Pool' }));
     await userEvent.click(screen.getByRole('button', { name: 'Save stay' }));
     await waitFor(() => expect(tripApi.createElement).toHaveBeenCalled());
@@ -74,7 +74,7 @@ describe('AddLodgingDialog', () => {
     expect(payload.typeSpecificData).toMatchObject({ checkInTime: '15:00', checkOutTime: '11:00', amenities: ['pool'] });
     expect(payload.booking).toMatchObject({
       bookingSite: 'Expedia', siteItineraryNumber: '7231004', confirmationNumber: 'H-88213',
-      advertisedRateCash: 403, advertisedPriceCash: 1612, dueAtBookingCash: 1430, dueLaterCash: 182.4, dueLaterNotes: 'Resort fee',
+      advertisedRateCash: 403, advertisedPriceCash: 1612, dueAtBookingCash: 1430, dueLaterCash: 182.4, dueLaterNotes: 'Resort fee', payAt: 'booking',
     });
   }, 30000);
 

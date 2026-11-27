@@ -7,7 +7,7 @@ import { LodgingStayForm } from './LodgingStayForm';
 import { StayDraft, isStayDraftDirty, stayDraftFromElement, stayPayload, validateStayDraft } from '../utils/stayDraft';
 import { amenitiesLabel, cancelDeadlineState, cancelLabel, couponsLabel, formatTime } from '../utils/lodging';
 import { formatPrice } from '../utils/flightRows';
-import { formatMoney } from '../utils/money';
+import { duesLine } from '../utils/priceEntry';
 import { formatNights, nightsBetween } from '../utils/tripDates';
 
 interface LodgingDetailsTabProps {
@@ -57,14 +57,6 @@ function priceLine(b: Booking): string {
     total ? `${total} total${b.advertisedIncludesTaxes ? ' incl. taxes' : ''}` : '',
   ].filter(Boolean);
   return parts.length ? `Adv ${parts.join(' · ')}` : '';
-}
-
-function paymentLine(b: Booking): string {
-  const atBooking = formatPrice(b.dueAtBookingCash, b.dueAtBookingPoints);
-  return [
-    atBooking ? `Due at booking ${atBooking}` : '',
-    b.dueLaterCash ? `Due at check-in ${formatMoney(b.dueLaterCash)}${b.dueLaterNotes ? ` (${b.dueLaterNotes})` : ''}` : '',
-  ].filter(Boolean).join(' · ');
 }
 
 export function LodgingDetailsTab({
@@ -163,7 +155,7 @@ export function LodgingDetailsTab({
   const destinationName = h?.destinationName ?? destinations.find(d => d.id === h?.destinationId)?.name ?? null;
   const refs = booking ? bookingLine(booking) : '';
   const price = booking ? priceLine(booking) : '';
-  const payment = booking ? paymentLine(booking) : '';
+  const payment = booking ? duesLine(booking, { withTotal: true }) : '';
   const cancel = cancelLabel(booking);
   const deadline = cancelDeadlineState(booking?.cancelBy ?? null);
   const amenities = amenitiesLabel(h?.amenities, h?.otherAmenities);
@@ -215,7 +207,7 @@ export function LodgingDetailsTab({
         </Section>
       )}
       {price && <Section title="Price"><Text size="sm">{price}</Text></Section>}
-      {payment && <Section title="Payment schedule"><Text size="sm">{payment}</Text></Section>}
+      {payment && <Section title="What you'll pay"><Text size="sm">{payment}</Text></Section>}
       {(cancel || booking?.cancellationPolicy) && (
         <Section title="Cancellation">
           {cancel && (

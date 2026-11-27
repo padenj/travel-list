@@ -5,6 +5,7 @@ import { StayDraft, addDays } from '../utils/stayDraft';
 import { BOOKING_SITES, CHECK_IN_QUICK, CHECK_OUT_QUICK, PROPERTY_AMENITY_OPTIONS, REFUNDABILITY_OPTIONS } from '../utils/lodging';
 import { HourPicker } from './HourPicker';
 import { CouponsEditor } from './CouponsEditor';
+import { PriceEntry } from './PriceEntry';
 
 interface LodgingStayFormProps {
   draft: StayDraft;
@@ -76,15 +77,9 @@ export function LodgingStayForm({ draft, onChange, destinations }: LodgingStayFo
               <TextInput id={`${uid}-points`} label="Advertised total (points)" type="number" step="1" value={draft.pricePoints} onChange={e => set('pricePoints', e.currentTarget.value)} />
             </Group>
             <Checkbox id={`${uid}-taxes`} label="Includes taxes & fees" checked={draft.includesTaxes} onChange={e => set('includesTaxes', e.currentTarget.checked)} />
-          </Section>
-
-          <Section title="Payment schedule">
-            <Group grow gap="xs">
-              <TextInput id={`${uid}-due-cash`} label="Due at booking (cash)" type="number" step="0.01" value={draft.dueAtBookingCash} onChange={e => set('dueAtBookingCash', e.currentTarget.value)} />
-              <TextInput id={`${uid}-due-points`} label="Due at booking (points)" type="number" step="1" value={draft.dueAtBookingPoints} onChange={e => set('dueAtBookingPoints', e.currentTarget.value)} />
-            </Group>
-            <TextInput id={`${uid}-later-cash`} label="Due at check-in (cash)" type="number" step="0.01" value={draft.dueLaterCash} onChange={e => set('dueLaterCash', e.currentTarget.value)} />
-            <TextInput id={`${uid}-later-notes`} label="Due at check-in note" placeholder="e.g. Resort fee + taxes" value={draft.dueLaterNotes} onChange={e => set('dueLaterNotes', e.currentTarget.value)} />
+            <Text size="sm" fw={600} mt={4}>Coupons</Text>
+            <CouponsEditor coupons={draft.coupons} onChange={coupons => set('coupons', coupons)} />
+            <PriceEntry value={draft.price} onChange={price => set('price', price)} />
           </Section>
 
           <Section title="Cancellation">
@@ -110,10 +105,6 @@ export function LodgingStayForm({ draft, onChange, destinations }: LodgingStayFo
           </Group>
         </Chip.Group>
         <TextInput id={`${uid}-other`} label="Other amenities" value={draft.otherAmenities} onChange={e => set('otherAmenities', e.currentTarget.value)} />
-      </Section>
-
-      <Section title="Coupons">
-        <CouponsEditor coupons={draft.coupons} onChange={coupons => set('coupons', coupons)} />
       </Section>
 
       <Textarea id={`${uid}-notes`} mt="sm" label="Notes" autosize minRows={1} value={draft.notes} onChange={e => set('notes', e.currentTarget.value)} />

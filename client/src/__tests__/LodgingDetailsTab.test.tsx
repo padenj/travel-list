@@ -79,7 +79,8 @@ describe('LodgingDetailsTab', () => {
     expect(screen.getByText('Expedia 7231004 · Hotel H-88213 · orig H-80000')).toBeTruthy();
     expect(screen.getByText('Loyalty: World of Hyatt')).toBeTruthy();
     expect(screen.getByText('Adv $403.00/nt · $1,612.00 total incl. taxes')).toBeTruthy();
-    expect(screen.getByText('Due at booking $1,430.00 · Due at check-in $182.40 (Resort fee)')).toBeTruthy();
+    expect(screen.getByText('Total $1,612.40 · At booking $1,430.00 · At check-in $182.40 (Resort fee)')).toBeTruthy();
+    expect(screen.getByText("What you'll pay")).toBeTruthy();
     expect(screen.getByText('Non-refundable')).toBeTruthy();
     expect(screen.getByText('No refunds')).toBeTruthy();
     expect(screen.getByText('Pool · Swim-up bar')).toBeTruthy();
@@ -89,7 +90,7 @@ describe('LodgingDetailsTab', () => {
   it('renders without a booking', () => {
     renderTab({ booking: null });
     expect(screen.getByText(/Mar 1, 3:00 PM/)).toBeTruthy();
-    expect(screen.queryByText(/Due at booking/)).toBeNull();
+    expect(screen.queryByText(/At booking/)).toBeNull();
   });
 
   it('reports dirty only after a change', async () => {
@@ -107,13 +108,13 @@ describe('LodgingDetailsTab', () => {
     vi.mocked(tripApi.updateElement).mockResolvedValue({} as any);
     renderTab();
     await userEvent.click(screen.getByRole('button', { name: 'Edit stay' }));
-    const due = screen.getByLabelText('Due at check-in (cash)');
+    const due = screen.getByLabelText('Due at check-in');
     await userEvent.clear(due);
     await userEvent.type(due, '200');
     await userEvent.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(tripApi.updateElement).toHaveBeenCalled());
     const payload = vi.mocked(tripApi.updateElement).mock.calls[0][2] as any;
     expect(payload).not.toHaveProperty('elementType');
-    expect(payload.booking).toMatchObject({ dueLaterCash: 200, siteItineraryNumber: '7231004' });
+    expect(payload.booking).toMatchObject({ dueAtBookingCash: 1412.4, dueLaterCash: 200, payAt: 'booking', siteItineraryNumber: '7231004' });
   });
 });

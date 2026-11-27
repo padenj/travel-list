@@ -28,8 +28,9 @@ describe('stay draft', () => {
     expect(draft).toMatchObject({
       name: 'Hyatt', checkInTime: '15:00', amenities: ['pool'], otherAmenities: 'Bar',
       bookingSite: 'Expedia', siteItineraryNumber: '7231', confirmationNumber: 'H-1', loyaltyProgram: 'Hyatt',
-      rateCash: '403', priceCash: '1612', includesTaxes: true, dueAtBookingCash: '1430', dueLaterCash: '182.4',
-      dueLaterNotes: 'Resort fee', refundability: 'free', cancelDate: '2027-02-27', cancelTime: '18:00',
+      rateCash: '403', priceCash: '1612', includesTaxes: true,
+      price: { totalCash: '1612.4', totalPoints: '', payAt: 'booking', otherCash: '182.4', notes: 'Resort fee' },
+      refundability: 'free', cancelDate: '2027-02-27', cancelTime: '18:00',
       cancellationPolicy: 'Free until 2 days', coupons: [{ code: 'X', savingsCash: '10', savingsPoints: '', notes: '' }],
     });
     const payload = stayPayload(draft);
@@ -43,10 +44,16 @@ describe('stay draft', () => {
         bookingSite: 'Expedia', siteItineraryNumber: '7231', confirmationNumber: 'H-1', loyaltyProgram: 'Hyatt',
         advertisedRateCash: 403, advertisedRatePoints: null, advertisedPriceCash: 1612, advertisedPricePoints: null,
         advertisedIncludesTaxes: true, dueAtBookingCash: 1430, dueAtBookingPoints: null, dueLaterCash: 182.4,
-        dueLaterNotes: 'Resort fee', refundability: 'free', cancelBy: '2027-02-27T18:00', cancellationPolicy: 'Free until 2 days',
+        dueLaterNotes: 'Resort fee', payAt: 'booking', refundability: 'free', cancelBy: '2027-02-27T18:00', cancellationPolicy: 'Free until 2 days',
         coupons: [{ code: 'X', savingsCash: 10, savingsPoints: null, notes: null }],
       },
     });
+  });
+
+  it('keeps pay at check-in from the booking', () => {
+    const draft = stayDraftFromElement(element, { ...booking, payAt: 'checkin', dueAtBookingCash: 100, dueLaterCash: 400 });
+    expect(draft.price).toMatchObject({ totalCash: '500', payAt: 'checkin', otherCash: '100' });
+    expect(stayPayload(draft).booking).toMatchObject({ dueAtBookingCash: 100, dueLaterCash: 400, payAt: 'checkin' });
   });
 
   it('builds a draft without a booking', () => {
@@ -58,9 +65,11 @@ describe('stay draft', () => {
     expect(validateStayDraft(ok)).toBeNull();
     expect(validateStayDraft({ ...ok, name: ' ' })).toBe('Hotel name is required');
     expect(validateStayDraft({ ...ok, checkOutDate: '2027-01-01' })).toBe('Check-out must be after check-in');
-    expect(validateStayDraft({ ...ok, dueLaterCash: '-1' })).toBe('Amounts must be 0 or more');
+    expect(validateStayDraft({ ...ok, price: { ...ok.price, otherCash: '-1' } })).toBe('Amounts must be 0 or more');
     expect(validateStayDraft({ ...ok, rateCash: 'abc' })).toBe('Amounts must be 0 or more');
-    expect(validateStayDraft({ ...ok, dueAtBookingPoints: '1.5' })).toBe('Points must be a whole number, 0 or more');
+    expect(validateStayDraft({ ...ok, price: { ...ok.price, totalPoints: '1.5' } })).toBe('Points must be a whole number, 0 or more');
+    expect(validateStayDraft({ ...ok, price: { ...ok.price, totalCash: '5', otherCash: '6' } }))
+      .toBe("Due at check-in can't be more than the total price");
     expect(validateStayDraft({ ...ok, cancelTime: '18:00' })).toBe('Add a cancel-by date for the time');
     expect(validateStayDraft({ ...ok, coupons: [{ code: '', savingsCash: '', savingsPoints: '', notes: '' }] })).toBe('Coupon code is required');
   });

@@ -1,4 +1,5 @@
 import { Booking, PropertyAmenity, Refundability, StayBookingPayload, TripElement } from '../types/trip';
+import { PriceEntryValue, emptyPriceEntry, fromDues, toDues, validatePriceEntry } from './priceEntry';
 
 export interface CouponDraft { code: string; savingsCash: string; savingsPoints: string; notes: string }
 
@@ -24,10 +25,7 @@ export interface StayDraft {
   priceCash: string;
   pricePoints: string;
   includesTaxes: boolean;
-  dueAtBookingCash: string;
-  dueAtBookingPoints: string;
-  dueLaterCash: string;
-  dueLaterNotes: string;
+  price: PriceEntryValue;
   refundability: Refundability | null;
   cancelDate: string;
   cancelTime: string;
@@ -41,7 +39,7 @@ export function emptyStayDraft(): StayDraft {
     destinationId: null, amenities: [], otherAmenities: '', notes: '',
     bookingSite: '', siteItineraryNumber: '', confirmationNumber: '', loyaltyProgram: '',
     rateCash: '', ratePoints: '', priceCash: '', pricePoints: '', includesTaxes: false,
-    dueAtBookingCash: '', dueAtBookingPoints: '', dueLaterCash: '', dueLaterNotes: '',
+    price: emptyPriceEntry(),
     refundability: null, cancelDate: '', cancelTime: '', cancellationPolicy: '', coupons: [],
   };
 }
@@ -64,8 +62,7 @@ export function stayDraftFromElement(element: TripElement, booking: Booking | nu
     rateCash: str(b?.advertisedRateCash), ratePoints: str(b?.advertisedRatePoints),
     priceCash: str(b?.advertisedPriceCash), pricePoints: str(b?.advertisedPricePoints),
     includesTaxes: Boolean(b?.advertisedIncludesTaxes),
-    dueAtBookingCash: str(b?.dueAtBookingCash), dueAtBookingPoints: str(b?.dueAtBookingPoints),
-    dueLaterCash: str(b?.dueLaterCash), dueLaterNotes: b?.dueLaterNotes ?? '',
+    price: b ? fromDues(b) : emptyPriceEntry(),
     refundability: b?.refundability ?? null,
     cancelDate: cancelBy.slice(0, 10), cancelTime: cancelBy.length > 10 ? cancelBy.slice(11, 16) : '',
     cancellationPolicy: b?.cancellationPolicy ?? '',
@@ -102,12 +99,14 @@ export function validateStayDraft(draft: StayDraft): string | null {
   if (!draft.checkOutDate) return 'Check-out date is required';
   if (!DATE_RE.test(draft.checkInDate) || !DATE_RE.test(draft.checkOutDate)) return 'Dates must be YYYY-MM-DD';
   if (draft.checkOutDate <= draft.checkInDate) return 'Check-out must be after check-in';
-  for (const v of [draft.rateCash, draft.priceCash, draft.dueAtBookingCash, draft.dueLaterCash]) {
+  for (const v of [draft.rateCash, draft.priceCash]) {
     if (num(v) === 'invalid') return 'Amounts must be 0 or more';
   }
-  for (const v of [draft.ratePoints, draft.pricePoints, draft.dueAtBookingPoints]) {
+  for (const v of [draft.ratePoints, draft.pricePoints]) {
     if (badPoints(v)) return 'Points must be a whole number, 0 or more';
   }
+  const priceProblem = validatePriceEntry(draft.price);
+  if (priceProblem) return priceProblem;
   if (draft.cancelTime && !draft.cancelDate) return 'Add a cancel-by date for the time';
   for (const c of draft.coupons) {
     if (!c.code.trim()) return 'Coupon code is required';
@@ -131,10 +130,7 @@ export function stayPayload(draft: StayDraft) {
     advertisedPriceCash: numOrNull(draft.priceCash),
     advertisedPricePoints: numOrNull(draft.pricePoints),
     advertisedIncludesTaxes: draft.includesTaxes,
-    dueAtBookingCash: numOrNull(draft.dueAtBookingCash),
-    dueAtBookingPoints: numOrNull(draft.dueAtBookingPoints),
-    dueLaterCash: numOrNull(draft.dueLaterCash),
-    dueLaterNotes: blank(draft.dueLaterNotes),
+    ...toDues(draft.price),
     refundability: draft.refundability,
     cancelBy: draft.cancelDate ? (draft.cancelTime ? `${draft.cancelDate}T${draft.cancelTime}` : draft.cancelDate) : null,
     cancellationPolicy: blank(draft.cancellationPolicy),
