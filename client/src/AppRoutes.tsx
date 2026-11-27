@@ -9,6 +9,7 @@ import SystemAdminPage from './pages/SystemAdminPage';
 import FamilyAdminPage from './pages/FamilyAdminPage';
 import SettingsProfile from './components/SettingsProfile';
 import SettingsSecurity from './components/SettingsSecurity';
+import SettingsPaymentMethods from './components/SettingsPaymentMethods';
 import SplitRailLayout from './components/SplitRailLayout';
 import PackingListPage from './pages/PackingListPage';
 import CategoryManagementPage from './pages/CategoryManagementPage';
@@ -163,6 +164,7 @@ export default function AppRoutes(): React.ReactElement {
             )
           } 
         />
+        <Route path="/settings/payment-methods" element={<SettingsPaymentMethods />} />
         <Route 
           path="/packing-lists" 
           element={<PackingListPage />} 

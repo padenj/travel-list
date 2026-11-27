@@ -26,6 +26,7 @@ import {
   IconUser,
   IconUsers,
   IconShield,
+  IconCreditCard,
   IconHelp,
   IconLogout,
   IconPlane,
@@ -61,6 +62,7 @@ const settingsTabs = [
   { id: 'profile', label: 'Profile', icon: IconUser, path: '/settings/profile' },
   { id: 'family', label: 'Family', icon: IconUsers, path: '/settings/family' },
   { id: 'security', label: 'Security', icon: IconShield, path: '/settings/security' },
+  { id: 'payment-methods', label: 'Payment methods', icon: IconCreditCard, path: '/settings/payment-methods' },
 ];
 
 export default function SplitRailLayout({ children, user, onLogout }: SplitRailLayoutProps): React.ReactElement {
@@ -114,6 +116,7 @@ export default function SplitRailLayout({ children, user, onLogout }: SplitRailL
     if (path.startsWith('/settings/profile')) return 'profile';
     if (path.startsWith('/settings/family')) return 'family';
     if (path.startsWith('/settings/security')) return 'security';
+    if (path.startsWith('/settings/payment-methods')) return 'payment-methods';
     return 'profile';
   }
 
