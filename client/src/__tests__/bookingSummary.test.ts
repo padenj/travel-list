@@ -33,4 +33,14 @@ describe('bookingMoneyLine', () => {
   it('keeps the sign of refunds', () => {
     expect(bookingMoneyLine(booking({ actualTotalCash: -20 }))).toBe('Paid -$20.00 (-$20.00/person)');
   });
+
+  it('shows the total price between advertised and paid', () => {
+    const line = bookingMoneyLine(booking({ advertisedPriceCash: 200, dueAtBookingCash: 380, dueLaterCash: 70, actualTotalCash: 380 }));
+    expect(line).toBe('Advertised $200.00/person · Total $450.00 · Paid $380.00 ($380.00/person)');
+  });
+
+  it('shows a points total with cash taxes', () => {
+    expect(bookingMoneyLine(booking({ dueAtBookingPoints: 30000, dueAtBookingCash: 11.2 })))
+      .toBe('Total 30,000 pts + $11.20 · Paid $0.00');
+  });
 });

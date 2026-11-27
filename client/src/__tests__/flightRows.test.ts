@@ -140,4 +140,16 @@ describe('flightTotals', () => {
   it('returns an empty label when nothing is priced', () => {
     expect(flightTotals([flight('el-1', 'A', [])], []).label).toBe('');
   });
+
+  it('uses the booking total when dues are set', () => {
+    const a = flight('el-1', 'A', []);
+    const b = booking('b1', ['el-1'], { travelerIds: ['p1', 'p2'], advertisedPriceCash: 200, dueAtBookingCash: 380, dueLaterCash: 70, dueAtBookingPoints: 1000 });
+    expect(flightTotals([a], [b])).toMatchObject({ cash: 450, points: 1000 });
+  });
+
+  it('falls back to advertised per person × travelers', () => {
+    const a = flight('el-1', 'A', []);
+    const b = booking('b1', ['el-1'], { travelerIds: ['p1', 'p2', 'p3'], advertisedPriceCash: 100.1, advertisedPricePoints: 5000 });
+    expect(flightTotals([a], [b])).toMatchObject({ cash: 300.3, points: 15000 });
+  });
 });

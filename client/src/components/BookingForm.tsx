@@ -1,7 +1,9 @@
 import { useMemo, useState } from 'react';
-import { Alert, Button, Checkbox, Group, Paper, SimpleGrid, Stack, Text, TextInput, Textarea } from '@mantine/core';
+import { Alert, Box, Button, Checkbox, Group, Paper, SimpleGrid, Stack, Text, TextInput, Textarea } from '@mantine/core';
 import { Booking, TripElement, TripParticipant } from '../types/trip';
 import { tripApi } from '../api/tripApi';
+import { PriceEntry } from './PriceEntry';
+import { PriceEntryValue, emptyPriceEntry, fromDues, toDues, validatePriceEntry } from '../utils/priceEntry';
 import { bookedTravelers, bookingLabel, flightOptionLabel, sortFlightsByDate } from '../utils/bookingCoverage';
 
 interface BookingFormProps {
@@ -35,6 +37,7 @@ export function BookingForm({
   const [loyaltyProgram, setLoyaltyProgram] = useState(booking?.loyaltyProgram ?? '');
   const [priceCash, setPriceCash] = useState(booking?.advertisedPriceCash != null ? String(booking.advertisedPriceCash) : '');
   const [pricePoints, setPricePoints] = useState(booking?.advertisedPricePoints != null ? String(booking.advertisedPricePoints) : '');
+  const [price, setPrice] = useState<PriceEntryValue>(() => (booking ? fromDues(booking) : emptyPriceEntry()));
   const [notes, setNotes] = useState(booking?.notes ?? '');
   const [elementIds, setElementIds] = useState<string[]>(() => {
     const initial = booking ? booking.elementIds : defaultElementId ? [defaultElementId] : [];
@@ -62,6 +65,11 @@ export function BookingForm({
       setError('Select or add at least one traveler');
       return;
     }
+    const priceProblem = validatePriceEntry(price);
+    if (priceProblem) {
+      setError(priceProblem);
+      return;
+    }
     try {
       setSaving(true);
       setError(null);
@@ -80,6 +88,7 @@ export function BookingForm({
         advertisedPriceCash: parseNumber(priceCash),
         advertisedPricePoints: parseNumber(pricePoints),
         notes: notes.trim() || null,
+        ...toDues(price),
         elementIds,
         travelerIds: ids,
       };
@@ -105,6 +114,9 @@ export function BookingForm({
         <TextInput label="Advertised price per person (cash)" type="number" step="0.01" value={priceCash} onChange={e => setPriceCash(e.currentTarget.value)} />
         <TextInput label="Advertised price per person (points)" type="number" step="1" value={pricePoints} onChange={e => setPricePoints(e.currentTarget.value)} />
       </SimpleGrid>
+      <Box mt="sm">
+        <PriceEntry value={price} onChange={setPrice} />
+      </Box>
       <Textarea mt="xs" label="Notes" autosize minRows={1} value={notes} onChange={e => setNotes(e.currentTarget.value)} />
 
       <Text size="sm" fw={600} mt="sm">Flights</Text>

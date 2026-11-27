@@ -134,6 +134,7 @@ describe('BookingCard', () => {
 
     await waitFor(() => expect(api.createBooking).toHaveBeenCalledWith('trip-1', {
       confirmationNumber: 'NEW1', loyaltyProgram: null, advertisedPriceCash: null, advertisedPricePoints: null, notes: null,
+      dueAtBookingCash: null, dueAtBookingPoints: null, dueLaterCash: null, dueLaterNotes: null, payAt: 'booking',
       elementIds: ['el-1'], travelerIds: ['p2', 'p3'],
     }));
     expect(onBookingsChanged).toHaveBeenCalled();
@@ -258,4 +259,26 @@ describe('BookingCard', () => {
     expect(editButtonsAfter).toHaveLength(2);
     editButtonsAfter.forEach(btn => expect((btn as HTMLButtonElement).disabled).toBe(false));
   });
+
+  it('saves the total price and pay-at with the booking', async () => {
+    const user = userEvent.setup();
+    renderCard();
+    await user.click(screen.getByRole('button', { name: '+ Booking' }));
+    await user.type(screen.getByLabelText('Total price (cash)'), '824.40');
+    await user.type(screen.getByLabelText('Due at check-in'), '70');
+    await user.type(screen.getByLabelText('Check-in note'), 'Bags');
+    await user.click(screen.getByRole('button', { name: 'Save booking' }));
+    await waitFor(() => expect(api.createBooking).toHaveBeenCalledWith('trip-1', expect.objectContaining({
+      dueAtBookingCash: 754.4, dueLaterCash: 70, dueLaterNotes: 'Bags', payAt: 'booking',
+    })));
+  }, 15000);
+
+  it('prefills the total when editing and shows what is still owed', async () => {
+    const user = userEvent.setup();
+    renderCard({ bookings: [makeBooking({ dueAtBookingCash: 754.4, dueLaterCash: 70 }), b2] });
+    expect(screen.getByText('Remaining $824.40 (incl. $754.40 due at booking)')).toBeTruthy();
+    await user.click(screen.getAllByRole('button', { name: /edit booking/i })[0]);
+    expect((screen.getByLabelText('Total price (cash)') as HTMLInputElement).value).toBe('824.4');
+    expect((screen.getByLabelText('Due at check-in') as HTMLInputElement).value).toBe('70');
+  }, 15000);
 });

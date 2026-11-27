@@ -6,6 +6,7 @@ import { tripApi } from '../api/tripApi';
 import { BookingForm } from './BookingForm';
 import { BookingTransactionList } from './BookingTransactionList';
 import { bookingMoneyLine } from '../utils/bookingSummary';
+import { paymentSummary } from '../utils/lodging';
 import { flightDateLabel, sortFlightsByDate } from '../utils/bookingCoverage';
 import { formatLegLine } from '../utils/flightLegs';
 
@@ -121,6 +122,12 @@ export function BookingBlock({
       )}
 
       <Text size="sm" c="dimmed">{bookingMoneyLine(booking)}</Text>
+      {(() => {
+        const summary = paymentSummary(booking);
+        return summary && (summary.remainingCash > 0 || summary.remainingPoints > 0)
+          ? <Text size="sm" fw={600}>{summary.label}</Text>
+          : null;
+      })()}
 
       {covered.length > 0 && (
         <>
