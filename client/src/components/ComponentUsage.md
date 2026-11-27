@@ -198,7 +198,7 @@ Stay fields shared by add and edit: hotel, check-in/out hours (`HourPicker`), bo
 
 ### PaymentMethodSelect
 **Used in:**
-  - `BookingTransactionList`
+  - `TransactionFormModal`
   - `FirstPaymentFields`
 
 Searchable family payment-method picker with an inline "+ New payment method…" option.
@@ -314,7 +314,13 @@ Read-mode booking: confirmation (and original), traveler chips, money line, "Cov
   - `BookingBlock`
   - `LodgingPaymentsTab`
 
-Lists/adds/edits/removes transactions (with payment method) for a single booking; supports recording price-drop rebookings (negative amount + new confirmation number) and free-text fee/tax breakdown notes. Reports its transaction count via `onCountChange` and whether its add form is open via `onEditingChange` (both read by `BookingBlock`).
+Lists/removes transactions (date, amount, payment method, and `New conf # …` only when a transaction recorded one) for a single booking; add/edit open `TransactionFormModal`. Reports its transaction count via `onCountChange` and whether the modal is open via `onEditingChange` (both read by `BookingBlock`).
+
+### TransactionFormModal
+**Used in:**
+  - `BookingTransactionList`
+
+Stacked "Add transaction" / "Edit transaction" modal (full screen on mobile; edit shows a date · amount · method summary). Supports price-drop rebookings (negative amount + new confirmation number) and fee/tax notes. Reports itself open through `NestedModalContext` so `ElementDialog` doesn't also close on Escape.
 
 ### FlightLegsEditor
 **Used in:**
