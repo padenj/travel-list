@@ -62,6 +62,7 @@ export default defineConfig({
       'client/src/__tests__/priceEntry.test.ts', // Total price + pay-at helpers
       'client/src/__tests__/PaymentMethodSelect.test.tsx', // Payment method picker with inline add
       'client/src/__tests__/SettingsPaymentMethods.test.tsx', // Settings page for payment methods
+      'client/src/__tests__/PriceEntry.test.tsx', // Total price + pay-at fields
       'src/**/*.test.{ts,tsx}',           // Frontend unit tests
       'server/**/*.test.ts',              // Backend unit tests
       'tests/integration/**/*.test.ts',   // Integration tests
