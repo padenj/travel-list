@@ -75,6 +75,8 @@ export function validateCoupons(coupons: any): string | null {
   return null;
 }
 
+export const PAY_AT = ['booking', 'checkin'] as const;
+
 const CASH_FIELDS = ['advertisedPriceCash', 'advertisedRateCash', 'dueAtBookingCash', 'dueLaterCash'] as const;
 const POINTS_FIELDS = ['advertisedPricePoints', 'advertisedRatePoints', 'dueAtBookingPoints'] as const;
 
@@ -87,6 +89,9 @@ export function validateBookingFields(data: any): string | null {
   for (const key of POINTS_FIELDS) {
     const v = d[key];
     if (v != null && (!Number.isInteger(v) || v < 0)) return 'Points must be a whole number, 0 or more';
+  }
+  if (Object.prototype.hasOwnProperty.call(d, 'payAt') && !(PAY_AT as readonly unknown[]).includes(d.payAt)) {
+    return "Pay at must be 'booking' or 'checkin'";
   }
   if (d.refundability != null && !(REFUNDABILITY as readonly string[]).includes(d.refundability)) return 'Unknown refundability';
   if (d.cancelBy != null && d.cancelBy !== '' && (typeof d.cancelBy !== 'string' || !DATETIME_RE.test(d.cancelBy))) {

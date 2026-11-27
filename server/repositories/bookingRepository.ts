@@ -6,6 +6,7 @@ export type RoomType = 'standard' | 'suite' | 'studio' | '1br' | '2br' | '3br' |
 export type BedType = 'king' | 'queen' | 'full' | 'twin' | 'sofa_bed' | 'bunk' | 'crib';
 export type PropertyAmenity = 'breakfast' | 'pool' | 'hot_tub' | 'parking' | 'wifi' | 'laundry' | 'airport_shuttle' | 'gym';
 export type RoomAmenity = 'fridge' | 'microwave' | 'kitchenette' | 'jetted_tub' | 'balcony';
+export type PayAt = 'booking' | 'checkin';
 export type Refundability = 'free' | 'partial' | 'nonrefundable';
 export interface BedCount { type: BedType; count: number }
 
@@ -36,6 +37,7 @@ const BOOKING_SELECT = (p = '') => `
   ${p}due_at_booking_cash as dueAtBookingCash, ${p}due_at_booking_points as dueAtBookingPoints,
   ${p}due_later_cash as dueLaterCash, ${p}due_later_notes as dueLaterNotes,
   ${p}refundability as refundability, ${p}cancel_by as cancelBy, ${p}cancellation_policy as cancellationPolicy,
+  ${p}pay_at as payAt,
   ${p}created_at as createdAt, ${p}updated_at as updatedAt`;
 
 const SCALAR_FIELDS: Array<[keyof UpdateBookingInput, string]> = [
@@ -80,6 +82,7 @@ export interface Booking {
   refundability: Refundability | null;
   cancelBy: string | null;
   cancellationPolicy: string | null;
+  payAt: PayAt;
   createdAt: string;
   updatedAt: string;
   elementIds: string[];
@@ -108,6 +111,7 @@ export interface CreateBookingInput {
   refundability?: Refundability | null;
   cancelBy?: string | null;
   cancellationPolicy?: string | null;
+  payAt?: PayAt;
   coupons?: CouponInput[];
   elementIds: string[];
   travelerIds: string[];
@@ -138,6 +142,7 @@ export interface UpdateBookingInput {
   refundability?: Refundability | null;
   cancelBy?: string | null;
   cancellationPolicy?: string | null;
+  payAt?: PayAt;
   coupons?: CouponInput[];
   elementIds?: string[];
   travelerIds?: string[];
@@ -160,8 +165,8 @@ export class BookingRepository {
     const db = await this.db;
     await withTransaction(db, async () => {
       await this.assertNoTravelerConflicts(tripId, input.elementIds, input.travelerIds);
-      const cols = ['id', 'trip_id', 'advertised_includes_taxes', ...SCALAR_FIELDS.map(([, c]) => c)];
-      const vals = [id, tripId, input.advertisedIncludesTaxes ? 1 : 0,
+      const cols = ['id', 'trip_id', 'advertised_includes_taxes', 'pay_at', ...SCALAR_FIELDS.map(([, c]) => c)];
+      const vals = [id, tripId, input.advertisedIncludesTaxes ? 1 : 0, input.payAt ?? 'booking',
         ...SCALAR_FIELDS.map(([k]) => fieldValue(k, (input as unknown as Record<string, unknown>)[k]))];
       await db.run(`INSERT INTO bookings (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`, vals);
       for (const elementId of input.elementIds) {
@@ -297,6 +302,7 @@ export class BookingRepository {
       if (key in updates) dbUpdates[column] = fieldValue(key, (updates as Record<string, unknown>)[key]);
     }
     if (updates.advertisedIncludesTaxes !== undefined) dbUpdates.advertised_includes_taxes = updates.advertisedIncludesTaxes ? 1 : 0;
+    if (updates.payAt !== undefined) dbUpdates.pay_at = updates.payAt;
 
     const db = await this.db;
     await withTransaction(db, async () => {
@@ -389,6 +395,7 @@ export class BookingRepository {
     return {
       ...row,
       advertisedIncludesTaxes: Boolean(row.advertisedIncludesTaxes),
+      payAt: row.payAt === 'checkin' ? 'checkin' : 'booking',
       coupons: couponRows.map((c: any) => ({
         id: c.id, code: c.code, savingsCash: c.savings_cash ?? null, savingsPoints: c.savings_points ?? null, notes: c.notes ?? null,
       })),
@@ -403,7 +410,7 @@ export class BookingRepository {
 
 export const BOOKING_INPUT_KEYS = [
   'confirmationNumber', 'advertisedPriceCash', 'advertisedPricePoints', 'loyaltyProgram', 'notes',
-  'bookingSite', 'siteItineraryNumber', 'advertisedIncludesTaxes',
+  'bookingSite', 'siteItineraryNumber', 'advertisedIncludesTaxes', 'payAt',
   'advertisedRateCash', 'advertisedRatePoints', 'dueAtBookingCash', 'dueAtBookingPoints',
   'dueLaterCash', 'dueLaterNotes', 'refundability', 'cancelBy', 'cancellationPolicy', 'coupons',
 ] as const;
