@@ -92,6 +92,11 @@ export default function SplitRailLayout({ children, user, onLogout }: SplitRailL
 
   const canAccessSystemAdmin = user.role === 'SystemAdmin';
   const canAccessFamilyAdmin = user.role === 'SystemAdmin' || user.role === 'FamilyAdmin';
+  // Payment methods are shared by the whole family, so every member gets that settings page.
+  const visibleSettingsTabs = canAccessFamilyAdmin
+    ? settingsTabs
+    : settingsTabs.filter((tab) => tab.id === 'payment-methods');
+  const settingsHome = visibleSettingsTabs[0].path;
 
   function getInitials(name?: string | null): string {
     if (!name) return '?';
@@ -159,29 +164,25 @@ export default function SplitRailLayout({ children, user, onLogout }: SplitRailL
         ))}
       </Stack>
 
-      {canAccessFamilyAdmin && (
-        <>
-          <Divider />
-          <UnstyledButton
-            component={Link}
-            to="/settings/profile"
-            onClick={closeMobileDrawer}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 12,
-              padding: '12px',
-              borderRadius: '8px',
-              backgroundColor: isSettingsContext ? '#e7f5ff' : 'transparent',
-              color: isSettingsContext ? '#1971c2' : 'inherit',
-              border: '2px solid #e7f5ff',
-            }}
-          >
-            <IconSettings size={20} />
-            <Text fw={500}>Settings</Text>
-          </UnstyledButton>
-        </>
-      )}
+      <Divider />
+      <UnstyledButton
+        component={Link}
+        to={settingsHome}
+        onClick={closeMobileDrawer}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+          padding: '12px',
+          borderRadius: '8px',
+          backgroundColor: isSettingsContext ? '#e7f5ff' : 'transparent',
+          color: isSettingsContext ? '#1971c2' : 'inherit',
+          border: '2px solid #e7f5ff',
+        }}
+      >
+        <IconSettings size={20} />
+        <Text fw={500}>Settings</Text>
+      </UnstyledButton>
     </Stack>
   );
 
@@ -201,16 +202,11 @@ export default function SplitRailLayout({ children, user, onLogout }: SplitRailL
           const isActive = activeRailItem === item.id;
           const isSettingsItem = item.id === 'settings';
           
-          // Don't show settings if user doesn't have access
-          if (isSettingsItem && !canAccessFamilyAdmin) {
-            return null;
-          }
-          
           return (
             <UnstyledButton
               key={item.id}
               component={Link}
-              to={item.path}
+              to={isSettingsItem ? settingsHome : item.path}
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -256,7 +252,7 @@ export default function SplitRailLayout({ children, user, onLogout }: SplitRailL
       </Group>
       
       <Group gap="sm">
-        {settingsTabs.map((tab) => (
+        {visibleSettingsTabs.map((tab) => (
           <Button
             key={tab.id}
             component={Link}
@@ -300,11 +296,9 @@ export default function SplitRailLayout({ children, user, onLogout }: SplitRailL
                     <Text fw={600}>{user.username}</Text>
                   </Menu.Label>
                   <Divider />
-                  {canAccessFamilyAdmin && (
-                    <Menu.Item component={Link} to="/settings/profile" leftSection={<IconSettings size={16} />}>
-                      Settings
-                    </Menu.Item>
-                  )}
+                  <Menu.Item component={Link} to={settingsHome} leftSection={<IconSettings size={16} />}>
+                    Settings
+                  </Menu.Item>
                   {canAccessSystemAdmin && (
                     <Menu.Item component={Link} to="/admin/system" leftSection={<IconShield size={16} />}>
                       System Admin
@@ -422,11 +416,9 @@ export default function SplitRailLayout({ children, user, onLogout }: SplitRailL
                   <Text fw={600}>{user.username}</Text>
                 </Menu.Label>
                 <Divider />
-                {canAccessFamilyAdmin && (
-                  <Menu.Item component={Link} to="/settings/profile" leftSection={<IconSettings size={16} />}>
-                    Settings
-                  </Menu.Item>
-                )}
+                <Menu.Item component={Link} to={settingsHome} leftSection={<IconSettings size={16} />}>
+                  Settings
+                </Menu.Item>
                 {canAccessSystemAdmin && (
                   <Menu.Item component={Link} to="/admin/system" leftSection={<IconShield size={16} />}>
                     System Admin

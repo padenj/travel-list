@@ -9,6 +9,7 @@ export default defineConfig({
     globals: true,
     setupFiles: ['./tests/setup.ts'],
     include: [
+      'client/src/__tests__/SplitRailLayout.settings.test.tsx', // Settings nav per role
       'client/src/__tests__/AddDestinationDialog.test.tsx', // Destination create/edit with member moves
       'client/src/__tests__/TripPackingSection.test.tsx', // Trip page packing cards
       'client/src/__tests__/ManageDestinationsDrawer.test.tsx', // Destinations drawer
