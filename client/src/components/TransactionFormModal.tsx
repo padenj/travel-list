@@ -123,7 +123,7 @@ export function TransactionFormModal({ opened, tripId, bookingId, transaction, o
       opened={opened}
       onClose={onClose}
       title={transaction ? 'Edit transaction' : 'Add transaction'}
-      size="lg"
+      size="md"
       zIndex={300}
       fullScreen={isMobile}
       centered={!isMobile}

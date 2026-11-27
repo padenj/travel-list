@@ -15,12 +15,11 @@ interface BookingTransactionListProps {
   onEditingChange?: (editing: boolean) => void;
 }
 
-// `modal` is null (closed), 'add', or the transaction being edited.
-type ModalState = null | 'add' | BookingTransaction;
-
 export function BookingTransactionList({ tripId, bookingId, refreshKey = 0, onChanged, onCountChange, onEditingChange }: BookingTransactionListProps) {
   const [transactions, setTransactions] = useState<BookingTransaction[]>([]);
-  const [modal, setModal] = useState<ModalState>(null);
+  const [modalOpen, setModalOpen] = useState(false);
+  // Kept after closing so the modal doesn't flip to "Add transaction" while it fades out.
+  const [editingTransaction, setEditingTransaction] = useState<BookingTransaction | null>(null);
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -42,24 +41,26 @@ export function BookingTransactionList({ tripId, bookingId, refreshKey = 0, onCh
   const onEditingChangeRef = useRef(onEditingChange);
   onEditingChangeRef.current = onEditingChange;
   useEffect(() => {
-    onEditingChangeRef.current?.(modal !== null);
-  }, [modal]);
+    onEditingChangeRef.current?.(modalOpen);
+  }, [modalOpen]);
   useEffect(() => () => onEditingChangeRef.current?.(false), []);
 
   const openAdd = () => {
     setError(null);
     setConfirmingId(null);
-    setModal('add');
+    setEditingTransaction(null);
+    setModalOpen(true);
   };
 
   const openEdit = (t: BookingTransaction) => {
     setError(null);
     setConfirmingId(null);
-    setModal(t);
+    setEditingTransaction(t);
+    setModalOpen(true);
   };
 
   const handleSaved = async () => {
-    setModal(null);
+    setModalOpen(false);
     await load();
     onChanged();
   };
@@ -130,11 +131,11 @@ export function BookingTransactionList({ tripId, bookingId, refreshKey = 0, onCh
       )}
 
       <TransactionFormModal
-        opened={modal !== null}
+        opened={modalOpen}
         tripId={tripId}
         bookingId={bookingId}
-        transaction={modal === 'add' ? null : modal}
-        onClose={() => setModal(null)}
+        transaction={editingTransaction}
+        onClose={() => setModalOpen(false)}
         onSaved={handleSaved}
       />
     </div>
