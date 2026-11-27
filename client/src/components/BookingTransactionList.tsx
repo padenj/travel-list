@@ -182,8 +182,10 @@ export function BookingTransactionList({ tripId, bookingId, originalConfirmation
                   {t.amountCash !== 0 && <span>{formatMoney(t.amountCash)}</span>}{' '}
                   {t.amountPoints !== 0 && <span>{`${t.amountPoints} pts`}</span>}
                 </Table.Td>
-                <Table.Td c="dimmed">{t.paymentMethodNickname ?? ''}</Table.Td>
-                <Table.Td c="dimmed">{confirmation}</Table.Td>
+                <Table.Td c="dimmed">
+                  {t.paymentMethodNickname && <div>{t.paymentMethodNickname}</div>}
+                  {confirmation && <div>{confirmation}</div>}
+                </Table.Td>
                 <Table.Td ta="right">
                   {confirmingId === t.id ? (
                     <Group gap={4} justify="flex-end" wrap="nowrap">
