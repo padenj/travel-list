@@ -53,6 +53,10 @@ describe('20261124_01_lodging migration', () => {
       'advertised_rate_cash', 'advertised_rate_points', 'due_at_booking_cash', 'due_at_booking_points',
       'due_later_cash', 'due_later_notes', 'refundability', 'cancel_by', 'cancellation_policy',
     ]));
+    expect(await cols(db, 'bookings')).toContain('pay_at');
+    await db.run(`INSERT INTO bookings (id, trip_id) VALUES ('bx', 't1')`);
+    expect((await db.get(`SELECT pay_at FROM bookings WHERE id = 'bx'`)).pay_at).toBe('booking');
+    await expect(db.run(`UPDATE bookings SET pay_at = 'later' WHERE id = 'bx'`)).rejects.toThrow(/CHECK/);
   });
 
   it('rebuilds hotel details with destination and amenities, dropping legacy columns', async () => {

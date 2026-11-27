@@ -19,6 +19,7 @@ const BOOKING_COLUMNS = [
   ['refundability', 'TEXT'],
   ['cancel_by', 'TEXT'],
   ['cancellation_policy', 'TEXT'],
+  ['pay_at', "TEXT NOT NULL DEFAULT 'booking' CHECK (pay_at IN ('booking','checkin'))"],
 ];
 
 const NEW_HOTEL_TABLE = `

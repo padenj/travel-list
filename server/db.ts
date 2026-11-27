@@ -372,6 +372,7 @@ const SCHEMAS = {
       refundability TEXT,
       cancel_by TEXT,
       cancellation_policy TEXT,
+      pay_at TEXT NOT NULL DEFAULT 'booking' CHECK (pay_at IN ('booking','checkin')),
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
       FOREIGN KEY (trip_id) REFERENCES trips(id) ON DELETE CASCADE
@@ -393,6 +394,16 @@ const SCHEMAS = {
       FOREIGN KEY (participant_id) REFERENCES trip_participants(id) ON DELETE RESTRICT
     );
 
+    CREATE TABLE IF NOT EXISTS payment_methods (
+      id TEXT PRIMARY KEY,
+      family_id TEXT NOT NULL,
+      nickname TEXT NOT NULL,
+      archived_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (family_id) REFERENCES families(id) ON DELETE CASCADE
+    );
+
     CREATE TABLE IF NOT EXISTS booking_transactions (
       id TEXT PRIMARY KEY,
       booking_id TEXT NOT NULL,
@@ -401,8 +412,10 @@ const SCHEMAS = {
       transaction_date TEXT NOT NULL,
       confirmation_number TEXT,
       notes TEXT,
+      payment_method_id TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      FOREIGN KEY (booking_id) REFERENCES bookings(id) ON DELETE CASCADE
+      FOREIGN KEY (booking_id) REFERENCES bookings(id) ON DELETE CASCADE,
+      FOREIGN KEY (payment_method_id) REFERENCES payment_methods(id)
     );
 
     CREATE TABLE IF NOT EXISTS flight_traveler_seats (
@@ -515,6 +528,7 @@ const SCHEMAS = {
     CREATE INDEX IF NOT EXISTS idx_booking_links_element ON booking_links(element_id);
     CREATE INDEX IF NOT EXISTS idx_booking_travelers_participant ON booking_travelers(participant_id);
     CREATE INDEX IF NOT EXISTS idx_booking_transactions_booking ON booking_transactions(booking_id);
+    CREATE INDEX IF NOT EXISTS idx_payment_methods_family ON payment_methods(family_id);
     CREATE INDEX IF NOT EXISTS idx_booking_coupons_booking ON booking_coupons(booking_id);
     CREATE INDEX IF NOT EXISTS idx_lodging_rooms_element ON lodging_rooms(element_id);
     CREATE INDEX IF NOT EXISTS idx_flight_traveler_seats_leg ON flight_traveler_seats(leg_id);
