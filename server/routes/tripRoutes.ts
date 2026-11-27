@@ -6,6 +6,8 @@ import { TripParticipantRepository } from '../repositories/tripParticipantReposi
 import { BookingRepository, BookingConflictError, pickBookingInput } from '../repositories/bookingRepository';
 import { LodgingRoomRepository, RoomConflictError } from '../repositories/lodgingRoomRepository';
 import { StayService } from '../services/stayService';
+import { BookingService } from '../services/bookingService';
+import { parseFirstTransaction } from '../utils/firstTransaction';
 import { BookingTransactionRepository } from '../repositories/bookingTransactionRepository';
 import { PaymentMethodRepository } from '../repositories/paymentMethodRepository';
 import { FlightTravelerSeatRepository } from '../repositories/flightTravelerSeatRepository';
@@ -44,6 +46,7 @@ const paymentMethodRepository = new PaymentMethodRepository();
 const flightTravelerSeatRepository = new FlightTravelerSeatRepository();
 const lodgingRoomRepository = new LodgingRoomRepository();
 const stayService = new StayService();
+const bookingService = new BookingService();
 
 const tripDestinationRepository = new TripDestinationRepository();
 const packingListRepository = new PackingListRepository();
@@ -256,8 +259,14 @@ tripRouter.post('/:tripId/elements', authMiddleware, tripAccessMiddleware, async
       }
       const bookingError = validateBookingFields(req.body.booking ?? {});
       if (bookingError) return res.status(400).json({ error: bookingError });
+      const first = parseFirstTransaction(req.body.firstTransaction, req.body.booking ?? {});
+      if (first.error) return res.status(400).json({ error: first.error });
+      if (first.value) {
+        const methodError = await paymentMethodError(req.trip!.family_id, first.value.paymentMethodId);
+        if (methodError) return res.status(400).json({ error: methodError });
+      }
       const stay = await stayService.createStay(req.trip!.id, {
-        name, notes, typeSpecificData, booking: pickBookingInput(req.body.booking ?? {}),
+        name, notes, typeSpecificData, booking: pickBookingInput(req.body.booking ?? {}), firstTransaction: first.value,
       });
       return res.status(201).json(stay);
     }
@@ -321,7 +330,7 @@ tripRouter.put('/:tripId/elements/:elementId', authMiddleware, tripAccessMiddlew
         const bookingError = validateBookingFields(booking);
         if (bookingError) return res.status(400).json({ error: bookingError });
       }
-      const { booking: _ignored, ...elementUpdates } = req.body ?? {};
+      const { booking: _ignored, firstTransaction: _notOnUpdate, ...elementUpdates } = req.body ?? {};
       const updated = await stayService.updateStay(req.trip!.id, element.id, {
         ...elementUpdates, ...(booking !== undefined ? { booking: pickBookingInput(booking) } : {}),
       });
@@ -613,9 +622,15 @@ tripRouter.post('/:tripId/bookings', authMiddleware, tripAccessMiddleware, async
     }
     const fieldsError = validateBookingFields(req.body);
     if (fieldsError) return res.status(400).json({ error: fieldsError });
-    const booking = await bookingRepository.createBooking(req.trip!.id, {
+    const first = parseFirstTransaction(req.body.firstTransaction, req.body);
+    if (first.error) return res.status(400).json({ error: first.error });
+    if (first.value) {
+      const methodError = await paymentMethodError(req.trip!.family_id, first.value.paymentMethodId);
+      if (methodError) return res.status(400).json({ error: methodError });
+    }
+    const booking = await bookingService.createBooking(req.trip!.id, {
       ...pickBookingInput(req.body), elementIds, travelerIds: travelerIds ?? [],
-    } as any);
+    } as any, first.value);
     res.status(201).json(booking);
   } catch (error) {
     sendBookingError(res, error, 'Failed to create booking');

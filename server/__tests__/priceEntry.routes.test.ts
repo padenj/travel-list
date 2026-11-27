@@ -76,4 +76,67 @@ describe('price entry routes (payAt + firstTransaction)', () => {
       expect((await post('/bookings', { elementIds: [flightId], travelerIds: [travelerId], payAt: null })).status).toBe(400);
     });
   });
+
+  describe('firstTransaction', () => {
+    const today = '2027-01-01';
+
+    it('creates a stay with its first transaction (cash + points due at booking)', async () => {
+      const method = await request(app).post('/api/payment-methods').set('Authorization', auth).send({ nickname: 'Visa - 1234' });
+      const res = await post('/elements', stayBody(
+        { dueAtBookingCash: 1250, dueAtBookingPoints: 9000, dueLaterCash: 39.6 },
+        { firstTransaction: { transactionDate: today, paymentMethodId: method.body.id } },
+      ));
+      expect(res.status).toBe(201);
+      const b = await stayBooking(res.body.id);
+      expect(b).toMatchObject({ actualTotalCash: 1250, actualTotalPoints: 9000 });
+      const txns = await get(`/bookings/${b.id}/transactions`);
+      expect(txns.body).toHaveLength(1);
+      expect(txns.body[0]).toMatchObject({
+        amountCash: 1250, amountPoints: 9000, transactionDate: today, paymentMethodNickname: 'Visa - 1234',
+      });
+    });
+
+    it('creates a flight booking with its first transaction', async () => {
+      const { flightId, travelerId } = await flightAndTraveler();
+      const res = await post('/bookings', {
+        elementIds: [flightId], travelerIds: [travelerId], dueAtBookingCash: 412.2,
+        firstTransaction: { transactionDate: today },
+      });
+      expect(res.status).toBe(201);
+      expect(res.body.actualTotalCash).toBe(412.2);
+      const txns = await get(`/bookings/${res.body.id}/transactions`);
+      expect(txns.body[0]).toMatchObject({ amountCash: 412.2, amountPoints: 0, paymentMethodId: null });
+    });
+
+    it('rejects when nothing is due at booking, bad dates and unknown methods — creating nothing', async () => {
+      const nothing = await post('/elements', stayBody({ dueLaterCash: 300 }, { firstTransaction: { transactionDate: today } }));
+      expect(nothing.status).toBe(400);
+      expect(nothing.body.error).toBe('Nothing is due at booking');
+      const badDate = await post('/elements', stayBody({ dueAtBookingCash: 10 }, { firstTransaction: { transactionDate: '01/01/2027' } }));
+      expect(badDate.status).toBe(400);
+      expect(badDate.body.error).toBe('Payment date must be YYYY-MM-DD');
+      const badMethod = await post('/elements', stayBody({ dueAtBookingCash: 10 }, { firstTransaction: { transactionDate: today, paymentMethodId: 'nope' } }));
+      expect(badMethod.status).toBe(400);
+      expect(badMethod.body.error).toBe('Unknown payment method');
+      expect((await get('/bookings')).body).toHaveLength(0);
+    });
+
+    it('rolls back the stay when the transaction insert fails', async () => {
+      const { BookingTransactionRepository } = await import('../repositories/bookingTransactionRepository');
+      const spy = vi.spyOn(BookingTransactionRepository.prototype, 'addTransaction').mockRejectedValueOnce(new Error('boom'));
+      const res = await post('/elements', stayBody({ dueAtBookingCash: 10 }, { firstTransaction: { transactionDate: today } }));
+      expect(res.status).toBe(500);
+      spy.mockRestore();
+      expect((await get('/bookings')).body).toHaveLength(0);
+      const elements = await get('/elements');
+      expect(elements.body.filter((e: { elementType: string }) => e.elementType === 'hotel')).toHaveLength(0);
+    });
+
+    it('ignores firstTransaction on updates', async () => {
+      const stay = await post('/elements', stayBody({ dueAtBookingCash: 10 }));
+      await put(`/elements/${stay.body.id}`, { booking: { dueAtBookingCash: 20 }, firstTransaction: { transactionDate: today } });
+      const b = await stayBooking(stay.body.id);
+      expect((await get(`/bookings/${b.id}/transactions`)).body).toHaveLength(0);
+    });
+  });
 });
