@@ -7,6 +7,7 @@ import { BookingRepository, BookingConflictError, pickBookingInput } from '../re
 import { LodgingRoomRepository, RoomConflictError } from '../repositories/lodgingRoomRepository';
 import { StayService } from '../services/stayService';
 import { BookingTransactionRepository } from '../repositories/bookingTransactionRepository';
+import { PaymentMethodRepository } from '../repositories/paymentMethodRepository';
 import { FlightTravelerSeatRepository } from '../repositories/flightTravelerSeatRepository';
 import { authMiddleware } from '../middleware';
 import { tripAccessMiddleware } from '../middleware/tripAccessMiddleware';
@@ -39,6 +40,7 @@ const tripElementConfirmationRepository = new TripElementConfirmationRepository(
 const tripParticipantRepository = new TripParticipantRepository();
 const bookingRepository = new BookingRepository();
 const bookingTransactionRepository = new BookingTransactionRepository();
+const paymentMethodRepository = new PaymentMethodRepository();
 const flightTravelerSeatRepository = new FlightTravelerSeatRepository();
 const lodgingRoomRepository = new LodgingRoomRepository();
 const stayService = new StayService();
@@ -765,6 +767,19 @@ tripRouter.delete('/:tripId/bookings/:id/travelers/:participantId', authMiddlewa
   }
 });
 
+// Returns an error message, or null when `value` is acceptable for this trip's family.
+// An archived method is only accepted when it is the transaction's current method (`current`).
+async function paymentMethodError(familyId: string, value: unknown, current: string | null = null): Promise<string | null> {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== 'string') return 'Unknown payment method';
+  const method = await paymentMethodRepository.getById(familyId, value);
+  if (!method) return 'Unknown payment method';
+  if (method.archived && value !== current) return 'Payment method is archived';
+  return null;
+}
+
+const TRANSACTION_UPDATE_KEYS = ['amountCash', 'amountPoints', 'transactionDate', 'confirmationNumber', 'notes', 'paymentMethodId'] as const;
+
 // ===== Booking transactions =====
 
 tripRouter.get('/:tripId/bookings/:bookingId/transactions', authMiddleware, tripAccessMiddleware, async (req: Request, res: Response) => {
@@ -786,13 +801,16 @@ tripRouter.post('/:tripId/bookings/:bookingId/transactions', authMiddleware, tri
     if (!booking || booking.tripId !== req.trip!.id) {
       return res.status(404).json({ error: 'Booking not found' });
     }
-    const { amountCash, amountPoints, transactionDate, confirmationNumber, notes } = req.body;
+    const { amountCash, amountPoints, transactionDate, confirmationNumber, notes, paymentMethodId } = req.body;
+    const methodError = await paymentMethodError(req.trip!.family_id, paymentMethodId);
+    if (methodError) return res.status(400).json({ error: methodError });
     const transaction = await bookingTransactionRepository.addTransaction(req.params.bookingId, {
       amountCash,
       amountPoints,
       transactionDate,
       confirmationNumber,
       notes,
+      paymentMethodId,
     });
     res.status(201).json(transaction);
   } catch (error) {
@@ -807,11 +825,17 @@ tripRouter.patch('/:tripId/bookings/:bookingId/transactions/:id', authMiddleware
     if (!booking || booking.tripId !== req.trip!.id) {
       return res.status(404).json({ error: 'Booking not found' });
     }
-    const transactions = await bookingTransactionRepository.getTransactionsForBooking(req.params.bookingId);
-    if (!transactions.some((transaction) => transaction.id === req.params.id)) {
+    const existing = await bookingTransactionRepository.getTransactionById(req.params.id);
+    if (!existing || existing.bookingId !== req.params.bookingId) {
       return res.status(404).json({ error: 'Transaction not found' });
     }
-    const updated = await bookingTransactionRepository.updateTransaction(req.params.id, req.body);
+    const methodError = await paymentMethodError(req.trip!.family_id, req.body.paymentMethodId, existing.paymentMethodId);
+    if (methodError) return res.status(400).json({ error: methodError });
+    const updates: Record<string, unknown> = {};
+    for (const key of TRANSACTION_UPDATE_KEYS) {
+      if (Object.prototype.hasOwnProperty.call(req.body, key)) updates[key] = req.body[key];
+    }
+    const updated = await bookingTransactionRepository.updateTransaction(req.params.id, updates);
     res.json(updated);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to update transaction';

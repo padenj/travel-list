@@ -9,6 +9,8 @@ export interface BookingTransaction {
   transactionDate: string;
   confirmationNumber: string | null;
   notes: string | null;
+  paymentMethodId: string | null;
+  paymentMethodNickname: string | null;
   createdAt: string;
 }
 
@@ -18,11 +20,19 @@ export interface AddTransactionInput {
   transactionDate?: string;
   confirmationNumber?: string;
   notes?: string;
+  paymentMethodId?: string | null;
 }
 
 function todayIsoDate(): string {
   return new Date().toISOString().slice(0, 10);
 }
+
+const TXN_SELECT = `
+  SELECT t.id, t.booking_id as bookingId, t.amount_cash as amountCash, t.amount_points as amountPoints,
+         t.transaction_date as transactionDate, t.confirmation_number as confirmationNumber, t.notes,
+         t.payment_method_id as paymentMethodId, pm.nickname as paymentMethodNickname, t.created_at as createdAt
+  FROM booking_transactions t
+  LEFT JOIN payment_methods pm ON pm.id = t.payment_method_id`;
 
 export class BookingTransactionRepository {
   private db = getDb();
@@ -36,10 +46,10 @@ export class BookingTransactionRepository {
     const id = uuidv4();
     const db = await this.db;
     await db.run(
-      `INSERT INTO booking_transactions (id, booking_id, amount_cash, amount_points, transaction_date, confirmation_number, notes, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+      `INSERT INTO booking_transactions (id, booking_id, amount_cash, amount_points, transaction_date, confirmation_number, notes, payment_method_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
       [id, bookingId, amountCash, amountPoints, input.transactionDate || todayIsoDate(),
-       input.confirmationNumber || null, input.notes || null]
+       input.confirmationNumber || null, input.notes || null, input.paymentMethodId || null]
     );
     return this.getTransactionById(id) as Promise<BookingTransaction>;
   }
@@ -47,9 +57,7 @@ export class BookingTransactionRepository {
   async getTransactionsForBooking(bookingId: string): Promise<BookingTransaction[]> {
     const db = await this.db;
     const rows = await db.all(
-      `SELECT id, booking_id as bookingId, amount_cash as amountCash, amount_points as amountPoints,
-              transaction_date as transactionDate, confirmation_number as confirmationNumber, notes, created_at as createdAt
-       FROM booking_transactions WHERE booking_id = ? ORDER BY transaction_date ASC, created_at ASC`,
+      `${TXN_SELECT} WHERE t.booking_id = ? ORDER BY t.transaction_date ASC, t.created_at ASC`,
       [bookingId]
     );
     return rows as BookingTransaction[];
@@ -61,6 +69,7 @@ export class BookingTransactionRepository {
     transactionDate?: string;
     confirmationNumber?: string | null;
     notes?: string | null;
+    paymentMethodId?: string | null;
   }): Promise<BookingTransaction> {
     if ('amountCash' in updates || 'amountPoints' in updates) {
       const existing = await this.getTransactionById(id);
@@ -78,6 +87,7 @@ export class BookingTransactionRepository {
       transactionDate: 'transaction_date',
       confirmationNumber: 'confirmation_number',
       notes: 'notes',
+      paymentMethodId: 'payment_method_id',
     };
     const dbUpdates: Record<string, any> = {};
     for (const [key, dbKey] of Object.entries(fieldMap)) {
@@ -97,14 +107,9 @@ export class BookingTransactionRepository {
     await db.run(`DELETE FROM booking_transactions WHERE id = ?`, [id]);
   }
 
-  private async getTransactionById(id: string): Promise<BookingTransaction | null> {
+  async getTransactionById(id: string): Promise<BookingTransaction | null> {
     const db = await this.db;
-    const row = await db.get(
-      `SELECT id, booking_id as bookingId, amount_cash as amountCash, amount_points as amountPoints,
-              transaction_date as transactionDate, confirmation_number as confirmationNumber, notes, created_at as createdAt
-       FROM booking_transactions WHERE id = ?`,
-      [id]
-    );
+    const row = await db.get(`${TXN_SELECT} WHERE t.id = ?`, [id]);
     return (row as BookingTransaction) || null;
   }
 }

@@ -102,4 +102,70 @@ describe('payment method routes', () => {
   it('requires auth', async () => {
     expect((await request(app).get('/api/payment-methods')).status).toBe(401);
   });
+
+  async function flightBooking() {
+    const tripId = seed.tripId;
+    const flight = await request(app).post(`/api/trips/${tripId}/elements`).set('Authorization', auth).send({
+      elementType: 'flight', name: 'F',
+      typeSpecificData: { legs: [{ departureAirport: 'SEA', arrivalAirport: 'SJD', departureDatetime: '2027-01-01T08:00:00Z', arrivalDatetime: '2027-01-01T12:00:00Z' }] },
+    });
+    const p = await request(app).post(`/api/trips/${tripId}/participants`).set('Authorization', auth).send({ displayName: 'Dad' });
+    const booking = await request(app).post(`/api/trips/${tripId}/bookings`).set('Authorization', auth)
+      .send({ elementIds: [flight.body.id], travelerIds: [p.body.id] });
+    return booking.body.id as string;
+  }
+  const txns = (bookingId: string) => `/api/trips/${seed.tripId}/bookings/${bookingId}/transactions`;
+
+  it('records, returns and edits the payment method on transactions', async () => {
+    const visa = (await pm.create({ nickname: 'Visa - 1234' })).body.id;
+    const amex = (await pm.create({ nickname: 'Amex' })).body.id;
+    const bookingId = await flightBooking();
+    const created = await request(app).post(txns(bookingId)).set('Authorization', auth)
+      .send({ amountCash: 50, transactionDate: '2027-01-01', paymentMethodId: visa });
+    expect(created.status).toBe(201);
+    expect(created.body).toMatchObject({ paymentMethodId: visa, paymentMethodNickname: 'Visa - 1234' });
+
+    const edited = await request(app).patch(`${txns(bookingId)}/${created.body.id}`).set('Authorization', auth)
+      .send({ amountCash: 55, notes: 'fixed', paymentMethodId: amex });
+    expect(edited.status).toBe(200);
+    expect(edited.body).toMatchObject({ amountCash: 55, notes: 'fixed', paymentMethodId: amex, paymentMethodNickname: 'Amex' });
+
+    const cleared = await request(app).patch(`${txns(bookingId)}/${created.body.id}`).set('Authorization', auth).send({ paymentMethodId: null });
+    expect(cleared.body).toMatchObject({ paymentMethodId: null, paymentMethodNickname: null });
+
+    const list = await request(app).get(txns(bookingId)).set('Authorization', auth);
+    expect(list.body[0]).toHaveProperty('paymentMethodNickname', null);
+  });
+
+  it('rejects unknown, foreign and newly-chosen archived methods; keeps an unchanged archived one', async () => {
+    const bookingId = await flightBooking();
+    const bad = await request(app).post(txns(bookingId)).set('Authorization', auth)
+      .send({ amountCash: 5, paymentMethodId: 'nope' });
+    expect(bad.status).toBe(400);
+    expect(bad.body.error).toBe('Unknown payment method');
+
+    await seed.db.run(`INSERT INTO families (id, name) VALUES ('fam-2', 'Other')`);
+    await seed.db.run(`INSERT INTO payment_methods (id, family_id, nickname) VALUES ('pm-foreign', 'fam-2', 'Theirs')`);
+    expect((await request(app).post(txns(bookingId)).set('Authorization', auth)
+      .send({ amountCash: 5, paymentMethodId: 'pm-foreign' })).status).toBe(400);
+
+    const visa = (await pm.create({ nickname: 'Visa' })).body.id;
+    const t = (await request(app).post(txns(bookingId)).set('Authorization', auth)
+      .send({ amountCash: 5, paymentMethodId: visa })).body.id;
+    await pm.update(visa, { archived: true });
+    const archivedNew = await request(app).post(txns(bookingId)).set('Authorization', auth).send({ amountCash: 5, paymentMethodId: visa });
+    expect(archivedNew.status).toBe(400);
+    expect(archivedNew.body.error).toBe('Payment method is archived');
+    const keep = await request(app).patch(`${txns(bookingId)}/${t}`).set('Authorization', auth)
+      .send({ notes: 'still visa', paymentMethodId: visa });
+    expect(keep.status).toBe(200);
+  });
+
+  it('PATCH ignores unknown keys', async () => {
+    const bookingId = await flightBooking();
+    const t = (await request(app).post(txns(bookingId)).set('Authorization', auth).send({ amountCash: 5 })).body.id;
+    const res = await request(app).patch(`${txns(bookingId)}/${t}`).set('Authorization', auth).send({ bookingId: 'x', notes: 'n' });
+    expect(res.status).toBe(200);
+    expect(res.body.bookingId).toBe(bookingId);
+  });
 });
