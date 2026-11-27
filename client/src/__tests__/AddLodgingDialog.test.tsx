@@ -8,6 +8,10 @@ import { tripApi } from '../api/tripApi';
 
 vi.mock('../api/tripApi', () => ({ tripApi: { createElement: vi.fn() } }));
 
+vi.mock('../api/paymentMethodApi', () => ({
+  paymentMethodApi: { list: vi.fn().mockResolvedValue([]), create: vi.fn(), update: vi.fn(), remove: vi.fn() },
+}));
+
 describe('AddLodgingDialog', () => {
   beforeEach(() => vi.mocked(tripApi.createElement).mockReset());
   afterEach(() => cleanup());
@@ -98,4 +102,31 @@ describe('AddLodgingDialog', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Discard' }));
     expect(onClose).toHaveBeenCalled();
   });
+
+  it('records the first payment by default when something is due at booking', async () => {
+    vi.mocked(tripApi.createElement).mockResolvedValue({ id: 'h1' } as any);
+    renderWithMantine(<AddLodgingDialog tripId="t1" opened destinations={[]} onClose={() => {}} onCreated={() => {}} />);
+    await userEvent.type(screen.getByLabelText('Hotel name'), 'Casa');
+    fireEvent.change(screen.getByLabelText('Check-in date'), { target: { value: '2027-03-01' } });
+    expect(screen.queryByLabelText('Also record payment')).toBeNull();
+    fireEvent.change(screen.getByLabelText('Total price (cash)'), { target: { value: '500' } });
+    expect((screen.getByLabelText('Also record payment') as HTMLInputElement).checked).toBe(true);
+    fireEvent.change(screen.getByLabelText('Payment date'), { target: { value: '2027-01-05' } });
+    await userEvent.click(screen.getByRole('button', { name: 'Save stay' }));
+    await waitFor(() => expect(tripApi.createElement).toHaveBeenCalled());
+    const payload = vi.mocked(tripApi.createElement).mock.calls[0][1] as any;
+    expect(payload.firstTransaction).toEqual({ transactionDate: '2027-01-05', paymentMethodId: null });
+  }, 30000);
+
+  it('skips the first payment when unchecked or when everything is paid at check-in', async () => {
+    vi.mocked(tripApi.createElement).mockResolvedValue({ id: 'h1' } as any);
+    renderWithMantine(<AddLodgingDialog tripId="t1" opened destinations={[]} onClose={() => {}} onCreated={() => {}} />);
+    await userEvent.type(screen.getByLabelText('Hotel name'), 'Casa');
+    fireEvent.change(screen.getByLabelText('Check-in date'), { target: { value: '2027-03-01' } });
+    fireEvent.change(screen.getByLabelText('Total price (cash)'), { target: { value: '500' } });
+    fireEvent.click(screen.getByLabelText('Also record payment'));
+    await userEvent.click(screen.getByRole('button', { name: 'Save stay' }));
+    await waitFor(() => expect(tripApi.createElement).toHaveBeenCalled());
+    expect((vi.mocked(tripApi.createElement).mock.calls[0][1] as any).firstTransaction).toBeUndefined();
+  }, 30000);
 });

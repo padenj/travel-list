@@ -3,7 +3,10 @@ import { Alert, Box, Button, Checkbox, Group, Paper, SimpleGrid, Stack, Text, Te
 import { Booking, TripElement, TripParticipant } from '../types/trip';
 import { tripApi } from '../api/tripApi';
 import { PriceEntry } from './PriceEntry';
-import { PriceEntryValue, emptyPriceEntry, fromDues, toDues, validatePriceEntry } from '../utils/priceEntry';
+import { FirstPaymentFields } from './FirstPaymentFields';
+import {
+  PriceEntryValue, dueAtBookingLabel, emptyFirstPayment, emptyPriceEntry, firstTransactionPayload, fromDues, hasDueAtBooking, toDues, validatePriceEntry,
+} from '../utils/priceEntry';
 import { bookedTravelers, bookingLabel, flightOptionLabel, sortFlightsByDate } from '../utils/bookingCoverage';
 
 interface BookingFormProps {
@@ -38,6 +41,7 @@ export function BookingForm({
   const [priceCash, setPriceCash] = useState(booking?.advertisedPriceCash != null ? String(booking.advertisedPriceCash) : '');
   const [pricePoints, setPricePoints] = useState(booking?.advertisedPricePoints != null ? String(booking.advertisedPricePoints) : '');
   const [price, setPrice] = useState<PriceEntryValue>(() => (booking ? fromDues(booking) : emptyPriceEntry()));
+  const [firstPayment, setFirstPayment] = useState(() => emptyFirstPayment());
   const [notes, setNotes] = useState(booking?.notes ?? '');
   const [elementIds, setElementIds] = useState<string[]>(() => {
     const initial = booking ? booking.elementIds : defaultElementId ? [defaultElementId] : [];
@@ -95,7 +99,8 @@ export function BookingForm({
       if (booking) {
         await tripApi.updateBooking(tripId, booking.id, payload);
       } else {
-        await tripApi.createBooking(tripId, payload);
+        const firstTransaction = firstTransactionPayload(firstPayment, price);
+        await tripApi.createBooking(tripId, { ...payload, ...(firstTransaction ? { firstTransaction } : {}) });
       }
       await onSaved();
     } catch (err) {
@@ -116,6 +121,11 @@ export function BookingForm({
       </SimpleGrid>
       <Box mt="sm">
         <PriceEntry value={price} onChange={setPrice} />
+        {!booking && hasDueAtBooking(price) && (
+          <Box mt="xs">
+            <FirstPaymentFields value={firstPayment} onChange={setFirstPayment} amountLabel={dueAtBookingLabel(price)} />
+          </Box>
+        )}
       </Box>
       <Textarea mt="xs" label="Notes" autosize minRows={1} value={notes} onChange={e => setNotes(e.currentTarget.value)} />
 

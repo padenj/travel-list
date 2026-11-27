@@ -23,6 +23,7 @@ vi.mock('../api/paymentMethodApi', () => ({
 }));
 
 import { tripApi } from '../api/tripApi';
+import { paymentMethodApi } from '../api/paymentMethodApi';
 import { BookingCard } from '../components/BookingCard';
 
 const api = tripApi as any;
@@ -93,6 +94,7 @@ describe('BookingCard', () => {
   beforeEach(() => {
     vi.resetAllMocks();
     api.listBookingTransactions.mockResolvedValue([]);
+    vi.mocked(paymentMethodApi.list).mockResolvedValue([]);
     api.createBooking.mockResolvedValue({});
     api.updateBooking.mockResolvedValue({});
     api.deleteBooking.mockResolvedValue(undefined);
@@ -267,10 +269,12 @@ describe('BookingCard', () => {
     await user.type(screen.getByLabelText('Total price (cash)'), '824.40');
     await user.type(screen.getByLabelText('Due at check-in'), '70');
     await user.type(screen.getByLabelText('Check-in note'), 'Bags');
+    await user.click(screen.getByLabelText('Also record payment'));
     await user.click(screen.getByRole('button', { name: 'Save booking' }));
     await waitFor(() => expect(api.createBooking).toHaveBeenCalledWith('trip-1', expect.objectContaining({
       dueAtBookingCash: 754.4, dueLaterCash: 70, dueLaterNotes: 'Bags', payAt: 'booking',
     })));
+    expect(api.createBooking.mock.calls[0][1]).not.toHaveProperty('firstTransaction');
   }, 15000);
 
   it('prefills the total when editing and shows what is still owed', async () => {
@@ -280,5 +284,24 @@ describe('BookingCard', () => {
     await user.click(screen.getAllByRole('button', { name: /edit booking/i })[0]);
     expect((screen.getByLabelText('Total price (cash)') as HTMLInputElement).value).toBe('824.4');
     expect((screen.getByLabelText('Due at check-in') as HTMLInputElement).value).toBe('70');
+  }, 15000);
+
+  it('records the first payment with a new flight booking', async () => {
+    const user = userEvent.setup();
+    renderCard();
+    await user.click(screen.getByRole('button', { name: '+ Booking' }));
+    await user.type(screen.getByLabelText('Total price (cash)'), '412.20');
+    await user.click(screen.getByRole('button', { name: 'Save booking' }));
+    await waitFor(() => expect(api.createBooking).toHaveBeenCalledWith('trip-1', expect.objectContaining({
+      dueAtBookingCash: 412.2,
+      firstTransaction: expect.objectContaining({ paymentMethodId: null }),
+    })));
+  }, 15000);
+
+  it('does not offer to record a payment when editing', async () => {
+    const user = userEvent.setup();
+    renderCard({ bookings: [makeBooking({ dueAtBookingCash: 100 }), b2] });
+    await user.click(screen.getAllByRole('button', { name: /edit booking/i })[0]);
+    expect(screen.queryByLabelText('Also record payment')).toBeNull();
   }, 15000);
 });
