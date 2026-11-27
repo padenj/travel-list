@@ -16,6 +16,7 @@ import { User, LoginRequest, ChangePasswordRequest } from './server-types';
 import { v4 as uuidv4 } from 'uuid';
 import { withTransaction } from './utils/transaction';
 import { tripRouter } from './routes/tripRoutes';
+import { paymentMethodRouter } from './routes/paymentMethodRoutes';
 import { TripDestinationRepository, DestinationConflictError, DestinationValidationError } from './repositories/tripDestinationRepository';
 import { moveSharedItem, MoveValidationError, notify } from './services/tripSplitService';
 import { createShellTripForListTx, deleteDestinationTx, updateDestination } from './services/tripListService';
@@ -2134,6 +2135,7 @@ router.delete('/families/:id', authMiddleware, async (req: Request, res: Respons
 
 // Mount trip router
 router.use('/trips', tripRouter);
+router.use('/payment-methods', paymentMethodRouter);
 router.use('/trips/files', tripFileRouter);
 
 export default router;
