@@ -59,6 +59,7 @@ export default defineConfig({
       'client/src/__tests__/LodgingPaymentsTab.test.tsx', // Payments tab summary
       'client/src/__tests__/LodgingSection.test.tsx', // Lodging section rows
       'client/src/__tests__/HourPicker.test.tsx', // Hour chips + other select
+      'client/src/__tests__/priceEntry.test.ts', // Total price + pay-at helpers
       'src/**/*.test.{ts,tsx}',           // Frontend unit tests
       'server/**/*.test.ts',              // Backend unit tests
       'tests/integration/**/*.test.ts',   // Integration tests

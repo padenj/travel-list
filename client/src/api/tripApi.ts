@@ -1,7 +1,7 @@
 import {
   Trip, TripElement, TripElementConfirmation, FlightAutofillLookupInput, FlightAutofillDetails,
   TripParticipant, Booking, CreateBookingPayload, BookingTransaction, AddBookingTransactionPayload, FlightTravelerSeat,
-  FlightLeg, FlightLegPayload, RoomPayload, LodgingRoom, StayBookingPayload,
+  FlightLeg, FlightLegPayload, RoomPayload, LodgingRoom, StayBookingPayload, FirstTransactionPayload,
   TripDestination, DestinationWritePayload, SplitListPayload, SplitResult, CopyTripPayload, CopyTripResult,
 } from '../types/trip';
 import { getAuthToken } from '../api';
@@ -12,6 +12,7 @@ export type TripElementWritePayload = Omit<Partial<TripElement>, 'notes'> & {
   notes?: string | null;
   typeSpecificData?: Record<string, unknown>;
   booking?: StayBookingPayload;
+  firstTransaction?: FirstTransactionPayload;
 };
 
 function authHeaders(extra: Record<string, string> = {}): Record<string, string> {

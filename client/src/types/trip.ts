@@ -178,6 +178,8 @@ export interface FlightAutofillDetails {
   sourceUrl: string;
 }
 
+export type PayAt = 'booking' | 'checkin';
+
 export interface BookingMoneyFields {
   bookingSite?: string | null;
   siteItineraryNumber?: string | null;
@@ -191,6 +193,7 @@ export interface BookingMoneyFields {
   refundability?: Refundability | null;
   cancelBy?: string | null;
   cancellationPolicy?: string | null;
+  payAt?: PayAt;
 }
 
 export interface Booking extends BookingMoneyFields {
@@ -220,9 +223,10 @@ export interface CreateBookingPayload extends BookingMoneyFields {
   elementIds: string[];
   travelerIds: string[];
   coupons?: Omit<BookingCoupon, 'id'>[];
+  firstTransaction?: FirstTransactionPayload;
 }
 
-export type StayBookingPayload = Omit<CreateBookingPayload, 'elementIds' | 'travelerIds'>;
+export type StayBookingPayload = Omit<CreateBookingPayload, 'elementIds' | 'travelerIds' | 'firstTransaction'>;
 
 export interface BookingTransaction {
   id: string;
@@ -232,6 +236,8 @@ export interface BookingTransaction {
   transactionDate: string;
   confirmationNumber: string | null;
   notes: string | null;
+  paymentMethodId?: string | null;
+  paymentMethodNickname?: string | null;
   createdAt: string;
 }
 
@@ -239,8 +245,23 @@ export interface AddBookingTransactionPayload {
   amountCash?: number;
   amountPoints?: number;
   transactionDate?: string;
-  confirmationNumber?: string;
-  notes?: string;
+  confirmationNumber?: string | null;
+  notes?: string | null;
+  paymentMethodId?: string | null;
+}
+
+export interface FirstTransactionPayload {
+  transactionDate: string;
+  paymentMethodId?: string | null;
+}
+
+export interface PaymentMethod {
+  id: string;
+  nickname: string;
+  archived: boolean;
+  transactionCount: number;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface FlightTravelerSeat {
