@@ -14,7 +14,12 @@ vi.mock('../api/tripApi', () => ({
     listBookingTransactions: vi.fn(),
     addBookingTransaction: vi.fn(),
     deleteBookingTransaction: vi.fn(),
+    updateBookingTransaction: vi.fn(),
   },
+}));
+
+vi.mock('../api/paymentMethodApi', () => ({
+  paymentMethodApi: { list: vi.fn().mockResolvedValue([]), create: vi.fn(), update: vi.fn(), remove: vi.fn() },
 }));
 
 import { tripApi } from '../api/tripApi';
