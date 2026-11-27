@@ -9,6 +9,8 @@ export default defineConfig({
     globals: true,
     setupFiles: ['./tests/setup.ts'],
     include: [
+      'client/src/__tests__/TransactionFormModal.test.tsx', // Add/edit transaction modal
+      'client/src/__tests__/SplitRailLayout.settings.test.tsx', // Settings nav per role
       'client/src/__tests__/AddDestinationDialog.test.tsx', // Destination create/edit with member moves
       'client/src/__tests__/TripPackingSection.test.tsx', // Trip page packing cards
       'client/src/__tests__/ManageDestinationsDrawer.test.tsx', // Destinations drawer
@@ -48,6 +50,22 @@ export default defineConfig({
       'client/src/__tests__/DashboardViewToggle.test.tsx',
       'client/src/__tests__/ShowPackedToggle.test.tsx', // Show packed switch persistence // Person/Columns toggle persistence
       'client/src/__tests__/PackingListsSideBySide.fillViewport.test.tsx', // fillViewport=false leaves column height natural
+      'client/src/__tests__/lodging.test.ts', // Lodging labels, per-night and cancel deadline helpers
+      'client/src/__tests__/lodgingDrafts.test.ts', // Stay and room form drafts
+      'client/src/__tests__/lodgingRows.test.ts', // Lodging row model and totals
+      'client/src/__tests__/AddMenu.test.tsx', // Add menu (Flight / Lodging)
+      'client/src/__tests__/AddLodgingDialog.test.tsx', // Add lodging dialog
+      'client/src/__tests__/LodgingDetailsTab.test.tsx', // Stay details tab
+      'client/src/__tests__/RoomForm.test.tsx', // Room form (beds, amenities, coupons)
+      'client/src/__tests__/LodgingRoomsTab.test.tsx', // Rooms tab and room blocks
+      'client/src/__tests__/LodgingPaymentsTab.test.tsx', // Payments tab summary
+      'client/src/__tests__/LodgingSection.test.tsx', // Lodging section rows
+      'client/src/__tests__/HourPicker.test.tsx', // Hour chips + other select
+      'client/src/__tests__/priceEntry.test.ts', // Total price + pay-at helpers
+      'client/src/__tests__/PaymentMethodSelect.test.tsx', // Payment method picker with inline add
+      'client/src/__tests__/SettingsPaymentMethods.test.tsx', // Settings page for payment methods
+      'client/src/__tests__/PriceEntry.test.tsx', // Total price + pay-at fields
+      'client/src/__tests__/FirstPaymentFields.test.tsx', // "Also record payment" on create
       'src/**/*.test.{ts,tsx}',           // Frontend unit tests
       'server/**/*.test.ts',              // Backend unit tests
       'tests/integration/**/*.test.ts',   // Integration tests

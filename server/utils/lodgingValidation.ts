@@ -1,0 +1,102 @@
+export const ROOM_TYPES = ['standard', 'suite', 'studio', '1br', '2br', '3br', 'other'] as const;
+export const BED_TYPES = ['king', 'queen', 'full', 'twin', 'sofa_bed', 'bunk', 'crib'] as const;
+export const REFUNDABILITY = ['free', 'partial', 'nonrefundable'] as const;
+export const PROPERTY_AMENITIES = ['breakfast', 'pool', 'hot_tub', 'parking', 'wifi', 'laundry', 'airport_shuttle', 'gym'] as const;
+export const ROOM_AMENITIES = ['fridge', 'microwave', 'kitchenette', 'jetted_tub', 'balcony'] as const;
+
+function amenitiesError(value: unknown, allowed: readonly string[]): string | null {
+  if (value === undefined || value === null) return null;
+  if (!Array.isArray(value)) return 'Amenities must be an array';
+  if (value.some(a => !allowed.includes(a))) return 'Unknown amenity';
+  return null;
+}
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+const DATETIME_RE = /^\d{4}-\d{2}-\d{2}(T([01]\d|2[0-3]):[0-5]\d)?$/;
+
+export interface StayDates { checkInDate?: string | null; checkOutDate?: string | null }
+
+function has(obj: any, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(obj, key);
+}
+
+export function validateStay(
+  data: any,
+  opts: { partial: boolean; existing?: StayDates },
+): string | null {
+  const d = data ?? {};
+  if (!opts.partial || has(d, 'name')) {
+    if (typeof d.name !== 'string' || !d.name.trim()) return 'Stay name is required';
+  }
+  const checkIn = has(d, 'checkInDate') ? d.checkInDate : opts.partial ? opts.existing?.checkInDate : undefined;
+  const checkOut = has(d, 'checkOutDate') ? d.checkOutDate : opts.partial ? opts.existing?.checkOutDate : undefined;
+  if (!checkIn) return 'Check-in date is required';
+  if (!checkOut) return 'Check-out date is required';
+  if (!DATE_RE.test(checkIn) || !DATE_RE.test(checkOut)) return 'Dates must be YYYY-MM-DD';
+  if (checkOut <= checkIn) return 'Check-out must be after check-in';
+  for (const key of ['checkInTime', 'checkOutTime']) {
+    const v = d[key];
+    if (v !== undefined && v !== null && v !== '' && (typeof v !== 'string' || !TIME_RE.test(v))) {
+      return 'Times must be HH:mm';
+    }
+  }
+  const amenityErr = amenitiesError(d.amenities, PROPERTY_AMENITIES);
+  if (amenityErr) return amenityErr;
+  return null;
+}
+
+export function validateRoom(room: any): string | null {
+  if (room === null || typeof room !== 'object' || Array.isArray(room)) return 'Room must be an object';
+  if (room.roomType != null && !(ROOM_TYPES as readonly string[]).includes(room.roomType)) return 'Unknown room type';
+  if (room.beds != null) {
+    if (!Array.isArray(room.beds)) return 'Beds must be an array';
+    const seen = new Set<string>();
+    for (const bed of room.beds) {
+      if (!bed || !(BED_TYPES as readonly string[]).includes(bed.type)) return 'Unknown bed type';
+      if (!Number.isInteger(bed.count) || bed.count < 1 || bed.count > 9) return 'Bed count must be 1 to 9';
+      if (seen.has(bed.type)) return 'Each bed type may appear once';
+      seen.add(bed.type);
+    }
+  }
+  const amenityErr = amenitiesError(room.amenities, ROOM_AMENITIES);
+  if (amenityErr) return amenityErr;
+  if (room.travelerIds !== undefined && !Array.isArray(room.travelerIds)) return 'Travelers must be an array';
+  return null;
+}
+
+export function validateCoupons(coupons: any): string | null {
+  if (!Array.isArray(coupons)) return 'Coupons must be an array';
+  for (const c of coupons) {
+    if (!c || typeof c.code !== 'string' || !c.code.trim()) return 'Coupon code is required';
+    if (c.savingsCash != null && (typeof c.savingsCash !== 'number' || !(c.savingsCash >= 0))) return 'Coupon savings must be 0 or more';
+    if (c.savingsPoints != null && (!Number.isInteger(c.savingsPoints) || c.savingsPoints < 0)) return 'Coupon points must be a whole number, 0 or more';
+  }
+  return null;
+}
+
+export const PAY_AT = ['booking', 'checkin'] as const;
+
+const CASH_FIELDS = ['advertisedPriceCash', 'advertisedRateCash', 'dueAtBookingCash', 'dueLaterCash'] as const;
+const POINTS_FIELDS = ['advertisedPricePoints', 'advertisedRatePoints', 'dueAtBookingPoints'] as const;
+
+export function validateBookingFields(data: any): string | null {
+  const d = data ?? {};
+  for (const key of CASH_FIELDS) {
+    const v = d[key];
+    if (v != null && (typeof v !== 'number' || !(v >= 0) || !Number.isFinite(v))) return 'Amounts must be 0 or more';
+  }
+  for (const key of POINTS_FIELDS) {
+    const v = d[key];
+    if (v != null && (!Number.isInteger(v) || v < 0)) return 'Points must be a whole number, 0 or more';
+  }
+  if (Object.prototype.hasOwnProperty.call(d, 'payAt') && !(PAY_AT as readonly unknown[]).includes(d.payAt)) {
+    return "Pay at must be 'booking' or 'checkin'";
+  }
+  if (d.refundability != null && !(REFUNDABILITY as readonly string[]).includes(d.refundability)) return 'Unknown refundability';
+  if (d.cancelBy != null && d.cancelBy !== '' && (typeof d.cancelBy !== 'string' || !DATETIME_RE.test(d.cancelBy))) {
+    return 'Cancel-by must be YYYY-MM-DD or YYYY-MM-DDTHH:mm';
+  }
+  if (d.coupons !== undefined) return validateCoupons(d.coupons);
+  return null;
+}

@@ -1,5 +1,6 @@
 import { Booking, TripElement } from '../types/trip';
 import { formatLayover } from './flightLegs';
+import { dueTotals } from './dues';
 import { formatMoney } from './money';
 
 export interface FlightRowLeg {
@@ -106,14 +107,23 @@ export function buildFlightRows(elements: TripElement[], bookings: Booking[]): F
     .sort((a, b) => a.sortKey.localeCompare(b.sortKey));
 }
 
+// Per booking: its total price when dues are set, otherwise advertised per person × travelers.
 export function flightTotals(elements: TripElement[], bookings: Booking[]): FlightTotals {
   const flightIds = new Set(elements.filter(e => e.elementType === 'flight').map(e => e.id));
   let cash = 0;
   let points = 0;
   for (const booking of bookings) {
     if (!booking.elementIds.some(id => flightIds.has(id))) continue;
-    cash += booking.advertisedPriceCash ?? 0;
-    points += booking.advertisedPricePoints ?? 0;
+    const totals = dueTotals(booking);
+    if (totals) {
+      cash += totals.cash;
+      points += totals.points;
+    } else {
+      const travelers = Math.max(1, booking.travelerIds.length);
+      cash += (booking.advertisedPriceCash ?? 0) * travelers;
+      points += (booking.advertisedPricePoints ?? 0) * travelers;
+    }
   }
+  cash = Math.round(cash * 100) / 100;
   return { cash, points, label: formatPrice(cash, points) };
 }

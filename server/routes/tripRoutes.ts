@@ -3,8 +3,13 @@ import { TripRepository } from '../repositories/tripRepository';
 import { TripElementRepository } from '../repositories/tripElementRepository';
 import { TripElementConfirmationRepository } from '../repositories/tripElementConfirmationRepository';
 import { TripParticipantRepository } from '../repositories/tripParticipantRepository';
-import { BookingRepository, BookingConflictError } from '../repositories/bookingRepository';
+import { BookingRepository, BookingConflictError, pickBookingInput } from '../repositories/bookingRepository';
+import { LodgingRoomRepository, RoomConflictError } from '../repositories/lodgingRoomRepository';
+import { StayService } from '../services/stayService';
+import { BookingService } from '../services/bookingService';
+import { parseFirstTransaction } from '../utils/firstTransaction';
 import { BookingTransactionRepository } from '../repositories/bookingTransactionRepository';
+import { PaymentMethodRepository } from '../repositories/paymentMethodRepository';
 import { FlightTravelerSeatRepository } from '../repositories/flightTravelerSeatRepository';
 import { authMiddleware } from '../middleware';
 import { tripAccessMiddleware } from '../middleware/tripAccessMiddleware';
@@ -27,6 +32,7 @@ import {
   copyTrip,
 } from '../services/tripListService';
 import { withTransaction } from '../utils/transaction';
+import { validateStay, validateRoom, validateBookingFields } from '../utils/lodgingValidation';
 
 export const tripRouter = Router();
 
@@ -36,7 +42,11 @@ const tripElementConfirmationRepository = new TripElementConfirmationRepository(
 const tripParticipantRepository = new TripParticipantRepository();
 const bookingRepository = new BookingRepository();
 const bookingTransactionRepository = new BookingTransactionRepository();
+const paymentMethodRepository = new PaymentMethodRepository();
 const flightTravelerSeatRepository = new FlightTravelerSeatRepository();
+const lodgingRoomRepository = new LodgingRoomRepository();
+const stayService = new StayService();
+const bookingService = new BookingService();
 
 const tripDestinationRepository = new TripDestinationRepository();
 const packingListRepository = new PackingListRepository();
@@ -193,12 +203,72 @@ tripRouter.post('/:tripId/flight-autofill', authMiddleware, tripAccessMiddleware
   }
 });
 
+const BOOKING_KIND_ERROR = 'A booking covers flights only, or exactly one stay';
+
+async function bookingKind(elementIds: string[]): Promise<'flight' | 'hotel' | 'invalid'> {
+  const types: string[] = [];
+  for (const id of new Set(elementIds)) {
+    const el = await tripElementRepository.getElementById(id);
+    if (!el) return 'invalid';
+    types.push(el.elementType);
+  }
+  if (types.length > 0 && types.every(t => t === 'flight')) return 'flight';
+  if (types.length === 1 && types[0] === 'hotel') return 'hotel';
+  return 'invalid';
+}
+
+async function checkStayDestination(tripId: string, destinationId: unknown): Promise<boolean> {
+  if (destinationId == null || destinationId === '') return true;
+  const db = await getDb();
+  const row = await db.get(
+    'SELECT id FROM trip_destinations WHERE id = ? AND trip_id = ? AND deleted_at IS NULL',
+    [destinationId, tripId]
+  );
+  return Boolean(row);
+}
+
+const STAY_HAS_BOOKING = 'This stay already has a booking';
+
+// Stays own exactly one booking; returns an error if `elementId` is a stay already booked by another booking.
+async function stayBookingError(elementId: string, bookingId: string | null): Promise<string | null> {
+  const existing = await bookingRepository.getBookingIdForElement(elementId);
+  return existing && existing !== bookingId ? STAY_HAS_BOOKING : null;
+}
+
+async function foreignTravelerError(tripId: string, travelerIds: unknown): Promise<string | null> {
+  if (!Array.isArray(travelerIds)) return null;
+  for (const id of travelerIds) {
+    const p = await tripParticipantRepository.getParticipantById(id);
+    if (!p || p.tripId !== tripId) return 'Traveler not found';
+  }
+  return null;
+}
+
 // Create element
 tripRouter.post('/:tripId/elements', authMiddleware, tripAccessMiddleware, async (req: Request, res: Response) => {
   try {
     const { elementType, name, bookingReference, bookingUrl, priceCash, pricePoints, loyaltyProgram, totalCash, totalPoints, notes, sortPosition, typeSpecificData } = req.body;
     if (!elementType || (!name && elementType !== 'flight')) {
       return res.status(400).json({ error: 'Missing required fields: elementType, name' });
+    }
+    if (elementType === 'hotel') {
+      const stayError = validateStay({ name, ...(typeSpecificData ?? {}) }, { partial: false });
+      if (stayError) return res.status(400).json({ error: stayError });
+      if (!(await checkStayDestination(req.trip!.id, typeSpecificData?.destinationId))) {
+        return res.status(404).json({ error: 'Destination not found' });
+      }
+      const bookingError = validateBookingFields(req.body.booking ?? {});
+      if (bookingError) return res.status(400).json({ error: bookingError });
+      const first = parseFirstTransaction(req.body.firstTransaction, req.body.booking ?? {});
+      if (first.error) return res.status(400).json({ error: first.error });
+      if (first.value) {
+        const methodError = await paymentMethodError(req.trip!.family_id, first.value.paymentMethodId);
+        if (methodError) return res.status(400).json({ error: methodError });
+      }
+      const stay = await stayService.createStay(req.trip!.id, {
+        name, notes, typeSpecificData, booking: pickBookingInput(req.body.booking ?? {}), firstTransaction: first.value,
+      });
+      return res.status(201).json(stay);
     }
     const element = await tripElementRepository.createElement(req.trip!.id, {
       elementType,
@@ -240,10 +310,98 @@ tripRouter.put('/:tripId/elements/:elementId', authMiddleware, tripAccessMiddlew
     if (!element || element.tripId !== req.trip!.id) {
       return res.status(404).json({ error: 'Element not found' });
     }
+    if (element.elementType === 'hotel') {
+      const { name, typeSpecificData, booking } = req.body ?? {};
+      if (name !== undefined || typeSpecificData !== undefined) {
+        const existing = {
+          checkInDate: (element as any).hotelDetails?.checkInDate ?? null,
+          checkOutDate: (element as any).hotelDetails?.checkOutDate ?? null,
+        };
+        const stayError = validateStay(
+          { ...(name !== undefined ? { name } : {}), ...(typeSpecificData ?? {}) },
+          { partial: true, existing }
+        );
+        if (stayError) return res.status(400).json({ error: stayError });
+        if (typeSpecificData && !(await checkStayDestination(req.trip!.id, typeSpecificData.destinationId))) {
+          return res.status(404).json({ error: 'Destination not found' });
+        }
+      }
+      if (booking !== undefined) {
+        const bookingError = validateBookingFields(booking);
+        if (bookingError) return res.status(400).json({ error: bookingError });
+      }
+      const { booking: _ignored, firstTransaction: _notOnUpdate, ...elementUpdates } = req.body ?? {};
+      const updated = await stayService.updateStay(req.trip!.id, element.id, {
+        ...elementUpdates, ...(booking !== undefined ? { booking: pickBookingInput(booking) } : {}),
+      });
+      return res.json(updated);
+    }
     const updated = await tripElementRepository.updateElement(req.params.elementId, req.body);
     res.json(updated);
   } catch (error) {
     res.status(500).json({ error: 'Failed to update element' });
+  }
+});
+
+async function findRoomForTrip(tripId: string, roomId: string) {
+  const room = await lodgingRoomRepository.getRoom(roomId);
+  if (!room) return null;
+  const element = await tripElementRepository.getElementById(room.elementId);
+  return element && element.tripId === tripId ? room : null;
+}
+
+function sendRoomError(res: Response, error: unknown, fallback: string) {
+  if (error instanceof RoomConflictError) return res.status(409).json({ error: error.message });
+  return res.status(500).json({ error: fallback });
+}
+
+tripRouter.post('/:tripId/elements/:elementId/rooms', authMiddleware, tripAccessMiddleware, async (req: Request, res: Response) => {
+  try {
+    const element = await tripElementRepository.getElementById(req.params.elementId);
+    if (!element || element.tripId !== req.trip!.id) return res.status(404).json({ error: 'Element not found' });
+    if (element.elementType !== 'hotel') return res.status(400).json({ error: 'Rooms are only for stays' });
+    const body = req.body ?? {};
+    const roomError = validateRoom(body);
+    if (roomError) return res.status(400).json({ error: roomError });
+    const travelerError = await foreignTravelerError(req.trip!.id, body.travelerIds);
+    if (travelerError) return res.status(404).json({ error: travelerError });
+    const room = await lodgingRoomRepository.createRoom(element.id, {
+      roomType: body.roomType, beds: body.beds, description: body.description,
+      amenities: body.amenities, otherAmenities: body.otherAmenities, travelerIds: body.travelerIds,
+    });
+    res.status(201).json(room);
+  } catch (error) {
+    sendRoomError(res, error, 'Failed to add room');
+  }
+});
+
+tripRouter.put('/:tripId/rooms/:roomId', authMiddleware, tripAccessMiddleware, async (req: Request, res: Response) => {
+  try {
+    const room = await findRoomForTrip(req.trip!.id, req.params.roomId);
+    if (!room) return res.status(404).json({ error: 'Room not found' });
+    const body = req.body ?? {};
+    const roomError = validateRoom(body);
+    if (roomError) return res.status(400).json({ error: roomError });
+    const travelerError = await foreignTravelerError(req.trip!.id, body.travelerIds);
+    if (travelerError) return res.status(404).json({ error: travelerError });
+    const input: Record<string, unknown> = {};
+    for (const key of ['roomType', 'beds', 'description', 'amenities', 'otherAmenities', 'travelerIds']) {
+      if (key in body) input[key] = body[key];
+    }
+    res.json(await lodgingRoomRepository.updateRoom(room.id, input));
+  } catch (error) {
+    sendRoomError(res, error, 'Failed to update room');
+  }
+});
+
+tripRouter.delete('/:tripId/rooms/:roomId', authMiddleware, tripAccessMiddleware, async (req: Request, res: Response) => {
+  try {
+    const room = await findRoomForTrip(req.trip!.id, req.params.roomId);
+    if (!room) return res.status(404).json({ error: 'Room not found' });
+    await lodgingRoomRepository.deleteRoom(room.id);
+    res.status(204).send();
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to delete room' });
   }
 });
 
@@ -439,26 +597,40 @@ tripRouter.get('/:tripId/bookings', authMiddleware, tripAccessMiddleware, async 
 
 tripRouter.post('/:tripId/bookings', authMiddleware, tripAccessMiddleware, async (req: Request, res: Response) => {
   try {
-    const { confirmationNumber, advertisedPriceCash, advertisedPricePoints, loyaltyProgram, notes, elementIds, travelerIds } = req.body;
+    const { elementIds, travelerIds } = req.body;
     if (!Array.isArray(elementIds) || elementIds.length === 0) {
       return res.status(400).json({ error: 'At least one elementId is required' });
     }
-    if (!Array.isArray(travelerIds) || travelerIds.length === 0) {
-      return res.status(400).json({ error: 'At least one travelerId is required' });
+    if (travelerIds !== undefined && !Array.isArray(travelerIds)) {
+      return res.status(400).json({ error: 'travelerIds must be an array' });
     }
     const foreign = await findForeignBookingRef(req.trip!.id, elementIds, travelerIds);
     if (foreign) {
       return res.status(404).json({ error: foreign });
     }
-    const booking = await bookingRepository.createBooking(req.trip!.id, {
-      confirmationNumber,
-      advertisedPriceCash,
-      advertisedPricePoints,
-      loyaltyProgram,
-      notes,
-      elementIds,
-      travelerIds,
-    });
+    const kind = await bookingKind(elementIds);
+    if (kind === 'invalid') {
+      return res.status(400).json({ error: BOOKING_KIND_ERROR });
+    }
+    if (kind === 'flight' && (!travelerIds || travelerIds.length === 0)) {
+      return res.status(400).json({ error: 'At least one travelerId is required' });
+    }
+    if (kind === 'hotel') {
+      if (travelerIds?.length) return res.status(400).json({ error: 'Stay travelers are set on rooms' });
+      const stayError = await stayBookingError(elementIds[0], null);
+      if (stayError) return res.status(400).json({ error: stayError });
+    }
+    const fieldsError = validateBookingFields(req.body);
+    if (fieldsError) return res.status(400).json({ error: fieldsError });
+    const first = parseFirstTransaction(req.body.firstTransaction, req.body);
+    if (first.error) return res.status(400).json({ error: first.error });
+    if (first.value) {
+      const methodError = await paymentMethodError(req.trip!.family_id, first.value.paymentMethodId);
+      if (methodError) return res.status(400).json({ error: methodError });
+    }
+    const booking = await bookingService.createBooking(req.trip!.id, {
+      ...pickBookingInput(req.body), elementIds, travelerIds: travelerIds ?? [],
+    } as any, first.value);
     res.status(201).json(booking);
   } catch (error) {
     sendBookingError(res, error, 'Failed to create booking');
@@ -483,22 +655,38 @@ tripRouter.patch('/:tripId/bookings/:id', authMiddleware, tripAccessMiddleware, 
     if (!booking || booking.tripId !== req.trip!.id) {
       return res.status(404).json({ error: 'Booking not found' });
     }
-    const { confirmationNumber, advertisedPriceCash, advertisedPricePoints, loyaltyProgram, notes, elementIds, travelerIds } = req.body ?? {};
+    const { elementIds, travelerIds } = req.body ?? {};
     if (elementIds !== undefined && (!Array.isArray(elementIds) || elementIds.length === 0)) {
       return res.status(400).json({ error: 'At least one elementId is required' });
     }
-    if (travelerIds !== undefined && (!Array.isArray(travelerIds) || travelerIds.length === 0)) {
-      return res.status(400).json({ error: 'At least one travelerId is required' });
+    if (travelerIds !== undefined && !Array.isArray(travelerIds)) {
+      return res.status(400).json({ error: 'travelerIds must be an array' });
     }
     const foreign = await findForeignBookingRef(req.trip!.id, elementIds, travelerIds);
     if (foreign) {
       return res.status(404).json({ error: foreign });
     }
-    const updates: Record<string, unknown> = {};
-    const fields = { confirmationNumber, advertisedPriceCash, advertisedPricePoints, loyaltyProgram, notes, elementIds, travelerIds };
-    for (const [key, value] of Object.entries(fields)) {
-      if (key in (req.body ?? {})) updates[key] = value;
+    // A booking whose elements are all soft-deleted has no kind left to enforce.
+    const kindIds: string[] = elementIds ?? booking.elementIds;
+    const kind = kindIds.length === 0 ? 'flight' : await bookingKind(kindIds);
+    if (kind === 'invalid') {
+      return res.status(400).json({ error: BOOKING_KIND_ERROR });
     }
+    if (kind === 'flight' && travelerIds !== undefined && travelerIds.length === 0) {
+      return res.status(400).json({ error: 'At least one travelerId is required' });
+    }
+    if (kind === 'hotel') {
+      if (travelerIds?.length) return res.status(400).json({ error: 'Stay travelers are set on rooms' });
+      if (elementIds !== undefined) {
+        const stayError = await stayBookingError(elementIds[0], booking.id);
+        if (stayError) return res.status(400).json({ error: stayError });
+      }
+    }
+    const fieldsError = validateBookingFields(req.body ?? {});
+    if (fieldsError) return res.status(400).json({ error: fieldsError });
+    const updates: Record<string, unknown> = { ...pickBookingInput(req.body ?? {}) };
+    if (elementIds !== undefined) updates.elementIds = elementIds;
+    if (travelerIds !== undefined) updates.travelerIds = travelerIds;
     const updated = await bookingRepository.updateBooking(req.params.id, updates);
     res.json(updated);
   } catch (error) {
@@ -532,6 +720,13 @@ tripRouter.post('/:tripId/bookings/:id/elements', authMiddleware, tripAccessMidd
     const element = await tripElementRepository.getElementById(elementId);
     if (!element || element.tripId !== req.trip!.id) {
       return res.status(404).json({ error: 'Element not found' });
+    }
+    if ((await bookingKind([...booking.elementIds, elementId])) === 'invalid') {
+      return res.status(400).json({ error: BOOKING_KIND_ERROR });
+    }
+    if (element.elementType === 'hotel') {
+      const stayError = await stayBookingError(elementId, booking.id);
+      if (stayError) return res.status(400).json({ error: stayError });
     }
     await bookingRepository.linkElement(req.params.id, elementId);
     res.json(await bookingRepository.getBookingById(req.params.id));
@@ -587,6 +782,19 @@ tripRouter.delete('/:tripId/bookings/:id/travelers/:participantId', authMiddlewa
   }
 });
 
+// Returns an error message, or null when `value` is acceptable for this trip's family.
+// An archived method is only accepted when it is the transaction's current method (`current`).
+async function paymentMethodError(familyId: string, value: unknown, current: string | null = null): Promise<string | null> {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== 'string') return 'Unknown payment method';
+  const method = await paymentMethodRepository.getById(familyId, value);
+  if (!method) return 'Unknown payment method';
+  if (method.archived && value !== current) return 'Payment method is archived';
+  return null;
+}
+
+const TRANSACTION_UPDATE_KEYS = ['amountCash', 'amountPoints', 'transactionDate', 'confirmationNumber', 'notes', 'paymentMethodId'] as const;
+
 // ===== Booking transactions =====
 
 tripRouter.get('/:tripId/bookings/:bookingId/transactions', authMiddleware, tripAccessMiddleware, async (req: Request, res: Response) => {
@@ -608,13 +816,16 @@ tripRouter.post('/:tripId/bookings/:bookingId/transactions', authMiddleware, tri
     if (!booking || booking.tripId !== req.trip!.id) {
       return res.status(404).json({ error: 'Booking not found' });
     }
-    const { amountCash, amountPoints, transactionDate, confirmationNumber, notes } = req.body;
+    const { amountCash, amountPoints, transactionDate, confirmationNumber, notes, paymentMethodId } = req.body;
+    const methodError = await paymentMethodError(req.trip!.family_id, paymentMethodId);
+    if (methodError) return res.status(400).json({ error: methodError });
     const transaction = await bookingTransactionRepository.addTransaction(req.params.bookingId, {
       amountCash,
       amountPoints,
       transactionDate,
       confirmationNumber,
       notes,
+      paymentMethodId,
     });
     res.status(201).json(transaction);
   } catch (error) {
@@ -629,11 +840,17 @@ tripRouter.patch('/:tripId/bookings/:bookingId/transactions/:id', authMiddleware
     if (!booking || booking.tripId !== req.trip!.id) {
       return res.status(404).json({ error: 'Booking not found' });
     }
-    const transactions = await bookingTransactionRepository.getTransactionsForBooking(req.params.bookingId);
-    if (!transactions.some((transaction) => transaction.id === req.params.id)) {
+    const existing = await bookingTransactionRepository.getTransactionById(req.params.id);
+    if (!existing || existing.bookingId !== req.params.bookingId) {
       return res.status(404).json({ error: 'Transaction not found' });
     }
-    const updated = await bookingTransactionRepository.updateTransaction(req.params.id, req.body);
+    const methodError = await paymentMethodError(req.trip!.family_id, req.body.paymentMethodId, existing.paymentMethodId);
+    if (methodError) return res.status(400).json({ error: methodError });
+    const updates: Record<string, unknown> = {};
+    for (const key of TRANSACTION_UPDATE_KEYS) {
+      if (Object.prototype.hasOwnProperty.call(req.body, key)) updates[key] = req.body[key];
+    }
+    const updated = await bookingTransactionRepository.updateTransaction(req.params.id, updates);
     res.json(updated);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to update transaction';

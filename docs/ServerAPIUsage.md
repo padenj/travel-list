@@ -228,6 +228,44 @@ This document maps server routes implemented in `server/routes.ts` to their purp
   - Purpose: Body `{ name, includeOneOffs }`. Creates a dateless trip with a copy of every destination and its list (members, item groups, unchecked items; one-off items only with `includeOneOffs`). Returns 201 `{ trip, destinations }`.
   - Client helper: `tripApi.copyTrip`
 
+- POST /trips/:tripId/elements, PUT /trips/:tripId/elements/:elementId
+  - Purpose: Create/update a trip element. For `elementType: 'hotel'`, `typeSpecificData` carries `address`, `phone`, `website`, `checkInDate`, `checkInTime`, `checkOutDate`, `checkOutTime`, `destinationId` (must belong to the trip, else 404), `amenities` (property amenities: `breakfast`, `pool`, `hot_tub`, `parking`, `wifi`, `laundry`, `airport_shuttle`, `gym`) and `otherAmenities`. Check-in and check-out dates are required on create; check-out must be after check-in. A hotel body may include `booking` (`confirmationNumber`, `loyaltyProgram`, `bookingSite`, `siteItineraryNumber`, `advertisedRateCash/Points`, `advertisedPriceCash/Points`, `advertisedIncludesTaxes`, `dueAtBookingCash/Points`, `dueLaterCash`, `dueLaterNotes`, `payAt`, `refundability`, `cancelBy`, `cancellationPolicy`, `coupons`); it creates or updates the stay's single booking in the same transaction. `payAt` (`'booking' | 'checkin'`, default `'booking'`, else 400) records which time the user treated as primary. On create only, a hotel body may also include `firstTransaction { transactionDate: 'YYYY-MM-DD', paymentMethodId? }`: a transaction for the amount due at booking is written atomically with the stay (400 "Nothing is due at booking" when that is 0). Elements return the stay as `hotelDetails` (plus `destinationName`), `rooms` and `bookingId`.
+  - Client helper: `tripApi.createElement`, `tripApi.updateElement`
+
+- POST /trips/:tripId/bookings, PATCH /trips/:tripId/bookings/:id
+  - Purpose: Bookings for flights or a hotel stay. A booking links either flights or exactly one hotel (400 otherwise). A stay has at most one booking (400 "This stay already has a booking") and stay bookings carry no travelers (travelers belong to rooms). All bookings accept the money fields listed above (including `payAt`); `coupons` is a full replacement. `POST` also accepts `firstTransaction { transactionDate, paymentMethodId? }` (create only; amount = due at booking; written atomically with the booking). Flight bookings require travelers; 409 when a traveler is already in another booking for the same element.
+  - Client helper: `tripApi.createBooking`, `tripApi.updateBooking`
+
+- GET /trips/:tripId/bookings/:bookingId/transactions, POST …/transactions, PATCH …/transactions/:id, DELETE …/transactions/:id
+  - Purpose: A booking's payments. POST/PATCH accept `amountCash`, `amountPoints`, `transactionDate`, `confirmationNumber`, `notes` and `paymentMethodId` (`null` clears; must belong to the trip's family, else 400 "Unknown payment method"; an archived method is only accepted when unchanged). Responses include `paymentMethodId` and `paymentMethodNickname`.
+  - Client helper: `tripApi.listBookingTransactions`, `tripApi.addBookingTransaction`, `tripApi.updateBookingTransaction`, `tripApi.deleteBookingTransaction`
+
+- POST /trips/:tripId/elements/:elementId/rooms, PUT /trips/:tripId/rooms/:roomId, DELETE /trips/:tripId/rooms/:roomId
+  - Purpose: Rooms of a hotel stay: `roomType`, `beds`, `description`, `amenities` (room amenities: `fridge`, `microwave`, `kitchenette`, `jetted_tub`, `balcony`), `otherAmenities`, `travelerIds`. 400 when the element is not a hotel or a field is invalid; 409 when a traveler is already in another room of the stay. Create returns 201, delete 204.
+  - Client helper: `tripApi.createRoom`, `tripApi.updateRoom`, `tripApi.deleteRoom`
+
+---
+
+## Payment Methods
+
+Family-scoped nicknames (e.g. "Southwest CC - 1234"); any signed-in family member may manage them.
+
+- GET /payment-methods?includeArchived=1
+  - Purpose: The family's methods sorted by nickname (active first) as `{ id, nickname, archived, transactionCount, createdAt, updatedAt }`; archived omitted unless `includeArchived=1`.
+  - Client helper: `paymentMethodApi.list`
+
+- POST /payment-methods
+  - Purpose: Body `{ nickname }` (trimmed, 1–60 chars). 201 with the method; 400 invalid nickname; 409 duplicate active nickname (case-insensitive).
+  - Client helper: `paymentMethodApi.create`
+
+- PATCH /payment-methods/:id
+  - Purpose: Body `{ nickname?, archived? }`. Rename and/or archive/unarchive; 409 when the result duplicates an active nickname; 404 outside the family.
+  - Client helper: `paymentMethodApi.update`
+
+- DELETE /payment-methods/:id
+  - Purpose: 204 when unused; 409 "Payment method is used by N transactions. Archive it instead." otherwise.
+  - Client helper: `paymentMethodApi.remove`
+
 ---
 
 ## Trip Destinations
@@ -245,7 +283,7 @@ This document maps server routes implemented in `server/routes.ts` to their purp
   - Client helper: `tripApi.updateDestination`
 
 - DELETE /trips/:tripId/destinations/:destinationId
-  - Purpose: Remove a destination atomically. Body `{ moveSharedItemsTo?, deleteList? }`; 409 `last_destination` when it is the trip's only destination; 409 `destination_has_items` when the list has items and neither is given. A kept list moves into its own new trip.
+  - Purpose: Remove a destination atomically. Body `{ moveSharedItemsTo?, deleteList? }`; 409 `last_destination` when it is the trip's only destination; 409 `destination_has_items` when the list has items and neither is given. A kept list moves into its own new trip. Stays that pointed at the destination keep their data and have `destinationId` cleared.
   - Client helper: `tripApi.deleteDestination`
 
 - POST /trips/:tripId/split

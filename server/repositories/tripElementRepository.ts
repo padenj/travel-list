@@ -2,6 +2,8 @@ import { v4 as uuidv4 } from 'uuid';
 import { getDb } from '../db';
 import { withTransaction } from '../utils/transaction';
 import { flightTitle } from '../utils/flightTitle';
+import type { PropertyAmenity } from './bookingRepository';
+import { listRoomsForElement, type LodgingRoom } from './lodgingRoomRepository';
 
 export interface TripElement {
   id: string;
@@ -20,6 +22,13 @@ export interface TripElement {
   createdAt: string;
   updatedAt: string;
   deletedAt?: string | null;
+  rooms?: LodgingRoom[];
+  bookingId?: string | null;
+}
+
+function parseAmenities(v: string | null | undefined): any[] {
+  if (!v) return [];
+  try { const p = JSON.parse(v); return Array.isArray(p) ? p : []; } catch { return []; }
 }
 
 export interface FlightLegInput {
@@ -60,17 +69,17 @@ export interface FlightLeg {
 }
 
 export interface HotelDetails {
-  elementId: string;
-  address?: string;
-  checkInDate: string;
-  checkOutDate: string;
-  roomType?: string;
-  bookingSource?: string;
-  advertisedPriceCash?: number;
-  advertisedPricePoints?: number;
-  advertisedLoyaltyProgram?: string;
-  createdAt: string;
-  updatedAt: string;
+  address: string | null;
+  phone: string | null;
+  website: string | null;
+  checkInDate: string | null;
+  checkInTime: string | null;
+  checkOutDate: string | null;
+  checkOutTime: string | null;
+  destinationId: string | null;
+  destinationName: string | null;
+  amenities: PropertyAmenity[];
+  otherAmenities: string | null;
 }
 
 export interface CarRentalDetails {
@@ -152,14 +161,16 @@ export class TripElementRepository {
       }
       await this.recomputeLayovers(id, true);
       await this.refreshFlightTitle(id);
-    } else if (element.elementType === 'hotel' && element.typeSpecificData) {
+    } else if (element.elementType === 'hotel') {
+      const h = (element.typeSpecificData ?? {}) as Partial<HotelDetails>;
       await db.run(
-        `INSERT INTO hotel_element_details (element_id, address, check_in_date, check_out_date, room_type, booking_source, advertised_price_cash, advertised_price_points, advertised_loyalty_program, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
-        [id, element.typeSpecificData.address || null, element.typeSpecificData.checkInDate || null,
-         element.typeSpecificData.checkOutDate || null, element.typeSpecificData.roomType || null,
-         element.typeSpecificData.bookingSource || null, element.typeSpecificData.advertisedPriceCash || null,
-         element.typeSpecificData.advertisedPricePoints || null, element.typeSpecificData.advertisedLoyaltyProgram || null]
+        `INSERT INTO hotel_element_details
+           (element_id, address, phone, website, check_in_date, check_in_time, check_out_date, check_out_time, destination_id,
+            amenities, other_amenities)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [id, h.address || null, h.phone || null, h.website || null, h.checkInDate || null, h.checkInTime || null,
+         h.checkOutDate || null, h.checkOutTime || null, h.destinationId || null,
+         JSON.stringify(Array.isArray(h.amenities) ? h.amenities : []), h.otherAmenities?.trim() || null]
       );
     } else if (element.elementType === 'car_rental' && element.typeSpecificData) {
       await db.run(
@@ -217,15 +228,27 @@ export class TripElementRepository {
       );
       (row as any).legs = legs;
     } else if (row.elementType === 'hotel') {
-      const details = await db.get(
-        `SELECT element_id as elementId, address, check_in_date as checkInDate, check_out_date as checkOutDate,
-                room_type as roomType, booking_source as bookingSource, advertised_price_cash as advertisedPriceCash,
-                advertised_price_points as advertisedPricePoints, advertised_loyalty_program as advertisedLoyaltyProgram,
-                created_at as createdAt, updated_at as updatedAt
-         FROM hotel_element_details WHERE element_id = ?`,
+      const h = await db.get(
+        `SELECT h.*,
+                CASE WHEN d.deleted_at IS NULL THEN d.id END AS live_destination_id,
+                CASE WHEN d.deleted_at IS NULL THEN d.name END AS destination_name
+           FROM hotel_element_details h
+           LEFT JOIN trip_destinations d ON d.id = h.destination_id
+          WHERE h.element_id = ?`,
         [elementId]
       );
-      (row as any).hotelDetails = details;
+      (row as any).hotelDetails = h ? {
+        address: h.address ?? null, phone: h.phone ?? null, website: h.website ?? null,
+        checkInDate: h.check_in_date ?? null, checkInTime: h.check_in_time ?? null,
+        checkOutDate: h.check_out_date ?? null, checkOutTime: h.check_out_time ?? null,
+        destinationId: h.live_destination_id ?? null, destinationName: h.destination_name ?? null,
+        amenities: parseAmenities(h.amenities), otherAmenities: h.other_amenities ?? null,
+      } : null;
+      (row as any).rooms = await listRoomsForElement(db, elementId);
+      const link = await db.get(
+        `SELECT bl.booking_id AS bookingId FROM booking_links bl JOIN bookings b ON b.id = bl.booking_id
+          WHERE bl.element_id = ? ORDER BY b.created_at, b.id LIMIT 1`, [elementId]);
+      (row as any).bookingId = link?.bookingId ?? null;
     } else if (row.elementType === 'car_rental') {
       const details = await db.get(
         `SELECT element_id as elementId, rental_company as rentalCompany, car_size as carSize,
@@ -275,7 +298,10 @@ export class TripElementRepository {
     return rows as TripElement[];
   }
 
-  async updateElement(elementId: string, updates: Partial<TripElement>): Promise<TripElement> {
+  async updateElement(
+    elementId: string,
+    updates: Partial<TripElement> & { typeSpecificData?: any }
+  ): Promise<TripElement> {
     const db = await this.db;
     const dbUpdates: Record<string, any> = {};
     const fieldMap: Record<string, string> = {
@@ -306,7 +332,37 @@ export class TripElementRepository {
       );
     }
 
+    if (updates.typeSpecificData) {
+      const existing = await db.get('SELECT element_type AS elementType FROM trip_elements WHERE id = ?', [elementId]);
+      if (existing?.elementType === 'hotel') {
+        await this.updateHotelDetails(db, elementId, updates.typeSpecificData);
+      }
+    }
+
     return this.getElementById(elementId) as Promise<TripElement>;
+  }
+
+  private async updateHotelDetails(db: any, elementId: string, data: Partial<HotelDetails>): Promise<void> {
+    const map: Record<string, string> = {
+      address: 'address', phone: 'phone', website: 'website',
+      checkInDate: 'check_in_date', checkInTime: 'check_in_time',
+      checkOutDate: 'check_out_date', checkOutTime: 'check_out_time', destinationId: 'destination_id',
+      amenities: 'amenities', otherAmenities: 'other_amenities',
+    };
+    await db.run('INSERT OR IGNORE INTO hotel_element_details (element_id) VALUES (?)', [elementId]);
+    const sets: string[] = [];
+    const values: unknown[] = [];
+    for (const [key, col] of Object.entries(map)) {
+      if (Object.prototype.hasOwnProperty.call(data, key)) {
+        sets.push(`${col} = ?`);
+        const v = (data as any)[key];
+        if (key === 'amenities') values.push(JSON.stringify(Array.isArray(v) ? v : []));
+        else values.push(typeof v === 'string' && v.trim() === '' ? null : v ?? null);
+      }
+    }
+    if (sets.length === 0) return;
+    sets.push(`updated_at = datetime('now')`);
+    await db.run(`UPDATE hotel_element_details SET ${sets.join(', ')} WHERE element_id = ?`, [...values, elementId]);
   }
 
   async deleteElement(elementId: string): Promise<void> {

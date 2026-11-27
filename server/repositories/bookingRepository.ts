@@ -2,6 +2,66 @@ import { v4 as uuidv4 } from 'uuid';
 import { getDb } from '../db';
 import { withTransaction } from '../utils/transaction';
 
+export type RoomType = 'standard' | 'suite' | 'studio' | '1br' | '2br' | '3br' | 'other';
+export type BedType = 'king' | 'queen' | 'full' | 'twin' | 'sofa_bed' | 'bunk' | 'crib';
+export type PropertyAmenity = 'breakfast' | 'pool' | 'hot_tub' | 'parking' | 'wifi' | 'laundry' | 'airport_shuttle' | 'gym';
+export type RoomAmenity = 'fridge' | 'microwave' | 'kitchenette' | 'jetted_tub' | 'balcony';
+export type PayAt = 'booking' | 'checkin';
+export type Refundability = 'free' | 'partial' | 'nonrefundable';
+export interface BedCount { type: BedType; count: number }
+
+export interface BookingCoupon {
+  id: string;
+  code: string;
+  savingsCash: number | null;
+  savingsPoints: number | null;
+  notes: string | null;
+}
+export type CouponInput = Partial<Omit<BookingCoupon, 'id'>> & { id?: string; code: string };
+
+export function blankToNull(v: string | null | undefined): string | null {
+  return v == null || v.trim() === '' ? null : v;
+}
+
+export function parseJsonArray<T>(v: string | null): T[] {
+  if (!v) return [];
+  try { const parsed = JSON.parse(v); return Array.isArray(parsed) ? parsed : []; } catch { return []; }
+}
+
+const BOOKING_SELECT = (p = '') => `
+  ${p}id as id, ${p}trip_id as tripId, ${p}confirmation_number as confirmationNumber,
+  ${p}advertised_price_cash as advertisedPriceCash, ${p}advertised_price_points as advertisedPricePoints,
+  ${p}loyalty_program as loyaltyProgram, ${p}notes as notes, ${p}booking_site as bookingSite,
+  ${p}site_itinerary_number as siteItineraryNumber, ${p}advertised_includes_taxes as advertisedIncludesTaxes,
+  ${p}advertised_rate_cash as advertisedRateCash, ${p}advertised_rate_points as advertisedRatePoints,
+  ${p}due_at_booking_cash as dueAtBookingCash, ${p}due_at_booking_points as dueAtBookingPoints,
+  ${p}due_later_cash as dueLaterCash, ${p}due_later_notes as dueLaterNotes,
+  ${p}refundability as refundability, ${p}cancel_by as cancelBy, ${p}cancellation_policy as cancellationPolicy,
+  ${p}pay_at as payAt,
+  ${p}created_at as createdAt, ${p}updated_at as updatedAt`;
+
+const SCALAR_FIELDS: Array<[keyof UpdateBookingInput, string]> = [
+  ['confirmationNumber', 'confirmation_number'],
+  ['advertisedPriceCash', 'advertised_price_cash'],
+  ['advertisedPricePoints', 'advertised_price_points'],
+  ['loyaltyProgram', 'loyalty_program'],
+  ['notes', 'notes'],
+  ['bookingSite', 'booking_site'],
+  ['siteItineraryNumber', 'site_itinerary_number'],
+  ['advertisedRateCash', 'advertised_rate_cash'],
+  ['advertisedRatePoints', 'advertised_rate_points'],
+  ['dueAtBookingCash', 'due_at_booking_cash'],
+  ['dueAtBookingPoints', 'due_at_booking_points'],
+  ['dueLaterCash', 'due_later_cash'],
+  ['dueLaterNotes', 'due_later_notes'],
+  ['refundability', 'refundability'],
+  ['cancelBy', 'cancel_by'],
+  ['cancellationPolicy', 'cancellation_policy'],
+];
+const TEXT_FIELDS = new Set(['confirmationNumber', 'loyaltyProgram', 'notes', 'bookingSite', 'siteItineraryNumber',
+  'dueLaterNotes', 'refundability', 'cancelBy', 'cancellationPolicy']);
+const fieldValue = (key: string, v: unknown) => (v === undefined ? null : TEXT_FIELDS.has(key) ? blankToNull(v as string | null) : v);
+
 export interface Booking {
   id: string;
   tripId: string;
@@ -10,6 +70,19 @@ export interface Booking {
   advertisedPricePoints: number | null;
   loyaltyProgram: string | null;
   notes: string | null;
+  bookingSite: string | null;
+  siteItineraryNumber: string | null;
+  advertisedIncludesTaxes: boolean;
+  advertisedRateCash: number | null;
+  advertisedRatePoints: number | null;
+  dueAtBookingCash: number | null;
+  dueAtBookingPoints: number | null;
+  dueLaterCash: number | null;
+  dueLaterNotes: string | null;
+  refundability: Refundability | null;
+  cancelBy: string | null;
+  cancellationPolicy: string | null;
+  payAt: PayAt;
   createdAt: string;
   updatedAt: string;
   elementIds: string[];
@@ -17,6 +90,7 @@ export interface Booking {
   currentConfirmationNumber: string | null;
   actualTotalCash: number;
   actualTotalPoints: number;
+  coupons: BookingCoupon[];
 }
 
 export interface CreateBookingInput {
@@ -25,6 +99,20 @@ export interface CreateBookingInput {
   advertisedPricePoints?: number;
   loyaltyProgram?: string;
   notes?: string;
+  bookingSite?: string | null;
+  siteItineraryNumber?: string | null;
+  advertisedIncludesTaxes?: boolean;
+  advertisedRateCash?: number | null;
+  advertisedRatePoints?: number | null;
+  dueAtBookingCash?: number | null;
+  dueAtBookingPoints?: number | null;
+  dueLaterCash?: number | null;
+  dueLaterNotes?: string | null;
+  refundability?: Refundability | null;
+  cancelBy?: string | null;
+  cancellationPolicy?: string | null;
+  payAt?: PayAt;
+  coupons?: CouponInput[];
   elementIds: string[];
   travelerIds: string[];
 }
@@ -42,6 +130,20 @@ export interface UpdateBookingInput {
   advertisedPricePoints?: number | null;
   loyaltyProgram?: string | null;
   notes?: string | null;
+  bookingSite?: string | null;
+  siteItineraryNumber?: string | null;
+  advertisedIncludesTaxes?: boolean;
+  advertisedRateCash?: number | null;
+  advertisedRatePoints?: number | null;
+  dueAtBookingCash?: number | null;
+  dueAtBookingPoints?: number | null;
+  dueLaterCash?: number | null;
+  dueLaterNotes?: string | null;
+  refundability?: Refundability | null;
+  cancelBy?: string | null;
+  cancellationPolicy?: string | null;
+  payAt?: PayAt;
+  coupons?: CouponInput[];
   elementIds?: string[];
   travelerIds?: string[];
 }
@@ -59,22 +161,35 @@ export class BookingRepository {
   private db = getDb();
 
   async createBooking(tripId: string, input: CreateBookingInput): Promise<Booking> {
-    await this.assertNoTravelerConflicts(tripId, input.elementIds, input.travelerIds);
     const id = uuidv4();
     const db = await this.db;
-    await db.run(
-      `INSERT INTO bookings (id, trip_id, confirmation_number, advertised_price_cash, advertised_price_points, loyalty_program, notes, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
-      [id, tripId, input.confirmationNumber || null, input.advertisedPriceCash ?? null,
-       input.advertisedPricePoints ?? null, input.loyaltyProgram || null, input.notes || null]
-    );
-    for (const elementId of input.elementIds) {
-      await db.run(`INSERT INTO booking_links (booking_id, element_id) VALUES (?, ?)`, [id, elementId]);
-    }
-    for (const participantId of input.travelerIds) {
-      await db.run(`INSERT INTO booking_travelers (booking_id, participant_id) VALUES (?, ?)`, [id, participantId]);
-    }
+    await withTransaction(db, async () => {
+      await this.assertNoTravelerConflicts(tripId, input.elementIds, input.travelerIds);
+      const cols = ['id', 'trip_id', 'advertised_includes_taxes', 'pay_at', ...SCALAR_FIELDS.map(([, c]) => c)];
+      const vals = [id, tripId, input.advertisedIncludesTaxes ? 1 : 0, input.payAt ?? 'booking',
+        ...SCALAR_FIELDS.map(([k]) => fieldValue(k, (input as unknown as Record<string, unknown>)[k]))];
+      await db.run(`INSERT INTO bookings (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`, vals);
+      for (const elementId of input.elementIds) {
+        await db.run(`INSERT INTO booking_links (booking_id, element_id) VALUES (?, ?)`, [id, elementId]);
+      }
+      for (const participantId of input.travelerIds) {
+        await db.run(`INSERT INTO booking_travelers (booking_id, participant_id) VALUES (?, ?)`, [id, participantId]);
+      }
+      await this.writeCoupons(db, id, input.coupons);
+    });
     return this.getBookingById(id) as Promise<Booking>;
+  }
+
+  private async writeCoupons(db: any, bookingId: string, coupons: CouponInput[] | undefined): Promise<void> {
+    if (coupons === undefined) return;
+    await db.run('DELETE FROM booking_coupons WHERE booking_id = ?', [bookingId]);
+    for (const [i, c] of coupons.entries()) {
+      await db.run(
+        `INSERT INTO booking_coupons (id, booking_id, code, savings_cash, savings_points, notes, position)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [uuidv4(), bookingId, typeof c.code === 'string' ? c.code.trim() : c.code, c.savingsCash ?? null, c.savingsPoints ?? null, blankToNull(c.notes), i]
+      );
+    }
   }
 
   // Other bookings in the trip that already cover any (element, traveler) pair from the given sets.
@@ -129,24 +244,24 @@ export class BookingRepository {
 
   async getBookingById(id: string): Promise<Booking | null> {
     const db = await this.db;
-    const row = await db.get(
-      `SELECT id, trip_id as tripId, confirmation_number as confirmationNumber,
-              advertised_price_cash as advertisedPriceCash, advertised_price_points as advertisedPricePoints,
-              loyalty_program as loyaltyProgram, notes, created_at as createdAt, updated_at as updatedAt
-       FROM bookings WHERE id = ?`,
-      [id]
-    );
+    const row = await db.get(`SELECT ${BOOKING_SELECT()} FROM bookings WHERE id = ?`, [id]);
     if (!row) return null;
     return this.hydrate(row);
+  }
+
+  async getBookingIdForElement(elementId: string): Promise<string | null> {
+    const db = await this.db;
+    const row = await db.get<{ bookingId: string }>(
+      `SELECT bl.booking_id as bookingId FROM booking_links bl JOIN bookings b ON b.id = bl.booking_id
+       WHERE bl.element_id = ? ORDER BY b.created_at, b.id LIMIT 1`, [elementId]);
+    return row?.bookingId ?? null;
   }
 
   async getBookingsForTrip(tripId: string, elementId?: string): Promise<Booking[]> {
     const db = await this.db;
     const rows = elementId
       ? await db.all(
-          `SELECT DISTINCT b.id, b.trip_id as tripId, b.confirmation_number as confirmationNumber,
-                  b.advertised_price_cash as advertisedPriceCash, b.advertised_price_points as advertisedPricePoints,
-                  b.loyalty_program as loyaltyProgram, b.notes, b.created_at as createdAt, b.updated_at as updatedAt
+          `SELECT DISTINCT ${BOOKING_SELECT('b.')}
            FROM bookings b
            JOIN booking_links bl ON bl.booking_id = b.id
            WHERE b.trip_id = ? AND bl.element_id = ?
@@ -154,10 +269,7 @@ export class BookingRepository {
           [tripId, elementId]
         )
       : await db.all(
-          `SELECT id, trip_id as tripId, confirmation_number as confirmationNumber,
-                  advertised_price_cash as advertisedPriceCash, advertised_price_points as advertisedPricePoints,
-                  loyalty_program as loyaltyProgram, notes, created_at as createdAt, updated_at as updatedAt
-           FROM bookings WHERE trip_id = ? ORDER BY created_at ASC`,
+          `SELECT ${BOOKING_SELECT()} FROM bookings WHERE trip_id = ? ORDER BY created_at ASC`,
           [tripId]
         );
 
@@ -174,9 +286,6 @@ export class BookingRepository {
     if (updates.elementIds !== undefined && updates.elementIds.length === 0) {
       throw new Error('At least one flight is required');
     }
-    if (updates.travelerIds !== undefined && updates.travelerIds.length === 0) {
-      throw new Error('At least one traveler is required');
-    }
     const elementIds = updates.elementIds ? Array.from(new Set(updates.elementIds)) : undefined;
     const travelerIds = updates.travelerIds ? Array.from(new Set(updates.travelerIds)) : undefined;
     if (elementIds || travelerIds) {
@@ -188,17 +297,12 @@ export class BookingRepository {
       );
     }
 
-    const fieldMap: Record<string, string> = {
-      confirmationNumber: 'confirmation_number',
-      advertisedPriceCash: 'advertised_price_cash',
-      advertisedPricePoints: 'advertised_price_points',
-      loyaltyProgram: 'loyalty_program',
-      notes: 'notes',
-    };
-    const dbUpdates: Record<string, any> = {};
-    for (const [key, dbKey] of Object.entries(fieldMap)) {
-      if (key in updates) dbUpdates[dbKey] = (updates as any)[key] ?? null;
+    const dbUpdates: Record<string, unknown> = {};
+    for (const [key, column] of SCALAR_FIELDS) {
+      if (key in updates) dbUpdates[column] = fieldValue(key, (updates as Record<string, unknown>)[key]);
     }
+    if (updates.advertisedIncludesTaxes !== undefined) dbUpdates.advertised_includes_taxes = updates.advertisedIncludesTaxes ? 1 : 0;
+    if (updates.payAt !== undefined) dbUpdates.pay_at = updates.payAt;
 
     const db = await this.db;
     await withTransaction(db, async () => {
@@ -218,6 +322,7 @@ export class BookingRepository {
           await db.run(`INSERT INTO booking_travelers (booking_id, participant_id) VALUES (?, ?)`, [id, participantId]);
         }
       }
+      await this.writeCoupons(db, id, updates.coupons);
     });
     return this.getBookingById(id) as Promise<Booking>;
   }
@@ -225,6 +330,7 @@ export class BookingRepository {
   async deleteBooking(id: string): Promise<void> {
     const db = await this.db;
     await db.run(`DELETE FROM booking_transactions WHERE booking_id = ?`, [id]);
+    await db.run(`DELETE FROM booking_coupons WHERE booking_id = ?`, [id]);
     await db.run(`DELETE FROM booking_travelers WHERE booking_id = ?`, [id]);
     await db.run(`DELETE FROM booking_links WHERE booking_id = ?`, [id]);
     await db.run(`DELETE FROM bookings WHERE id = ?`, [id]);
@@ -284,9 +390,15 @@ export class BookingRepository {
        ORDER BY created_at DESC LIMIT 1`,
       [row.id]
     );
+    const couponRows = await db.all('SELECT * FROM booking_coupons WHERE booking_id = ? ORDER BY position', [row.id]);
 
     return {
       ...row,
+      advertisedIncludesTaxes: Boolean(row.advertisedIncludesTaxes),
+      payAt: row.payAt === 'checkin' ? 'checkin' : 'booking',
+      coupons: couponRows.map((c: any) => ({
+        id: c.id, code: c.code, savingsCash: c.savings_cash ?? null, savingsPoints: c.savings_points ?? null, notes: c.notes ?? null,
+      })),
       elementIds: elementRows.map((r: any) => r.elementId),
       travelerIds: travelerRows.map((r: any) => r.participantId),
       actualTotalCash: totals?.totalCash ?? 0,
@@ -294,4 +406,21 @@ export class BookingRepository {
       currentConfirmationNumber: latestTxnConfirmation?.confirmationNumber || row.confirmationNumber || null,
     };
   }
+}
+
+export const BOOKING_INPUT_KEYS = [
+  'confirmationNumber', 'advertisedPriceCash', 'advertisedPricePoints', 'loyaltyProgram', 'notes',
+  'bookingSite', 'siteItineraryNumber', 'advertisedIncludesTaxes', 'payAt',
+  'advertisedRateCash', 'advertisedRatePoints', 'dueAtBookingCash', 'dueAtBookingPoints',
+  'dueLaterCash', 'dueLaterNotes', 'refundability', 'cancelBy', 'cancellationPolicy', 'coupons',
+] as const;
+
+// Copies only the booking fields present in `body` (so PATCH stays partial).
+export function pickBookingInput(body: any): UpdateBookingInput {
+  const out: Record<string, unknown> = {};
+  for (const key of BOOKING_INPUT_KEYS) {
+    if (body && Object.prototype.hasOwnProperty.call(body, key)) out[key] = body[key];
+  }
+  if ('advertisedIncludesTaxes' in out) out.advertisedIncludesTaxes = Boolean(out.advertisedIncludesTaxes);
+  return out as UpdateBookingInput;
 }

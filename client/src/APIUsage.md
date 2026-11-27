@@ -114,8 +114,10 @@ Keep this checklist updated as you complete migration verification and removal s
   - client/src/components/ManageDestinationsDrawer.tsx (`getTrip`)
 - `createElement`:
   - client/src/components/AddElementDialog.tsx (flight `name` omitted; the server titles flights from their legs)
-- `updateElement` (notes only, `null` clears), `deleteElement`:
+  - client/src/components/AddLodgingDialog.tsx (hotel stay with `typeSpecificData` and the stay's `booking`)
+- `updateElement` (flight notes, `null` clears; hotel stay fields plus `booking`), `deleteElement`:
   - client/src/components/FlightDetailsTab.tsx
+  - client/src/components/LodgingDetailsTab.tsx
 - `syncLegs`:
   - client/src/components/FlightLegList.tsx (inline add/edit/delete of a leg sends the full leg list)
 - `lookupFlightAutofill`:
@@ -123,24 +125,38 @@ Keep this checklist updated as you complete migration verification and removal s
 - `createParticipant`, `deleteParticipant`:
   - client/src/components/TripParticipantsPanel.tsx (rendered in the `TripTravelersStrip` Manage modal)
   - client/src/components/BookingForm.tsx (inline "+ New traveler" creation)
+  - client/src/components/RoomForm.tsx
 - `updateParticipant`:
   - not used by the UI (kept for API completeness)
 - `listBookings`:
-  - client/src/pages/TripDetailPage.tsx (trip-wide list passed to `BookingCard`)
+  - client/src/pages/TripDetailPage.tsx (trip-wide list passed to `BookingCard`; the stay's booking via `stayBooking` for the lodging Details and Payments tabs)
 - `createBooking`, `updateBooking` (scalars + full `elementIds`/`travelerIds` replacement; 409 on traveler conflicts):
   - client/src/components/BookingForm.tsx
 - `deleteBooking`:
   - client/src/components/BookingBlock.tsx
+- `createRoom`, `updateRoom`:
+  - client/src/components/RoomForm.tsx
+- `deleteRoom`:
+  - client/src/components/RoomBlock.tsx
 - `getBooking`, `linkBookingElement`, `unlinkBookingElement`, `addBookingTraveler`, `removeBookingTraveler`:
   - not used by the UI (kept for API completeness)
-- `listBookingTransactions`, `addBookingTransaction`, `deleteBookingTransaction`:
-  - client/src/components/BookingTransactionList.tsx (rendered inside `BookingBlock.tsx`)
-- `updateBookingTransaction`:
-  - not used by the UI (kept for API completeness)
+- `listBookingTransactions`, `addBookingTransaction`, `updateBookingTransaction`, `deleteBookingTransaction`:
+  - client/src/components/BookingTransactionList.tsx (rendered inside `BookingBlock.tsx` and `LodgingPaymentsTab.tsx`; add/edit send `paymentMethodId`)
+- `createElement` / `createBooking` also accept `firstTransaction` (see `AddLodgingDialog.tsx`, `BookingForm.tsx`).
+
+### Payment methods (`client/src/api/paymentMethodApi.ts`)
+- `paymentMethodApi.list`:
+  - client/src/components/PaymentMethodSelect.tsx
+  - client/src/components/SettingsPaymentMethods.tsx
+- `paymentMethodApi.create`:
+  - client/src/components/PaymentMethodSelect.tsx (inline "+ New payment method…")
+  - client/src/components/SettingsPaymentMethods.tsx
+- `paymentMethodApi.update`, `paymentMethodApi.remove`:
+  - client/src/components/SettingsPaymentMethods.tsx
 - `listSeatsForLeg`, `assignSeat`, `removeSeat`:
   - client/src/components/FlightSeatGrid.tsx (rendered in `components/FlightSeatsTab.tsx`, once per flight leg)
 - `listDestinations`, `deleteDestination` (409 `destination_has_items` or `last_destination` → `ApiConflictError`):
-  - client/src/components/TripPackingSection.tsx (`listDestinations` is also used by `AddDestinationDialog.tsx`, `GlobalListEditDrawer.tsx` and `utils/destinationErrors.ts`)
+  - client/src/components/TripPackingSection.tsx (`listDestinations` is also used by `pages/TripDetailPage.tsx` (destination chip and stay destination select), `AddDestinationDialog.tsx`, `GlobalListEditDrawer.tsx` and `utils/destinationErrors.ts`)
 - `createDestination` (`moveFrom`, `sharedItemsTo`), `updateDestination` (`moveFrom`):
   - client/src/components/AddDestinationDialog.tsx (`updateDestination` is also used by `GlobalListEditDrawer.tsx` to rename the destination and to Move a person with their items)
 - `splitList`:

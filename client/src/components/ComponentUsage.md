@@ -142,9 +142,9 @@ Compact flights table (CSS grid) that reflows to cards on mobile; shows legs, la
 
 ### ElementDialog
 **Used in:**
-  - `pages/TripDetailPage.tsx` (hosts `FlightDetailsTab`, bookings and `FlightSeatsTab`)
+  - `pages/TripDetailPage.tsx` (hosts the flight tabs and the lodging Details/Rooms/Payments tabs)
 
-Generic modal with swipeable Details/Bookings/Seats tabs; full-screen on mobile.
+Generic modal with swipeable tabs (Details/Bookings/Seats for flights, Details/Rooms/Payments for stays); `initialTab` picks the starting tab; full-screen on mobile. `keepMounted` keeps inactive tabs mounted (stays only) and `dirty` shows `DiscardChangesModal` before closing.
 
 ### FlightDetailsTab
 **Used in:**
@@ -168,7 +168,115 @@ Create-flight modal: `FlightLegsEditor` + notes. No name field — the server ti
 **Used in:**
   - `pages/TripDetailPage.tsx`
 
-Trip title, badge, dates and Add flight button (floating on mobile).
+Trip title, badge, dates and the `AddMenu` (floating on mobile).
+
+### AddMenu
+**Used in:**
+  - `TripHeader`
+
+Header "+ Add" menu with Flight and Lodging items.
+
+### LodgingSection
+**Used in:**
+  - `pages/TripDetailPage.tsx`
+
+Lodging rows and total on the trip page.
+
+### LodgingStayForm
+**Used in:**
+  - `AddLodgingDialog`
+  - `LodgingDetailsTab`
+
+Stay fields shared by add and edit: hotel, check-in/out hours (`HourPicker`), booking references, advertised nightly and total price, coupons, `PriceEntry` (what you'll pay), cancellation, property amenities and notes.
+
+### PriceEntry
+**Used in:**
+  - `LodgingStayForm`
+  - `BookingForm`
+
+"What you'll pay": total price (cash/points), Pay at Booking | Check-in, the other-time amount and a check-in note, with a preview line. Values convert to/from the stored dues with `utils/priceEntry.ts`.
+
+### PaymentMethodSelect
+**Used in:**
+  - `TransactionFormModal`
+  - `FirstPaymentFields`
+
+Searchable family payment-method picker with an inline "+ New payment method…" option.
+
+### FirstPaymentFields
+**Used in:**
+  - `AddLodgingDialog`
+  - `BookingForm` (create only)
+
+"Also record payment" checkbox with payment date and method; shown while creating when something is due at booking. Sent as `firstTransaction`.
+
+### SettingsPaymentMethods
+**Used in:**
+  - `AppRoutes` (`/settings/payment-methods`)
+
+Settings page to add, rename, archive/unarchive and delete (when unused) payment methods.
+
+### AddLodgingDialog
+**Used in:**
+  - `pages/TripDetailPage.tsx`
+
+Creates a stay with its booking (and optionally its first payment; asks before discarding typed values), then the page opens it on the Rooms tab.
+
+### LodgingDetailsTab
+**Used in:**
+  - `pages/TripDetailPage.tsx` (passed into `ElementDialog`)
+
+Stay read view (maps, phone, website, booking references, price, payment schedule, cancellation, amenities, coupons) with edit and delete; reports dirty state.
+
+### LodgingRoomsTab
+**Used in:**
+  - `pages/TripDetailPage.tsx` (passed into `ElementDialog`)
+
+Rooms list, "+ Room" button and a "Not in a room" hint.
+
+### RoomBlock
+**Used in:**
+  - `LodgingRoomsTab`
+
+Room summary (type, beds, travelers, description, room amenities) with edit and delete.
+
+### RoomForm
+**Used in:**
+  - `LodgingRoomsTab` (create)
+  - `RoomBlock` (edit)
+
+Room form: type, beds, description, room amenities and travelers.
+
+### LodgingPaymentsTab
+**Used in:**
+  - `pages/TripDetailPage.tsx` (passed into `ElementDialog`)
+
+Due / paid / remaining summary for the stay's booking plus `BookingTransactionList`.
+
+### HourPicker
+**Used in:**
+  - `LodgingStayForm` (check-in, check-out and cancel-by times)
+
+Hour-only time picker: quick chips plus an "Other" hour select.
+
+### DiscardChangesModal
+**Used in:**
+  - `ElementDialog`
+  - `AddLodgingDialog`
+
+"Discard unsaved changes?" confirmation with Discard / Keep editing.
+
+### BedsEditor
+**Used in:**
+  - `RoomForm`
+
+Bed type and count row editor.
+
+### CouponsEditor
+**Used in:**
+  - `LodgingStayForm`
+
+Coupon row editor.
 
 ### TripTravelersStrip
 **Used in:**
@@ -193,7 +301,7 @@ Thin container for one flight's bookings. Receives the trip-wide `bookings` list
   - `BookingCard` (create)
   - `BookingBlock` (edit)
 
-Create/edit form: confirmation, loyalty program, advertised prices, notes, flight checkboxes (whole flights, date-sorted), traveler checkboxes with conflict hints "(on ABC123)", and inline "+ New traveler". Server errors (e.g. 409 conflicts) show inline.
+Create/edit form: confirmation, loyalty program, advertised prices, total price (`PriceEntry`), optional first payment (create only), notes, flight checkboxes (whole flights, date-sorted), traveler checkboxes with conflict hints "(on ABC123)", and inline "+ New traveler". Server errors (e.g. 409 conflicts) show inline.
 
 ### BookingBlock
 **Used in:**
@@ -203,9 +311,16 @@ Read-mode booking: confirmation (and original), traveler chips, money line, "Cov
 
 ### BookingTransactionList
 **Used in:**
-  - `BookingBlock` (only consumer)
+  - `BookingBlock`
+  - `LodgingPaymentsTab`
 
-Lists/add/removes transactions for a single booking; supports recording price-drop rebookings (negative amount + new confirmation number) and free-text fee/tax breakdown notes. Reports its transaction count via `onCountChange` and whether its add form is open via `onEditingChange` (both read by `BookingBlock`).
+Lists/removes transactions (date, amount, payment method, and `New conf # …` only when a transaction recorded one) for a single booking; add/edit open `TransactionFormModal`. Reports its transaction count via `onCountChange` and whether the modal is open via `onEditingChange` (both read by `BookingBlock`).
+
+### TransactionFormModal
+**Used in:**
+  - `BookingTransactionList`
+
+Stacked "Add transaction" / "Edit transaction" modal (full screen on mobile; edit shows a date · amount · method summary). Supports price-drop rebookings (negative amount + new confirmation number) and fee/tax notes. Reports itself open through `NestedModalContext` so `ElementDialog` doesn't also close on Escape.
 
 ### FlightLegsEditor
 **Used in:**

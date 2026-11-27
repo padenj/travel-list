@@ -167,7 +167,12 @@ describe('BookingRepository', () => {
     it('rejects empty replacement lists', async () => {
       const booking = await repo.createBooking(tripId, { elementIds: [elementId], travelerIds: [participantAId] });
       await expect(repo.updateBooking(booking.id, { elementIds: [] })).rejects.toThrow('At least one flight is required');
-      await expect(repo.updateBooking(booking.id, { travelerIds: [] })).rejects.toThrow('At least one traveler is required');
+    });
+
+    it('allows an empty traveler list (the route requires travelers for flights only)', async () => {
+      const booking = await repo.createBooking(tripId, { elementIds: [elementId], travelerIds: [participantAId] });
+      const updated = await repo.updateBooking(booking.id, { travelerIds: [] });
+      expect(updated.travelerIds).toEqual([]);
     });
 
     it('rolls back link replacement when a write fails midway', async () => {
@@ -312,6 +317,76 @@ describe('BookingRepository', () => {
       const updated = await repo.updateBooking(booking.id, { notes: 'updated notes' });
       expect(updated.notes).toBe('updated notes');
       expect(updated.elementIds).toEqual([elementId]);
+    });
+  });
+
+  describe('stay booking fields', () => {
+    let hotelId: string;
+
+    beforeEach(async () => {
+      hotelId = (await new TripElementRepository().createElement(tripId, {
+        elementType: 'hotel', name: 'Casa',
+        typeSpecificData: { checkInDate: '2027-01-01', checkOutDate: '2027-01-04' },
+      })).id;
+    });
+
+    it('creates a booking with site, price, schedule, cancellation and coupons', async () => {
+      const b = await repo.createBooking(tripId, {
+        elementIds: [hotelId], travelerIds: [],
+        bookingSite: 'expedia', siteItineraryNumber: '7301', confirmationNumber: 'H-1',
+        advertisedPriceCash: 612.4, advertisedRateCash: 189, advertisedIncludesTaxes: true,
+        dueAtBookingCash: 430, dueLaterCash: 182.4, dueLaterNotes: 'resort fee',
+        refundability: 'free', cancelBy: '2026-12-30', cancellationPolicy: 'Free until 48h',
+        coupons: [{ code: 'SAVE10', savingsCash: 10 }],
+      });
+      expect(b).toMatchObject({
+        bookingSite: 'expedia', siteItineraryNumber: '7301', confirmationNumber: 'H-1',
+        advertisedPriceCash: 612.4, advertisedRateCash: 189, advertisedRatePoints: null, advertisedIncludesTaxes: true,
+        dueAtBookingCash: 430, dueAtBookingPoints: null, dueLaterCash: 182.4, dueLaterNotes: 'resort fee',
+        refundability: 'free', cancelBy: '2026-12-30', cancellationPolicy: 'Free until 48h',
+        coupons: [{ code: 'SAVE10', savingsCash: 10, savingsPoints: null, notes: null }],
+      });
+      expect(b).not.toHaveProperty('room');
+      const list = await repo.getBookingsForTrip(tripId);
+      expect(list.find(x => x.id === b.id)).toMatchObject({ dueLaterCash: 182.4, refundability: 'free' });
+    });
+
+    it('defaults new fields to null / empty', async () => {
+      const b = await repo.createBooking(tripId, { elementIds: [hotelId], travelerIds: [] });
+      expect(await repo.getBookingById(b.id)).toMatchObject({
+        coupons: [], advertisedIncludesTaxes: false, bookingSite: null,
+        advertisedRateCash: null, dueAtBookingCash: null, dueLaterCash: null, refundability: null, cancelBy: null,
+      });
+    });
+
+    it('updates new fields and replaces coupons in order', async () => {
+      const b = await repo.createBooking(tripId, { elementIds: [hotelId], travelerIds: [], coupons: [{ code: 'A' }] });
+      await repo.updateBooking(b.id, {
+        coupons: [{ code: 'C' }, { code: 'B' }], dueLaterCash: 50, refundability: 'nonrefundable', cancelBy: null,
+      });
+      const got = await repo.getBookingById(b.id);
+      expect(got!.coupons!.map(c => c.code)).toEqual(['C', 'B']);
+      expect(got).toMatchObject({ dueLaterCash: 50, refundability: 'nonrefundable', cancelBy: null });
+    });
+
+    it('delete removes coupons', async () => {
+      const b = await repo.createBooking(tripId, { elementIds: [hotelId], travelerIds: [], coupons: [{ code: 'A' }] });
+      await repo.deleteBooking(b.id);
+      const db = await getDb();
+      expect(await db.get('SELECT COUNT(*) n FROM booking_coupons WHERE booking_id = ?', [b.id])).toEqual({ n: 0 });
+    });
+
+    it('getBookingIdForElement returns the stay booking or null', async () => {
+      expect(await repo.getBookingIdForElement(hotelId)).toBeNull();
+      const b = await repo.createBooking(tripId, { elementIds: [hotelId], travelerIds: [] });
+      expect(await repo.getBookingIdForElement(hotelId)).toBe(b.id);
+    });
+
+    it('createBooking is atomic: a failing coupon insert rolls back the booking', async () => {
+      const db = await getDb();
+      const before = (await db.get('SELECT COUNT(*) n FROM bookings')).n;
+      await expect(repo.createBooking(tripId, { elementIds: [hotelId], travelerIds: [], coupons: [{ code: null }] } as any)).rejects.toThrow();
+      expect((await db.get('SELECT COUNT(*) n FROM bookings')).n).toBe(before);
     });
   });
 });

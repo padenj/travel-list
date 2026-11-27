@@ -254,6 +254,7 @@ export class TripDestinationRepository {
     const db = await getDb();
     const now = new Date().toISOString();
     await db.run(`UPDATE trip_destinations SET deleted_at = ?, updated_at = ? WHERE id = ?`, [now, now, id]);
+    await db.run(`UPDATE hotel_element_details SET destination_id = NULL WHERE destination_id = ?`, [id]);
   }
 
   async ensureParticipantsTx(db: Database, tripId: string, memberIds: string[]): Promise<void> {

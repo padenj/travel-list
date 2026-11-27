@@ -1,12 +1,16 @@
 import { Booking } from '../types/trip';
 import { formatPrice } from './flightRows';
 import { formatMoney } from './money';
+import { dueTotals } from './dues';
 
 export function bookingMoneyLine(booking: Booking): string {
   const parts: string[] = [];
 
   const advertised = formatPrice(booking.advertisedPriceCash, booking.advertisedPricePoints);
   if (advertised) parts.push(`Advertised ${advertised}/person`);
+
+  const totals = dueTotals(booking);
+  if (totals) parts.push(`Total ${formatPrice(totals.cash, totals.points) || formatMoney(0)}`);
 
   const paid = formatPrice(booking.actualTotalCash, booking.actualTotalPoints);
   if (!paid) {

@@ -1,16 +1,16 @@
-import { Badge, Button, Text, Title } from '@mantine/core';
-import { IconPlus } from '@tabler/icons-react';
+import { Badge, Text, Title } from '@mantine/core';
 import { Trip } from '../types/trip';
 import { formatNights, formatTripDateRange, nightsBetween } from '../utils/tripDates';
+import { AddMenu } from './AddMenu';
 import classes from './TripHeader.module.css';
 
 interface TripHeaderProps {
   trip: Trip;
-  onAdd: () => void;
-  addLabel?: string;
+  onAddFlight: () => void;
+  onAddLodging: () => void;
 }
 
-export function TripHeader({ trip, onAdd, addLabel = 'Add flight' }: TripHeaderProps) {
+export function TripHeader({ trip, onAddFlight, onAddLodging }: TripHeaderProps) {
   const range = formatTripDateRange(trip.startDate, trip.endDate);
   const nights = nightsBetween(trip.startDate, trip.endDate);
 
@@ -30,9 +30,7 @@ export function TripHeader({ trip, onAdd, addLabel = 'Add flight' }: TripHeaderP
           </Text>
         )}
       </div>
-      <Button className={classes.add} leftSection={<IconPlus size={16} />} onClick={onAdd}>
-        {addLabel}
-      </Button>
+      <AddMenu className={classes.add} onAddFlight={onAddFlight} onAddLodging={onAddLodging} />
     </div>
   );
 }
