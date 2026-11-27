@@ -54,6 +54,12 @@ export function LodgingRoomsTab({
   const notInRoom = inRoom.size > 0 ? participants.filter(p => !inRoom.has(p.id)) : [];
 
   const setDirty = (key: string, dirty: boolean) => setDirtyKeys(prev => toggled(prev, key, dirty));
+  // Clear a form's dirty flag in the same update that closes it, rather than relying on the
+  // form's unmount cleanup, which React may run after the close has already been reported.
+  const closeAdd = () => {
+    setAdding(false);
+    setDirty('new', false);
+  };
 
   return (
     <div>
@@ -70,10 +76,10 @@ export function LodgingRoomsTab({
           participants={participants}
           onParticipantsChanged={onParticipantsChanged}
           onSaved={async () => {
-            setAdding(false);
+            closeAdd();
             await onRoomsChanged();
           }}
-          onCancel={() => setAdding(false)}
+          onCancel={closeAdd}
           onDirtyChange={dirty => setDirty('new', dirty)}
         />
       )}
@@ -87,7 +93,10 @@ export function LodgingRoomsTab({
           onParticipantsChanged={onParticipantsChanged}
           takenTravelerIds={takenBy(room.id)}
           onChanged={onRoomsChanged}
-          onEditingChange={editing => setEditingIds(prev => toggled(prev, room.id, editing))}
+          onEditingChange={editing => {
+            setEditingIds(prev => toggled(prev, room.id, editing));
+            if (!editing) setDirty(room.id, false);
+          }}
           onDirtyChange={dirty => setDirty(room.id, dirty)}
           actionsDisabled={adding}
         />
