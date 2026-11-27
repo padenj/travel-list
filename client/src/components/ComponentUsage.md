@@ -187,13 +187,40 @@ Lodging rows and total on the trip page.
   - `AddLodgingDialog`
   - `LodgingDetailsTab`
 
-Stay fields shared by add and edit: hotel, check-in/out hours (`HourPicker`), booking references, advertised nightly and total price, payment schedule, cancellation, property amenities, coupons and notes.
+Stay fields shared by add and edit: hotel, check-in/out hours (`HourPicker`), booking references, advertised nightly and total price, coupons, `PriceEntry` (what you'll pay), cancellation, property amenities and notes.
+
+### PriceEntry
+**Used in:**
+  - `LodgingStayForm`
+  - `BookingForm`
+
+"What you'll pay": total price (cash/points), Pay at Booking | Check-in, the other-time amount and a check-in note, with a preview line. Values convert to/from the stored dues with `utils/priceEntry.ts`.
+
+### PaymentMethodSelect
+**Used in:**
+  - `BookingTransactionList`
+  - `FirstPaymentFields`
+
+Searchable family payment-method picker with an inline "+ New payment method…" option.
+
+### FirstPaymentFields
+**Used in:**
+  - `AddLodgingDialog`
+  - `BookingForm` (create only)
+
+"Also record payment" checkbox with payment date and method; shown while creating when something is due at booking. Sent as `firstTransaction`.
+
+### SettingsPaymentMethods
+**Used in:**
+  - `AppRoutes` (`/settings/payment-methods`)
+
+Settings page to add, rename, archive/unarchive and delete (when unused) payment methods.
 
 ### AddLodgingDialog
 **Used in:**
   - `pages/TripDetailPage.tsx`
 
-Creates a stay with its booking (asks before discarding typed values), then the page opens it on the Rooms tab.
+Creates a stay with its booking (and optionally its first payment; asks before discarding typed values), then the page opens it on the Rooms tab.
 
 ### LodgingDetailsTab
 **Used in:**
@@ -274,7 +301,7 @@ Thin container for one flight's bookings. Receives the trip-wide `bookings` list
   - `BookingCard` (create)
   - `BookingBlock` (edit)
 
-Create/edit form: confirmation, loyalty program, advertised prices, notes, flight checkboxes (whole flights, date-sorted), traveler checkboxes with conflict hints "(on ABC123)", and inline "+ New traveler". Server errors (e.g. 409 conflicts) show inline.
+Create/edit form: confirmation, loyalty program, advertised prices, total price (`PriceEntry`), optional first payment (create only), notes, flight checkboxes (whole flights, date-sorted), traveler checkboxes with conflict hints "(on ABC123)", and inline "+ New traveler". Server errors (e.g. 409 conflicts) show inline.
 
 ### BookingBlock
 **Used in:**
@@ -287,7 +314,7 @@ Read-mode booking: confirmation (and original), traveler chips, money line, "Cov
   - `BookingBlock`
   - `LodgingPaymentsTab`
 
-Lists/add/removes transactions for a single booking; supports recording price-drop rebookings (negative amount + new confirmation number) and free-text fee/tax breakdown notes. Reports its transaction count via `onCountChange` and whether its add form is open via `onEditingChange` (both read by `BookingBlock`).
+Lists/adds/edits/removes transactions (with payment method) for a single booking; supports recording price-drop rebookings (negative amount + new confirmation number) and free-text fee/tax breakdown notes. Reports its transaction count via `onCountChange` and whether its add form is open via `onEditingChange` (both read by `BookingBlock`).
 
 ### FlightLegsEditor
 **Used in:**

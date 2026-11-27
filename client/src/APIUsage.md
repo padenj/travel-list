@@ -140,10 +140,19 @@ Keep this checklist updated as you complete migration verification and removal s
   - client/src/components/RoomBlock.tsx
 - `getBooking`, `linkBookingElement`, `unlinkBookingElement`, `addBookingTraveler`, `removeBookingTraveler`:
   - not used by the UI (kept for API completeness)
-- `listBookingTransactions`, `addBookingTransaction`, `deleteBookingTransaction`:
-  - client/src/components/BookingTransactionList.tsx (rendered inside `BookingBlock.tsx` and `LodgingPaymentsTab.tsx`)
-- `updateBookingTransaction`:
-  - not used by the UI (kept for API completeness)
+- `listBookingTransactions`, `addBookingTransaction`, `updateBookingTransaction`, `deleteBookingTransaction`:
+  - client/src/components/BookingTransactionList.tsx (rendered inside `BookingBlock.tsx` and `LodgingPaymentsTab.tsx`; add/edit send `paymentMethodId`)
+- `createElement` / `createBooking` also accept `firstTransaction` (see `AddLodgingDialog.tsx`, `BookingForm.tsx`).
+
+### Payment methods (`client/src/api/paymentMethodApi.ts`)
+- `paymentMethodApi.list`:
+  - client/src/components/PaymentMethodSelect.tsx
+  - client/src/components/SettingsPaymentMethods.tsx
+- `paymentMethodApi.create`:
+  - client/src/components/PaymentMethodSelect.tsx (inline "+ New payment method…")
+  - client/src/components/SettingsPaymentMethods.tsx
+- `paymentMethodApi.update`, `paymentMethodApi.remove`:
+  - client/src/components/SettingsPaymentMethods.tsx
 - `listSeatsForLeg`, `assignSeat`, `removeSeat`:
   - client/src/components/FlightSeatGrid.tsx (rendered in `components/FlightSeatsTab.tsx`, once per flight leg)
 - `listDestinations`, `deleteDestination` (409 `destination_has_items` or `last_destination` → `ApiConflictError`):
