@@ -44,16 +44,16 @@ describe('BookingTransactionList', () => {
     expect(screen.queryByText(/total paid/i)).toBeNull();
   });
 
-  it('shows points, negative amounts with the sign first, and carries the original confirmation', async () => {
+  it('shows points, negative amounts, and only a transaction’s own new confirmation number', async () => {
     (tripApi.listBookingTransactions as any).mockResolvedValue([
       { id: 't1', bookingId: 'b1', amountCash: 157.96, amountPoints: 0, transactionDate: '2026-10-24', confirmationNumber: null, notes: null, createdAt: '' },
       { id: 't2', bookingId: 'b1', amountCash: -20, amountPoints: 5000, transactionDate: '2026-10-26', confirmationNumber: 'XYZ789', notes: null, createdAt: '' },
     ]);
-    renderList({ originalConfirmationNumber: 'ABC123' });
+    renderList();
     expect(await screen.findByText('-$20.00')).toBeTruthy();
     expect(screen.getByText('5000 pts')).toBeTruthy();
-    expect(screen.getByText('ABC123')).toBeTruthy();
-    expect(screen.getByText('XYZ789')).toBeTruthy();
+    expect(screen.getByText('New conf # XYZ789')).toBeTruthy();
+    expect(screen.getAllByText(/New conf #/)).toHaveLength(1);
   });
 
   it('shows an empty message when there are no transactions', async () => {
@@ -62,14 +62,14 @@ describe('BookingTransactionList', () => {
     expect(await screen.findByText(/no transactions yet/i)).toBeTruthy();
   });
 
-  it('keeps the add form collapsed until "+ Transaction" is clicked', async () => {
+  it('opens an "Add transaction" dialog from "+ Transaction"', async () => {
     renderList();
     await screen.findByText('$78.98');
     expect(screen.queryByLabelText(/amount \(cash\)/i)).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: /\+ transaction/i }));
-    expect(screen.getByLabelText(/amount \(cash\)/i)).toBeTruthy();
+    expect(await screen.findByRole('dialog', { name: 'Add transaction' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: /^cancel$/i }));
-    expect(screen.queryByLabelText(/amount \(cash\)/i)).toBeNull();
+    await waitFor(() => expect(screen.queryByLabelText(/amount \(cash\)/i)).toBeNull());
   });
 
   it('uses a multi-line textarea for notes', async () => {
@@ -80,7 +80,7 @@ describe('BookingTransactionList', () => {
     expect(notes.tagName).toBe('TEXTAREA');
   });
 
-  it('adds a negative transaction with a new confirmation number, then collapses the form', async () => {
+  it('adds a transaction through the dialog, then closes it and reloads', async () => {
     (tripApi.addBookingTransaction as any).mockResolvedValue({
       id: 't2', bookingId: 'b1', amountCash: -10, amountPoints: 0, transactionDate: '2026-02-01', confirmationNumber: 'REBOOKED', notes: null, createdAt: '',
     });
@@ -98,6 +98,7 @@ describe('BookingTransactionList', () => {
       confirmationNumber: 'REBOOKED',
     })));
     await waitFor(() => expect(onChanged).toHaveBeenCalled());
+    await waitFor(() => expect(tripApi.listBookingTransactions).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(screen.queryByLabelText(/amount \(cash\)/i)).toBeNull());
   });
 
@@ -152,16 +153,16 @@ describe('BookingTransactionList', () => {
     expect(await screen.findByText('Visa - 1234')).toBeTruthy();
   });
 
-  it('edits a transaction with the form prefilled', async () => {
+  it('edits a transaction in an "Edit transaction" dialog', async () => {
     (tripApi.updateBookingTransaction as any).mockResolvedValue({});
     const onChanged = vi.fn();
     renderList({ onChanged });
     await screen.findByText('$78.98');
     fireEvent.click(screen.getByRole('button', { name: 'Edit transaction' }));
+    expect(await screen.findByRole('dialog', { name: 'Edit transaction' })).toBeTruthy();
+    expect(screen.getByText('Jan 15, 2026 · $78.98 · Visa - 1234')).toBeTruthy();
     const cash = screen.getByLabelText('Amount (cash)') as HTMLInputElement;
     expect(cash.value).toBe('78.98');
-    expect((screen.getByLabelText('Date') as HTMLInputElement).value).toBe('2026-01-15');
-    expect((screen.getByLabelText('Notes') as HTMLTextAreaElement).value).toBe('Fee breakdown');
     fireEvent.change(cash, { target: { value: '80' } });
     fireEvent.change(screen.getByLabelText('Notes'), { target: { value: '' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
@@ -169,19 +170,17 @@ describe('BookingTransactionList', () => {
       amountCash: 80, amountPoints: 0, transactionDate: '2026-01-15', confirmationNumber: null, notes: null, paymentMethodId: 'pm1',
     }));
     await waitFor(() => expect(onChanged).toHaveBeenCalled());
-    expect(screen.queryByLabelText('Amount (cash)')).toBeNull();
+    await waitFor(() => expect(screen.queryByLabelText('Amount (cash)')).toBeNull());
   });
 
-  it('keeps only one form open and reports editing', async () => {
+  it('reports editing while the edit dialog is open', async () => {
     const onEditingChange = vi.fn();
     renderList({ onEditingChange });
     await screen.findByText('$78.98');
     fireEvent.click(screen.getByRole('button', { name: 'Edit transaction' }));
     expect(onEditingChange).toHaveBeenLastCalledWith(true);
-    expect(screen.queryByRole('button', { name: /\+ transaction/i })).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: /^cancel$/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /^cancel$/i }));
     expect(onEditingChange).toHaveBeenLastCalledWith(false);
-    expect(screen.getByRole('button', { name: /\+ transaction/i })).toBeTruthy();
   });
 
   it('sends the chosen payment method when adding', async () => {

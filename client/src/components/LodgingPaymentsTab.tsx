@@ -36,7 +36,6 @@ export function LodgingPaymentsTab({ tripId, booking, refreshKey, onChanged, onC
       <BookingTransactionList
         tripId={tripId}
         bookingId={booking.id}
-        originalConfirmationNumber={booking.confirmationNumber}
         refreshKey={refreshKey}
         onChanged={onChanged}
         onCountChange={onCountChange}
